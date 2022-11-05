@@ -1,0 +1,46 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'smartdns'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=smartdns",
+          "--package=smartdns",
+          "--all-features"
+        ],
+        "filter": {
+          "name": "smartdns",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "-c", "tests/example/smartdns.conf", 
+        "-d"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'smartdns'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=smartdns",
+          "--package=smartdns"
+        ],
+        "filter": {
+          "name": "smartdns",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
