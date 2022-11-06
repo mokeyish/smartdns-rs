@@ -166,13 +166,13 @@ impl FromStr for BindServer {
             }
         }
 
-        let sock_addr = addr
+        let sock_addrs = addr
             .map(|addr| parse::parse_sock_addrs(addr).ok())
             .unwrap_or_default()
             .expect(&[s, "addr expect [::]:53 or 0.0.0.0:53"].concat());
 
         Ok(Self {
-            addr: vec![sock_addr],
+            addr: sock_addrs,
             group,
             no_rule_addr,
             no_rule_nameserver,
@@ -388,7 +388,7 @@ impl FromStr for SpeedCheckMode {
 }
 
 mod parse {
-    use std::{collections::hash_map::Entry, ffi::OsStr, net::AddrParseError};
+    use std::{collections::hash_map::Entry, ffi::OsStr, net::{AddrParseError, SocketAddrV4, SocketAddrV6}};
 
     use super::*;
     use crate::log::{info, warn};
@@ -684,8 +684,26 @@ mod parse {
         }
     }
 
-    pub fn parse_sock_addrs(addr: &str) -> Result<SocketAddr, AddrParseError> {
-        SocketAddr::from_str(addr)
+    pub fn parse_sock_addrs(addr: &str) -> Result<Vec<SocketAddr>, AddrParseError> {
+        let addr = addr.trim();
+        let mut sock_addrs = vec![];
+
+        if addr.starts_with("*:") || addr.starts_with(":")  {
+            let port_str = addr.trim_start_matches("*:").trim_start_matches(':');
+            let port = u16::from_str(port_str)
+            .expect("The expected format for listening to both IPv4 and IPv6 addresses is :<port>,  *:<port>");
+
+            sock_addrs.push(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)));
+            sock_addrs.push(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0)));
+
+        } else {
+            match SocketAddr::from_str(addr) {
+                Ok(sock_addr) => sock_addrs.push(sock_addr),
+                Err(err) => return Err(err),
+            }
+        }
+
+        Ok(sock_addrs)
     }
 
     #[cfg(test)]
@@ -892,16 +910,35 @@ mod parse {
 
         #[test]
         fn test_to_socket_addrs_1() {
-            let addr1 = parse_sock_addrs("127.0.1.1:123").unwrap();
+            let sock_addrs = parse_sock_addrs("127.0.1.1:123").unwrap();
+            assert_eq!(sock_addrs.len(), 1);
+            let addr1 = sock_addrs[0];
             assert_eq!(addr1.ip().to_string(), "127.0.1.1");
             assert_eq!(addr1.port(), 123)
         }
 
         #[test]
         fn test_to_socket_addrs_2() {
-            let addr1 = parse_sock_addrs("[::]:123").unwrap();
+            let sock_addrs = parse_sock_addrs("[::]:123").unwrap();
+            let addr1 = sock_addrs[0];
             assert_eq!(addr1.ip().to_string(), "::");
             assert_eq!(addr1.port(), 123)
+        }
+
+        #[test]
+        fn test_to_socket_addrs_3() {
+            let sock_addrs = parse_sock_addrs(":123").unwrap();
+            assert_eq!(sock_addrs.len(), 2);
+            // let addr1 = sock_addrs[0];
+            // assert_eq!(addr1.ip().to_string(), "::");
+            
+            assert!(sock_addrs.get(0).unwrap().is_ipv4());
+            assert!(sock_addrs.get(1).unwrap().is_ipv6());
+
+            assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "0.0.0.0");
+            assert_eq!(sock_addrs.get(1).unwrap().ip().to_string(), "::");
+            assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
+            assert_eq!(sock_addrs.get(1).unwrap().port(), 123);
         }
     }
 }

@@ -99,7 +99,7 @@ fn main() {
             SmartDnsConfig::load_from_file(p)
         })
         .next()
-        .unwrap()
+        .expect("No configuation file found.")
     };
 
     info!(r#"whoami 👉 "{}""#, cfg.server_name);
