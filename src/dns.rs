@@ -1,17 +1,19 @@
-use crate::{dns_client, dns_server::Request as OriginRequest, dns_url::DnsUrl};
-use crate::log::{debug, warn};
+
+use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
 use trust_dns_resolver::{
+    Name,
     config::{NameServerConfig, NameServerConfigGroup, Protocol},
     error::ResolveError,
 };
+use trust_dns_client::rr::{rdata::SOA, RData};
 use url::Host;
 
-use std::{net::ToSocketAddrs, str::FromStr, sync::Arc};
 
-use trust_dns_client::rr::{rdata::SOA, RData};
-use trust_dns_resolver::Name;
-
+use crate::{dns_client, dns_server::Request as OriginRequest, dns_url::DnsUrl};
+use crate::log::{debug, warn};
 use crate::dns_conf::SmartDnsConfig;
+use crate::preset_ns;
+
 pub use trust_dns_resolver::lookup::Lookup;
 
 #[derive(Debug, Default)]
@@ -37,21 +39,38 @@ impl DnsUrl {
     pub async fn to_nameserver_config_group(&self) -> Option<NameServerConfigGroup> {
         let url = self;
 
-        if url.proto().is_encrypted()
-            && match url.host() {
-                Host::Ipv4(_) | Host::Ipv6(_) => true,
-                _ => false,
+        let mut host = None;
+
+        if url.proto().is_encrypted() {
+
+            match url.host() {
+                Host::Ipv4(ip) => {
+                    host = preset_ns::find_dns_tls_name(&ip.to_owned().into()).map(|s| s.to_string());
+                },
+                Host::Ipv6(ip) => {
+                    host = preset_ns::find_dns_tls_name(&ip.to_owned().into()).map(|s| s.to_string());
+                }
+                Host::Domain(domain) => {
+                    host = Some(domain.to_string())
+                },
             }
-        {
-            warn!(
-                "Currently, encrypted dns {} with pure ip not supported!!!",
-                url.to_string()
-            );
-            return None;
+
+            if host.is_none() {
+                warn!(
+                    "Currently, encrypted dns {} with pure ip not supported!!!",
+                    url.to_string()
+                );
+                return None;
+            }
         }
 
         let sock_addrs = match url.host() {
-            Host::Domain(host) => dns_client::resolve(host, None).await.unwrap_or_default(),
+            Host::Domain(host) => {
+                match preset_ns::find_dns_ips(host) {
+                    Some(ips) => ips.to_vec(),
+                    None => dns_client::resolve(host, None).await.unwrap_or_default()
+                }
+            },
             Host::Ipv4(ipv4) => vec![(*ipv4).into()],
             Host::Ipv6(ipv6) => vec![(*ipv6).into()],
         }
@@ -87,10 +106,10 @@ impl DnsUrl {
                 })
                 .collect::<Vec<_>>(),
             Protocol::Https => sock_addrs
-                .map(|addr| NameServerConfig {
+                .map( |addr| NameServerConfig {
                     socket_addr: addr,
                     protocol: Protocol::Https,
-                    tls_dns_name: Some(url.host().to_string()),
+                    tls_dns_name: host.to_owned(),
                     tls_config: None,
                     trust_nx_responses: true,
                     bind_addr: None,
@@ -100,7 +119,7 @@ impl DnsUrl {
                 .map(|addr| NameServerConfig {
                     socket_addr: addr,
                     protocol: Protocol::Tls,
-                    tls_dns_name: Some(url.host().to_string()),
+                    tls_dns_name: host.to_owned(),
                     tls_config: None,
                     trust_nx_responses: true,
                     bind_addr: None,

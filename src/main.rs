@@ -23,6 +23,7 @@ mod dns_url;
 mod infra;
 mod log;
 mod matcher;
+mod preset_ns;
 
 use dns_mw::DnsMiddlewareBuilder;
 use dns_mw_addr::AddressMiddleware;

@@ -6,6 +6,7 @@ use trust_dns_resolver::config::{NameServerConfigGroup, ResolverConfig, Resolver
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{IntoName, TokioHandle, TryParseIp};
 use crate::log::warn;
+use crate::preset_ns::GetDnsHostName;
 
 const ALIDNS_IPS: &[IpAddr] = &[
     IpAddr::V4(Ipv4Addr::new(223, 5, 5, 5)),
@@ -17,7 +18,7 @@ const ALIDNS_IPS: &[IpAddr] = &[
 
 static BOOTSTRAP_SERVERS: Lazy<Mutex<NameServerConfigGroup>> = Lazy::new(|| {
     let cfg =
-        NameServerConfigGroup::from_ips_https(ALIDNS_IPS, 443, "dns.alidns.com".to_string(), true);
+        NameServerConfigGroup::from_ips_https(ALIDNS_IPS, 443, ALIDNS_IPS.get_host_name().unwrap().to_string(), true);
 
     Mutex::new(cfg)
 });
