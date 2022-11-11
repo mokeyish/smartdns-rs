@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -21,15 +20,14 @@ fn download<P: AsRef<Path> + Copy>(url: &str, file_path: P) -> bool {
 }
 
 fn write_all_to_file<P: AsRef<Path> + Copy, T: AsRef<[u8]>>(file_path: P, text: T) {
-    let mut file = File::create(file_path)
-        .expect(
-            &[
-                "Create file ",
-                file_path.as_ref().to_str().expect("<>"),
-                "failed",
-            ]
-            .concat(),
-        );
+    let mut file = File::create(file_path).expect(
+        &[
+            "Create file ",
+            file_path.as_ref().to_str().expect("<>"),
+            "failed",
+        ]
+        .concat(),
+    );
     file.write_all(text.as_ref()).unwrap();
 }
 

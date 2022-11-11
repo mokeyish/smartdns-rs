@@ -18,20 +18,13 @@
 // }
 
 pub use icmp_ping::icmp_ping_parallel;
-pub use tcp_ping::{
-    tcp_ping_parallel,
-    ping,
-};
-
-
-
+pub use tcp_ping::{ping, tcp_ping_parallel};
 
 mod tcp_ping {
     use std::net::SocketAddr;
-    use std::time::{Instant, Duration};
+    use std::time::{Duration, Instant};
 
     pub fn tcp_ping_parallel(addrs: &[SocketAddr], times: Option<u8>, timeout: Option<u64>) {
-
         for addr in addrs {
             ping(addr, times.unwrap_or(1), timeout.unwrap_or(3000));
         }
@@ -40,7 +33,9 @@ mod tcp_ping {
     pub fn ping(addr: &SocketAddr, times: u8, timeout: u64) -> Option<Duration> {
         let start = Instant::now();
         for _ in 0..times {
-            if let Err(_) = std::net::TcpStream::connect_timeout(addr, Duration::from_millis(timeout)) {
+            if let Err(_) =
+                std::net::TcpStream::connect_timeout(addr, Duration::from_millis(timeout))
+            {
                 return None;
             }
         }
@@ -70,7 +65,6 @@ mod tcp_ping {
             tcp_ping_parallel(ips, None, Some(1000));
             println!("##########");
             tcp_ping_parallel(ips2, None, None);
-
         }
     }
 }
@@ -143,23 +137,20 @@ mod icmp_ping {
         use super::*;
 
         #[test]
+        #[ignore = "reason"]
         fn test_icmp_ping() {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-
                     let ips = &[
                         "119.29.29.29".parse().unwrap(),
                         "8.8.8.8".parse().unwrap(),
                         "1.1.1.1".parse().unwrap(),
                     ];
 
-                    icmp_ping_parallel(ips)
-                    .await
-                    .unwrap();
-
+                    icmp_ping_parallel(ips).await.unwrap();
                 });
         }
     }

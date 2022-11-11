@@ -1,24 +1,27 @@
-
 use cfg_if::cfg_if;
 use futures::Future;
 
 use std::io;
 
-use crate::log::{debug, warn, error, info};
-use trust_dns_client::op::{MessageType, OpCode, ResponseCode, Edns, Header};
-use trust_dns_server::{
-    authority::{MessageResponseBuilder, MessageResponse, LookupOptions, ZoneType, AuthLookup, LookupObject, EmptyLookup, LookupError},
-    server::{ RequestHandler, ResponseHandler, ResponseInfo}, store::forwarder::ForwardLookup,
-};
+use crate::log::{debug, error, info, warn};
+use trust_dns_client::op::{Edns, Header, MessageType, OpCode, ResponseCode};
 use trust_dns_proto::rr::Record;
-pub use trust_dns_server::ServerFuture;
 pub use trust_dns_server::server::Request;
+pub use trust_dns_server::ServerFuture;
+use trust_dns_server::{
+    authority::{
+        AuthLookup, EmptyLookup, LookupError, LookupObject, LookupOptions, MessageResponse,
+        MessageResponseBuilder, ZoneType,
+    },
+    server::{RequestHandler, ResponseHandler, ResponseInfo},
+    store::forwarder::ForwardLookup,
+};
 
 use crate::dns::DnsRequest;
 use crate::dns_mw::DnsMiddlewareHandler;
 
 pub struct MiddlewareBasedRequestHandler {
-    handler: DnsMiddlewareHandler
+    handler: DnsMiddlewareHandler,
 }
 
 impl MiddlewareBasedRequestHandler {
@@ -39,7 +42,6 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
             //  especially for recursive lookups
             MessageType::Query => match request.op_code() {
                 OpCode::Query => {
-                
                     let response_edns: Option<Edns>;
 
                     // check if it's edns
@@ -87,17 +89,18 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                         response_edns = None;
                     }
 
-                    debug!("query received: {} {} {}", request.id(), request.query(), request.query().query_type());
-
+                    debug!(
+                        "query received: {} {} {}",
+                        request.id(),
+                        request.query(),
+                        request.query().query_type()
+                    );
 
                     let info = async {
                         let _request_info = request.request_info();
 
-
-
                         let res = async {
                             // let query = request_info.query;
-
 
                             // let (response_header, sections) = self.build_response(
                             //     request_info,
@@ -111,10 +114,7 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
 
                             let request_header = request.header();
 
-
-
                             let (response_header, sections) = async {
-
                                 let lookup_options = lookup_options_for_edns(request.edns());
 
                                 // log algorithms being requested
@@ -124,48 +124,55 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                                         request_id, lookup_options
                                     );
                                 }
-                            
-                                let mut response_header = Header::response_from_request(request_header);
-                                response_header.set_authoritative(ZoneType::Forward.is_authoritative());
-                            
+
+                                let mut response_header =
+                                    Header::response_from_request(request_header);
+                                response_header
+                                    .set_authoritative(ZoneType::Forward.is_authoritative());
+
                                 // debug!("performing {} on {}", query, authority.origin());
-                            
+
                                 // let future = self.dns_server.search(request_info, lookup_options);
 
-                                let future =  async {
+                                let future = async {
+                                    let req: &DnsRequest = request;
 
-                                    let req: & DnsRequest = request;
-    
-                                    let lookup_result: Result<Box<dyn LookupObject>, LookupError> = match self.handler.search(
-                                        req
-                                    ).await {
-                                        Ok(lookup) => {
-                                            Ok(Box::new(ForwardLookup(lookup)))
-                                        }
-                                        Err(_err) => {
-                                            Err(LookupError::NameExists)
-                                        }
-                                    };
+                                    let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
+                                        match self.handler.search(req).await {
+                                            Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
+                                            Err(_err) => Err(LookupError::NameExists),
+                                        };
 
                                     lookup_result
-
                                 };
-                            
-                                let sections = send_forwarded_response(future, request_header, &mut response_header).await;
-                            
+
+                                let sections = send_forwarded_response(
+                                    future,
+                                    request_header,
+                                    &mut response_header,
+                                )
+                                .await;
+
                                 (response_header, sections)
-                            }.await;
-                        
-                            let response = MessageResponseBuilder::from_message_request(request).build(
-                                response_header,
-                                sections.answers.iter(),
-                                sections.ns.iter(),
-                                sections.soa.iter(),
-                                sections.additionals.iter(),
-                            );
-                        
-                            let result = send_response(response_edns.clone(), response, response_handle.clone()).await;
-                        
+                            }
+                            .await;
+
+                            let response = MessageResponseBuilder::from_message_request(request)
+                                .build(
+                                    response_header,
+                                    sections.answers.iter(),
+                                    sections.ns.iter(),
+                                    sections.soa.iter(),
+                                    sections.additionals.iter(),
+                                );
+
+                            let result = send_response(
+                                response_edns.clone(),
+                                response,
+                                response_handle.clone(),
+                            )
+                            .await;
+
                             match result {
                                 Err(e) => {
                                     error!("error sending response: {}", e);
@@ -173,13 +180,12 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                                 }
                                 Ok(i) => i,
                             }
-                        }.await;
-
+                        }
+                        .await;
 
                         res
-                
-                    }.await;
-
+                    }
+                    .await;
 
                     Ok(info)
                 }
@@ -206,7 +212,7 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                     .await
             }
         };
-        
+
         match result {
             Err(e) => {
                 error!("request failed: {}", e);
@@ -216,7 +222,6 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
         }
     }
 }
-
 
 async fn send_forwarded_response(
     future: impl Future<Output = Result<Box<dyn LookupObject>, LookupError>>,
@@ -259,14 +264,12 @@ async fn send_forwarded_response(
     }
 }
 
-
 struct LookupSections {
     answers: Box<dyn LookupObject>,
     ns: Box<dyn LookupObject>,
     soa: Box<dyn LookupObject>,
     additionals: Box<dyn LookupObject>,
 }
-
 
 async fn send_response<'a, R: ResponseHandler>(
     _response_edns: Option<Edns>,
@@ -302,7 +305,6 @@ async fn send_response<'a, R: ResponseHandler>(
     response_handle.send_response(response).await
 }
 
-
 fn lookup_options_for_edns(edns: Option<&Edns>) -> LookupOptions {
     let _edns = match edns {
         Some(edns) => edns,
@@ -326,8 +328,6 @@ fn lookup_options_for_edns(edns: Option<&Edns>) -> LookupOptions {
     }
 }
 
-
-
 trait ServeFaild {
     fn serve_failed() -> Self;
 }
@@ -339,4 +339,3 @@ impl ServeFaild for ResponseInfo {
         header.into()
     }
 }
-

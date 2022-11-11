@@ -26,7 +26,7 @@ where
             &TReq,
             Next<'a, TCtx, TReq, TRes, TErr>,
         ) -> BoxFuture<'a, Result<TRes, TErr>>,
-{    
+{
     #[inline]
     async fn handle(
         &self,
@@ -128,8 +128,6 @@ impl<TCtx: Send, TReq: Sync, TRes, TErr> MiddlewareHost<TCtx, TReq, TRes, TErr> 
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
 
@@ -142,7 +140,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl MiddlewareDefaultHandler<String, String, String, String> for DefaultHandler {
-        async fn handle(&self, _ctx: &mut String, req: & String) -> Result<String, String> {
+        async fn handle(&self, _ctx: &mut String, req: &String) -> Result<String, String> {
             Ok(format!("Default Handler, len: {}\n", req.len()))
         }
     }
@@ -161,7 +159,7 @@ mod tests {
         async fn handle(
             &self,
             ctx: &mut String,
-            req: & String,
+            req: &String,
             next: Next<'_, String, String, String, String>,
         ) -> Result<String, String> {
             let mut res = "MiddlewareOne 开始 \n".to_string();
@@ -180,7 +178,7 @@ mod tests {
         async fn handle(
             &self,
             ctx: &mut String,
-            req: & String,
+            req: &String,
             next: Next<'_, String, String, String, String>,
         ) -> Result<String, String> {
             let mut res = "MiddlewareTwo 开始 \n".to_string();
@@ -195,11 +193,11 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl Middleware<String,String, String, String> for MiddlewareThree {
+    impl Middleware<String, String, String, String> for MiddlewareThree {
         async fn handle(
             &self,
             ctx: &mut String,
-            req: & String,
+            req: &String,
             next: Next<'_, String, String, String, String>,
         ) -> Result<String, String> {
             let mut res = "MiddlewareThree 开始 \n".to_string();
@@ -212,7 +210,6 @@ mod tests {
             Ok(res)
         }
     }
-
 
     #[test]
     fn test_middleware() {

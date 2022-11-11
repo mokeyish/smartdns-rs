@@ -1,3 +1,5 @@
+use crate::log::warn;
+use crate::preset_ns::GetDnsHostName;
 use once_cell::sync::Lazy;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::{io, net::IpAddr};
@@ -5,8 +7,6 @@ use tokio::sync::Mutex;
 use trust_dns_resolver::config::{NameServerConfigGroup, ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{IntoName, TokioHandle, TryParseIp};
-use crate::log::warn;
-use crate::preset_ns::GetDnsHostName;
 
 const ALIDNS_IPS: &[IpAddr] = &[
     IpAddr::V4(Ipv4Addr::new(223, 5, 5, 5)),
@@ -15,10 +15,13 @@ const ALIDNS_IPS: &[IpAddr] = &[
     IpAddr::V6(Ipv6Addr::new(0x2400, 0x3200, 0, 0, 0, 0, 0, 0x0001)),
 ];
 
-
 static BOOTSTRAP_SERVERS: Lazy<Mutex<NameServerConfigGroup>> = Lazy::new(|| {
-    let cfg =
-        NameServerConfigGroup::from_ips_https(ALIDNS_IPS, 443, ALIDNS_IPS.get_host_name().unwrap().to_string(), true);
+    let cfg = NameServerConfigGroup::from_ips_https(
+        ALIDNS_IPS,
+        443,
+        ALIDNS_IPS.get_host_name().unwrap().to_string(),
+        true,
+    );
 
     Mutex::new(cfg)
 });
@@ -127,7 +130,6 @@ mod tests {
 
     use super::*;
 
-
     async fn assert_google(nameservers: NameServerConfigGroup) {
         let name = "dns.google";
         let addrs = resolve(name, Some(nameservers))
@@ -201,7 +203,6 @@ mod tests {
         })
     }
 
-
     #[test]
     fn test_nameserver_quad9_dns_url_https_resolve() {
         let dns_url = DnsUrl::from_str("https://dns.quad9.net/dns-query").unwrap();
@@ -244,7 +245,6 @@ mod tests {
         let dns_url = DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap();
 
         Runtime::new().unwrap().block_on(async {
-
             let config = dns_url.to_nameserver_config_group(None).await.unwrap();
             assert_google(config.clone()).await;
             assert_alidns(config).await;
@@ -256,7 +256,6 @@ mod tests {
         let dns_url = DnsUrl::from_str("tls://dns.alidns.com").unwrap();
 
         Runtime::new().unwrap().block_on(async {
-
             let config = dns_url.to_nameserver_config_group(None).await.unwrap();
             assert_google(config.clone()).await;
             assert_alidns(config).await;
@@ -266,8 +265,11 @@ mod tests {
     #[test]
     fn test_nameserver_alidns_https_tls_name_with_ip_resolve() {
         Runtime::new().unwrap().block_on(async {
-            let config = DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap()
-            .to_nameserver_config_group(None).await.unwrap();
+            let config = DnsUrl::from_str("https://223.5.5.5/dns-query")
+                .unwrap()
+                .to_nameserver_config_group(None)
+                .await
+                .unwrap();
 
             assert_google(config.clone()).await;
             assert_alidns(config).await;
@@ -275,8 +277,8 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reason"]
     fn test_nameserver_dnspod_https_resolve() {
-
         let dns_url = DnsUrl::from_str("https://doh.pub/dns-query").unwrap();
 
         Runtime::new().unwrap().block_on(async {
@@ -286,18 +288,22 @@ mod tests {
         })
     }
 
-
     #[test]
     fn test_nameserver_dnspod_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dot.pub").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let config: NameServerConfigGroup = dns_url.to_nameserver_config_group(None).await.unwrap()
-            .into_inner().into_iter().filter(|ns|ns.socket_addr.ip().to_string() == "120.53.53.53").collect::<Vec<_>>().into();
+            let config: NameServerConfigGroup = dns_url
+                .to_nameserver_config_group(None)
+                .await
+                .unwrap()
+                .into_inner()
+                .into_iter()
+                .filter(|ns| ns.socket_addr.ip().to_string() == "120.53.53.53")
+                .collect::<Vec<_>>()
+                .into();
 
             assert_google(config.clone()).await;
             assert_alidns(config).await;
         })
     }
-
-
 }

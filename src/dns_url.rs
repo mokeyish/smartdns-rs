@@ -35,17 +35,14 @@ impl DnsUrl {
 
     pub fn path(&self) -> &str {
         match self.proto {
-            Protocol::Https => {
-                match self.path.as_ref() {
-                    Some(p) => p,
-                    None => "/dns-query"
-                }
-            }
+            Protocol::Https => match self.path.as_ref() {
+                Some(p) => p,
+                None => "/dns-query",
+            },
             _ => "",
         }
     }
 }
-
 
 #[derive(Debug)]
 pub enum DnsUrlParseErr {
@@ -53,7 +50,6 @@ pub enum DnsUrlParseErr {
     ProtocolNotSupport(String),
     HostUnspecified,
 }
-
 
 impl FromStr for DnsUrl {
     type Err = DnsUrlParseErr;
@@ -67,8 +63,6 @@ impl FromStr for DnsUrl {
         let is_endwith_slash = url.ends_with('/');
 
         let url = Url::parse(url.as_str())?;
-
-
 
         let proto = match url.scheme() {
             "udp" => Protocol::Udp,
@@ -128,7 +122,6 @@ impl From<url::ParseError> for DnsUrlParseErr {
     }
 }
 
-
 fn dns_proto_default_port(proto: &Protocol) -> u16 {
     use Protocol::*;
     match *proto {
@@ -142,9 +135,6 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
         _ => todo!(),
     }
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -254,7 +244,6 @@ mod tests {
 
     #[test]
     fn test_parse_misc_01() {
-
         let url = DnsUrl::from_str("127.0.0.1:1053").unwrap();
         assert_eq!(url.proto, Protocol::Udp);
         assert_eq!(url.host.to_string(), "127.0.0.1");
@@ -263,7 +252,6 @@ mod tests {
         assert_eq!(url.to_string(), "udp://127.0.0.1:1053");
     }
 
-    
     #[test]
     fn test_parse_misc_02() {
         let url = DnsUrl::from_str("[240e:1f:1::1]").unwrap();

@@ -1,12 +1,9 @@
-
-
 use crate::dns::NameServerConfigGroup;
 use crate::infra::ping::ping;
 
 pub trait NameServerHealthyCheck {
     fn remove_timeout(&mut self);
 }
-
 
 impl NameServerHealthyCheck for NameServerConfigGroup {
     fn remove_timeout(&mut self) {
@@ -17,19 +14,14 @@ impl NameServerHealthyCheck for NameServerConfigGroup {
             }
         }
 
-        while let Some(idx) = removed_idx.pop()  {
+        while let Some(idx) = removed_idx.pop() {
             self.remove(idx);
         }
     }
 }
 
-
 #[cfg(test)]
 mod tests {
 
-
-
-    fn test() {
-
-    }
+    fn test() {}
 }

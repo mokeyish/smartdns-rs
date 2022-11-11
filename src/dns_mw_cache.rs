@@ -1,11 +1,10 @@
-
 use std::time::Duration;
 use std::time::Instant;
 
 use crate::dns::*;
 use crate::dns_conf::SmartDnsConfig;
-use crate::middleware::*;
 use crate::log::debug;
+use crate::middleware::*;
 
 use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::dns_lru::DnsLru;
@@ -26,7 +25,6 @@ impl DnsCacheMiddleware {
         }
     }
 }
-
 
 #[async_trait::async_trait]
 impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddleware {
@@ -49,12 +47,15 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
 
         let res = match res {
             Ok(lookup) => {
-                
-                self.cache.insert_records(query.original().to_owned(), lookup.records().to_owned().into_iter(), Instant::now());
+                self.cache.insert_records(
+                    query.original().to_owned(),
+                    lookup.records().to_owned().into_iter(),
+                    Instant::now(),
+                );
 
                 Ok(lookup)
-            },
-            Err(err) => Err(err)
+            }
+            Err(err) => Err(err),
         };
 
         res
