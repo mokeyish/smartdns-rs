@@ -1,7 +1,8 @@
 use std::{
     net::{IpAddr, ToSocketAddrs},
     str::FromStr,
-    sync::Arc, time::Duration,
+    sync::Arc,
+    time::Duration,
 };
 
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
@@ -19,11 +20,8 @@ use crate::preset_ns;
 use crate::{dns_client, dns_server::Request as OriginRequest, dns_url::DnsUrl};
 
 pub use trust_dns_resolver::{
-    config::{
-        NameServerConfig,
-        NameServerConfigGroup
-    },
-    lookup::Lookup
+    config::{NameServerConfig, NameServerConfigGroup},
+    lookup::Lookup,
 };
 
 #[derive(Debug, Default)]
@@ -174,7 +172,7 @@ impl DnsUrl {
         .into();
 
         if let Some(ns) = config.get(0) {
-            if ns.protocol == Protocol::Tls || ns.protocol  == Protocol::Https {
+            if ns.protocol == Protocol::Tls || ns.protocol == Protocol::Https {
                 config = config.with_client_config(DOT_TLS_CONFIG.clone())
             }
         }

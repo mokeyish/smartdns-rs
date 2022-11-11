@@ -1,22 +1,21 @@
 use std::str::FromStr;
 
-use crate::matcher::DomainAddressMatcher;
 use crate::dns::*;
 use crate::dns_conf::SmartDnsConfig;
+use crate::matcher::DomainAddressMatcher;
 use crate::middleware::*;
 use trust_dns_client::rr::{RData, RecordType};
 use trust_dns_resolver::Name;
 
-
 #[derive(Debug)]
 pub struct AddressMiddleware {
-    map: DomainAddressMatcher
+    map: DomainAddressMatcher,
 }
 
 impl AddressMiddleware {
     pub fn new(cfg: &SmartDnsConfig) -> Self {
         Self {
-            map: DomainAddressMatcher::create(cfg)
+            map: DomainAddressMatcher::create(cfg),
         }
     }
 }

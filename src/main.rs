@@ -1,13 +1,12 @@
 #![allow(dead_code)]
 
+use cfg_if::cfg_if;
 use clap::Parser;
 use std::{path::Path, time::Duration};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime,
 };
-use cfg_if::cfg_if;
-
 
 mod dns;
 mod dns_client;
@@ -21,9 +20,9 @@ mod dns_mw_spdt;
 mod dns_mw_zone;
 mod dns_server;
 mod dns_url;
+mod fast_ping;
 mod infra;
 mod log;
-mod fast_ping;
 mod matcher;
 mod preset_ns;
 
@@ -139,7 +138,10 @@ fn main() {
 
         // check if audit enabled.
         if cfg.audit_enable && cfg.audit_file.is_some() {
-            middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(&runtime, cfg.audit_file.as_ref().unwrap()));
+            middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(
+                &runtime,
+                cfg.audit_file.as_ref().unwrap(),
+            ));
         }
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware);

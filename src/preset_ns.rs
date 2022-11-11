@@ -1,8 +1,6 @@
-
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-
 
 /// IP addresses for Google Public DNS
 /// Please see: https://dns.google/
@@ -25,21 +23,16 @@ pub const ALIDNS_IPS: &[IpAddr] = &[
     IpAddr::V6(Ipv6Addr::new(0x2400, 0x3200, 0, 0, 0, 0, 0, 0x0001)),
 ];
 
-
 /// IP address for the DNSPod Public DNS service
 /// Please see: https://www.dnspod.cn/Products/publicdns
-pub const DNSPOD_IPS: &[IpAddr] =&[
-    
+pub const DNSPOD_IPS: &[IpAddr] = &[
     IpAddr::V4(Ipv4Addr::new(119, 29, 29, 29)),
     IpAddr::V6(Ipv6Addr::new(0x2402, 0x4e00, 0, 0, 0, 0, 0, 0)),
 ];
 
-
 pub trait GetDnsHostName {
-    
     fn get_host_name(self) -> Option<&'static str>;
 }
-
 
 impl GetDnsHostName for &[IpAddr] {
     fn get_host_name(self) -> Option<&'static str> {
@@ -48,13 +41,12 @@ impl GetDnsHostName for &[IpAddr] {
             GOOGLE_IPS => "dns.google",
             QUAD9_IPS => "dns.quad9.net",
             ALIDNS_IPS => "dns.alidns.com",
-            _ => return None
+            _ => return None,
         })
     }
 }
 
 pub fn find_dns_tls_name(ip: &IpAddr) -> Option<&'static str> {
-    
     if CLOUDFLARE_IPS.contains(ip) {
         return CLOUDFLARE_IPS.get_host_name();
     }
@@ -73,17 +65,15 @@ pub fn find_dns_tls_name(ip: &IpAddr) -> Option<&'static str> {
     None
 }
 
-pub fn find_dns_ips(host: &str ) -> Option<&'static [IpAddr]> {
-    
+pub fn find_dns_ips(host: &str) -> Option<&'static [IpAddr]> {
     Some(match host {
         "cloudflare-dns.com" => CLOUDFLARE_IPS,
         "dns.google" => GOOGLE_IPS,
         "dns.quad9.net" => QUAD9_IPS,
         "dns.alidns.com" => ALIDNS_IPS,
-        _ => return None
+        _ => return None,
     })
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -91,7 +81,6 @@ mod tests {
 
     #[test]
     pub fn test_get_preset_dns_hostname() {
-
         assert_eq!(GOOGLE_IPS.get_host_name().unwrap(), "dns.google");
     }
 }

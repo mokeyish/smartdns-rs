@@ -160,7 +160,6 @@ impl NameServerMiddleware {
                             }
                         }
                     }
-                    
                 }
             }
 
@@ -169,7 +168,6 @@ impl NameServerMiddleware {
                     name_server_cfg_group.merge(s);
                 }
             }
-
         }
 
         async {

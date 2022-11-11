@@ -1,10 +1,7 @@
-
 use crate::dns::*;
 use crate::middleware::*;
 
-
 pub struct DnsZoneMiddleware;
-
 
 #[async_trait::async_trait]
 impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddleware {

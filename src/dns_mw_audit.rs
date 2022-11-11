@@ -1,17 +1,14 @@
 use std::fs::File;
+use std::io::{LineWriter, Write};
 use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
-use std::io::{Write, LineWriter};
 
 use chrono::prelude::*;
 use smallvec::SmallVec;
 use tokio::{
     runtime::Runtime,
-    sync::mpsc:: {
-        self,
-        Sender
-    }
+    sync::mpsc::{self, Sender},
 };
 
 use trust_dns_client::rr::Record;
@@ -23,7 +20,7 @@ use crate::log::{debug, warn};
 use crate::middleware::*;
 
 pub struct DnsAuditMiddleware {
-    audit_sender: Sender<DnsAuditRecord>
+    audit_sender: Sender<DnsAuditRecord>,
 }
 
 #[async_trait::async_trait]
@@ -58,7 +55,10 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddl
 
         debug!("{}", audit.to_string_without_date());
 
-        self.audit_sender.send(audit).await.unwrap_or_else(|err| warn!("send audit failed,{}", err));
+        self.audit_sender
+            .send(audit)
+            .await
+            .unwrap_or_else(|err| warn!("send audit failed,{}", err));
 
         res
     }
@@ -66,7 +66,6 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddl
 
 impl DnsAuditMiddleware {
     pub fn new<P: AsRef<Path>>(rt: &Runtime, path: P) -> Self {
-
         let audit_file = path.as_ref().to_owned();
 
         let (audit_tx, mut audit_rx) = mpsc::channel::<DnsAuditRecord>(100);
@@ -88,7 +87,7 @@ impl DnsAuditMiddleware {
         });
 
         Self {
-            audit_sender: audit_tx
+            audit_sender: audit_tx,
         }
     }
 }
@@ -173,7 +172,6 @@ impl ToString for DnsAuditRecord {
     }
 }
 
-
 fn record_audit_to_file<P: AsRef<Path>>(audit_file: P, audit_records: &[DnsAuditRecord]) {
     use std::fs;
     let audit_file = audit_file.as_ref();
@@ -184,8 +182,7 @@ fn record_audit_to_file<P: AsRef<Path>>(audit_file: P, audit_records: &[DnsAudit
         }
     }
 
-    if let Ok(file) = 
-    File::options().create(true).append(true).open(audit_file) {
+    if let Ok(file) = File::options().create(true).append(true).open(audit_file) {
         let mut writer = LineWriter::new(file);
         for audit in audit_records {
             if writer.write_all(audit.to_string().as_bytes()).is_err() {
@@ -195,12 +192,11 @@ fn record_audit_to_file<P: AsRef<Path>>(audit_file: P, audit_records: &[DnsAudit
     }
 }
 
-
 #[cfg(test)]
 mod tests {
 
-    use std::str::FromStr;
     use std::io::Read;
+    use std::str::FromStr;
 
     use trust_dns_client::rr::RData;
 
@@ -227,8 +223,6 @@ mod tests {
         assert_eq!(audit.to_string(), "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34");
     }
 
-
-    
     #[test]
     fn test_dns_audit_to_string_without_date() {
         let now = "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap();
@@ -275,14 +269,15 @@ mod tests {
 
         let mut s = String::new();
 
-        std::fs::File::open(file).unwrap().read_to_string(&mut s).unwrap();
-
+        std::fs::File::open(file)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
 
         assert_eq!(s, "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34");
 
         std::fs::remove_file(file).unwrap();
-        
-        assert!(!file.exists());
 
+        assert!(!file.exists());
     }
 }

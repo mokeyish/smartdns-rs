@@ -10,8 +10,8 @@ use cfg_if::cfg_if;
 use trust_dns_client::rr::{domain, LowerName};
 use trust_dns_resolver::Name;
 
-use crate::log::{info, warn, error};
 use crate::dns_url::DnsUrl;
+use crate::log::{error, info, warn};
 
 #[derive(Debug, Default, Clone)]
 pub struct SmartDnsConfig {
@@ -89,8 +89,8 @@ impl SmartDnsConfig {
 ///   -no-rule-soa: Skip address SOA(#) rules.
 ///   -no-dualstack-selection: Disable dualstack ip selection.
 ///   -force-aaaa-soa: force AAAA query return SOA.
-/// example: 
-///  IPV4: 
+/// example:
+///  IPV4:
 ///    bind :53
 ///    bind :6053 -group office -no-speed-check
 ///  IPV6:
@@ -186,7 +186,6 @@ impl FromStr for BindServer {
             no_dualstack_selection,
             force_aaaa_soa,
         })
-
     }
 }
 
@@ -203,7 +202,6 @@ impl BindServer {
             || self.force_aaaa_soa
     }
 }
-
 
 /// remote udp dns server list
 /// server [IP]:[PORT] [-blacklist-ip] [-whitelist-ip] [-check-edns] [-group [group] ...] [-exclude-default-group]
@@ -331,11 +329,10 @@ impl FromStr for DomainAddress {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct AddressRuleItem {
     pub domain: DomainOrDomainSet,
-    pub address: DomainAddress
+    pub address: DomainAddress,
 }
 
 #[derive(Debug, Clone)]
@@ -345,12 +342,12 @@ pub struct ForwardRuleItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DomainOrDomainSet  {
+pub enum DomainOrDomainSet {
     Domain(LowerName),
-    DomainSet(String)
+    DomainSet(String),
 }
 
-impl FromStr for DomainOrDomainSet  {
+impl FromStr for DomainOrDomainSet {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -368,7 +365,6 @@ impl FromStr for DomainOrDomainSet  {
     }
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpeedCheckMode {
     Ping,
@@ -382,11 +378,12 @@ impl FromStr for SpeedCheckMode {
         if s == "ping" {
             Ok(SpeedCheckMode::Ping)
         } else if s.starts_with("tcp:") {
-            u16::from_str(&s[4..]).map( |port| SpeedCheckMode::Tcp(port)).map_err(|_|())
+            u16::from_str(&s[4..])
+                .map(|port| SpeedCheckMode::Tcp(port))
+                .map_err(|_| ())
         } else {
             Err(())
         }
-    
     }
 }
 
@@ -466,7 +463,6 @@ mod parse {
 
         fn config_bind(&mut self, options: &str, bind_tcp: bool) {
             if let Ok(bind) = BindServer::from_str(options) {
-
                 if bind_tcp {
                     self.binds_tcp.push(bind);
                 } else {
@@ -477,9 +473,7 @@ mod parse {
 
         #[inline]
         fn config_server(&mut self, _typ: &str, options: &str) {
-
             if let Ok(server) = DnsServer::from_str(options) {
-                
                 if !server.exclude_default_group {
                     self.servers
                         .get_mut("default")
@@ -519,7 +513,7 @@ mod parse {
                 if let Ok(domain) = domain {
                     self.forward_rules.push(ForwardRuleItem {
                         domain,
-                        server_group
+                        server_group,
                     })
                 } else {
                     println!("parse err");
@@ -536,23 +530,16 @@ mod parse {
                 return;
             }
 
-
             if let Ok(domain) = DomainOrDomainSet::from_str(parts[0]) {
-
                 let domain_address = parts.iter().nth(1).map(|p| *p).unwrap_or("#");
 
-
                 if let Ok(addr) = DomainAddress::from_str(domain_address) {
-
                     self.address_rules.push(AddressRuleItem {
                         domain,
                         address: addr,
                     });
                 }
-                
             }
-
-
         }
 
         #[inline]
@@ -616,7 +603,6 @@ mod parse {
             }
         }
     }
-
 
     pub fn find_path<P: AsRef<Path>>(path: P, base_conf_file: Option<&PathBuf>) -> PathBuf {
         let mut path = path.as_ref().to_path_buf();
@@ -692,7 +678,7 @@ mod parse {
         let addr = addr.trim();
         let mut sock_addrs = vec![];
 
-        if addr.starts_with("*:") || addr.starts_with(":")  {
+        if addr.starts_with("*:") || addr.starts_with(":") {
             let port_str = addr.trim_start_matches("*:").trim_start_matches(':');
             let port = u16::from_str(port_str)
             .expect("The expected format for listening to both IPv4 and IPv6 addresses is :<port>,  *:<port>");
@@ -709,7 +695,6 @@ mod parse {
                     sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
                 }
             };
-
         } else {
             match SocketAddr::from_str(addr) {
                 Ok(sock_addr) => sock_addrs.push(sock_addr),
@@ -880,9 +865,12 @@ mod parse {
             cfg.config_item("speed-check-mode ping,tcp:123");
 
             assert_eq!(cfg.speed_check_mode.len(), 2);
-            
+
             assert_eq!(cfg.speed_check_mode.get(0).unwrap(), &SpeedCheckMode::Ping);
-            assert_eq!(cfg.speed_check_mode.get(1).unwrap(), &SpeedCheckMode::Tcp(123));
+            assert_eq!(
+                cfg.speed_check_mode.get(1).unwrap(),
+                &SpeedCheckMode::Tcp(123)
+            );
         }
 
         #[test]
@@ -945,12 +933,12 @@ mod parse {
 
             cfg_if! {
                 if #[cfg(target_os = "windows")] {
-                    
+
                     assert_eq!(sock_addrs.len(), 2);
 
                     assert!(sock_addrs.get(0).unwrap().is_ipv6());
                     assert!(sock_addrs.get(1).unwrap().is_ipv4());
-                    
+
                     assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "::");
                     assert_eq!(sock_addrs.get(1).unwrap().ip().to_string(), "0.0.0.0");
 
@@ -959,7 +947,7 @@ mod parse {
 
                 }else if #[cfg(target_os = "linux")]  {
                     // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
-    
+
                     assert_eq!(sock_addrs.len(), 1);
                     assert!(sock_addrs.get(0).unwrap().is_ipv6());
                     assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "::");
@@ -974,7 +962,6 @@ mod parse {
                     assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
                 }
             };
-
         }
     }
 }
