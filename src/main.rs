@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 
 use clap::Parser;
-use std::{env, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime,
 };
+use cfg_if::cfg_if;
 
 
 mod dns;
@@ -22,7 +23,9 @@ mod dns_server;
 mod dns_url;
 mod infra;
 mod log;
+mod fast_ping;
 mod matcher;
+mod preset_ns;
 
 use dns_mw::DnsMiddlewareBuilder;
 use dns_mw_addr::AddressMiddleware;
@@ -35,8 +38,8 @@ use dns_server::{MiddlewareBasedRequestHandler, ServerFuture};
 use infra::middleware;
 use log::logger;
 
-use crate::log::{debug, error, info};
 use crate::dns_conf::SmartDnsConfig;
+use crate::log::{debug, error, info};
 
 /// Start smartdns server.
 ///
@@ -77,29 +80,35 @@ fn main() {
         info!("loading configuration from: {:?}", args.conf);
         SmartDnsConfig::load_from_file(conf.as_path())
     } else {
-        if env::consts::OS == "android" {
-            [
-                "/data/data/com.termux/files/usr/etc/smartdns.conf",
-                "/data/data/com.termux/files/usr/etc/smartdns/smartdns.conf",
-            ]
+        cfg_if! {
+            if #[cfg(target_os = "android")] {
+                let candidate_path = [
+                    "/data/data/com.termux/files/usr/etc/smartdns.conf",
+                    "/data/data/com.termux/files/usr/etc/smartdns/smartdns.conf"
+                ];
+
+            } else if #[cfg(target_os = "windows")] {
+                let candidate_path  = [""];
+            } else {
+                let candidate_path = [
+                    "/etc/smartdns.conf",
+                    "/etc/smartdns/smartdns.conf",
+                    "/usr/local/etc/smartdns.conf",
+                    "/usr/local/etc/smartdns/smartdns.conf"
+                ];
+            }
+        };
+
+        candidate_path
             .iter()
-        } else {
-            [
-                "/etc/smartdns.conf",
-                "/etc/smartdns/smartdns.conf",
-                "/usr/local/etc/smartdns.conf",
-                "/usr/local/etc/smartdns/smartdns.conf",
-            ]
-            .iter()
-        }
-        .map(Path::new)
-        .filter(|p| p.exists())
-        .map(|p| {
-            info!("loading configuration from: {:?}", p);
-            SmartDnsConfig::load_from_file(p)
-        })
-        .next()
-        .expect("No configuation file found.")
+            .map(Path::new)
+            .filter(|p| p.exists())
+            .map(|p| {
+                info!("loading configuration from: {:?}", p);
+                SmartDnsConfig::load_from_file(p)
+            })
+            .next()
+            .expect("No configuation file found.")
     };
 
     info!(r#"whoami 👉 "{}""#, cfg.server_name);
@@ -129,11 +138,10 @@ fn main() {
         let mut middleware_builder = DnsMiddlewareBuilder::new();
 
         // check if audit enabled.
-        if cfg.audit_enable {
-            middleware_builder = middleware_builder.with(DnsAuditMiddleware::default());
+        if cfg.audit_enable && cfg.audit_file.is_some() {
+            middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(&runtime, cfg.audit_file.as_ref().unwrap()));
         }
 
-        
         middleware_builder = middleware_builder.with(DnsZoneMiddleware);
 
         if cfg.address_rules.len() > 0 {
@@ -202,11 +210,11 @@ fn main() {
     match runtime.block_on(server.block_until_done()) {
         Ok(()) => {
             // we're exiting for some reason...
-            info!("Trust-DNS {} stopping", trust_dns_client::version());
+            info!("Smart-DNS {} stopping", trust_dns_client::version());
         }
         Err(e) => {
             let error_msg = format!(
-                "Trust-DNS {} has encountered an error: {}",
+                "Smart-DNS {} has encountered an error: {}",
                 trust_dns_client::version(),
                 e
             );

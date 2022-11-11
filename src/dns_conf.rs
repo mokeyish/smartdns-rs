@@ -5,10 +5,12 @@ use std::net::ToSocketAddrs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+
+use cfg_if::cfg_if;
 use trust_dns_client::rr::{domain, LowerName};
 use trust_dns_resolver::Name;
-use crate::log::{info, warn, error};
 
+use crate::log::{info, warn, error};
 use crate::dns_url::DnsUrl;
 
 #[derive(Debug, Default, Clone)]
@@ -16,6 +18,7 @@ pub struct SmartDnsConfig {
     pub server_name: Name,
     pub user: Option<String>,
     pub audit_enable: bool,
+    pub audit_file: Option<PathBuf>,
     pub log_level: Option<String>,
     pub binds: Vec<BindServer>,
     pub binds_tcp: Vec<BindServer>,
@@ -388,9 +391,9 @@ impl FromStr for SpeedCheckMode {
 }
 
 mod parse {
-    use std::{collections::hash_map::Entry, ffi::OsStr, net::{AddrParseError, SocketAddrV4, SocketAddrV6}};
-
     use super::*;
+    use std::{collections::hash_map::Entry, ffi::OsStr, net::AddrParseError};
+
     use crate::log::{info, warn};
 
     impl SmartDnsConfig {
@@ -441,6 +444,7 @@ mod parse {
                         "prefetch-domain" => self.prefetch_domain = parse_bool(options),
                         "cache-size" => self.cache_size = usize::from_str(options).ok(),
                         "audit-enable" => self.audit_enable = parse_bool(options),
+                        "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
                         "log-level" => self.log_level = Some(options.to_string()),
                         "dnsmasq-lease-file" => self.dnsmasq_lease_file = Some(options.to_string()),
                         "bind" => self.config_bind(options, false),
@@ -693,8 +697,18 @@ mod parse {
             let port = u16::from_str(port_str)
             .expect("The expected format for listening to both IPv4 and IPv6 addresses is :<port>,  *:<port>");
 
-            sock_addrs.push(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)));
-            sock_addrs.push(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0)));
+            cfg_if! {
+                if #[cfg(target_os = "windows")] {
+                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
+                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+                }else if #[cfg(target_os = "linux")]  {
+                    // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
+                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
+                } else {
+                    // ipv4 default ?
+                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+                }
+            };
 
         } else {
             match SocketAddr::from_str(addr) {
@@ -904,8 +918,8 @@ mod parse {
         fn test_addr_parse() {
             assert!(parse_sock_addrs("[::]:123").is_ok());
             assert!(parse_sock_addrs("0.0.0.0:123").is_ok());
-            assert!(parse_sock_addrs(":123").is_err());
-            assert!(parse_sock_addrs("*:123").is_err());
+            assert!(parse_sock_addrs(":123").is_ok());
+            assert!(parse_sock_addrs("*:123").is_ok());
         }
 
         #[test]
@@ -928,17 +942,39 @@ mod parse {
         #[test]
         fn test_to_socket_addrs_3() {
             let sock_addrs = parse_sock_addrs(":123").unwrap();
-            assert_eq!(sock_addrs.len(), 2);
-            // let addr1 = sock_addrs[0];
-            // assert_eq!(addr1.ip().to_string(), "::");
-            
-            assert!(sock_addrs.get(0).unwrap().is_ipv4());
-            assert!(sock_addrs.get(1).unwrap().is_ipv6());
 
-            assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "0.0.0.0");
-            assert_eq!(sock_addrs.get(1).unwrap().ip().to_string(), "::");
-            assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
-            assert_eq!(sock_addrs.get(1).unwrap().port(), 123);
+            cfg_if! {
+                if #[cfg(target_os = "windows")] {
+                    
+                    assert_eq!(sock_addrs.len(), 2);
+
+                    assert!(sock_addrs.get(0).unwrap().is_ipv6());
+                    assert!(sock_addrs.get(1).unwrap().is_ipv4());
+                    
+                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "::");
+                    assert_eq!(sock_addrs.get(1).unwrap().ip().to_string(), "0.0.0.0");
+
+                    assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
+                    assert_eq!(sock_addrs.get(1).unwrap().port(), 123);
+
+                }else if #[cfg(target_os = "linux")]  {
+                    // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
+    
+                    assert_eq!(sock_addrs.len(), 1);
+                    assert!(sock_addrs.get(0).unwrap().is_ipv6());
+                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "::");
+                    assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
+
+
+                } else {
+                    // ipv4 default ?
+                    assert_eq!(sock_addrs.len(), 1);
+                    assert!(sock_addrs.get(0).unwrap().is_ipv4());
+                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "0.0.0.0");
+                    assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
+                }
+            };
+
         }
     }
 }

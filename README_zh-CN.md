@@ -43,3 +43,15 @@ cargo build --release
 
 
 
+## 开源声明
+
+本软件包含来自 https://github.com/bluejekyll/trust-dns 的代码, 其许可是下列二选一
+
+
+- Apache License, Version 2.0, (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license (LICENSE-MIT or http://opensource.org/licenses/MIT)
+
+
+其余代码则是
+
+- GPL-3.0 license (LICENSE-GPL-3.0 or https://opensource.org/licenses/GPL-3.0)

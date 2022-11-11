@@ -25,15 +25,28 @@ cd smartdns-rs
 cargo build --release
 ```
 
-
 ## Others
 
 TODO...
 
-
-
-## Acknowledgments !!!
+## Acknowledgments !!!  
 
 This software wouldn't have been possible without:
+
 - [Trust-DNS](https://github.com/bluejekyll/trust-dns)
 - [SmartDNS](https://github.com/pymumu/smartdns)
+
+
+
+## License
+
+This software contains codes from https://github.com/bluejekyll/trust-dns, which is licensed under either of
+
+
+- Apache License, Version 2.0, (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license (LICENSE-MIT or http://opensource.org/licenses/MIT)
+
+
+And other codes is licensed under
+
+- GPL-3.0 license (LICENSE-GPL-3.0 or https://opensource.org/licenses/GPL-3.0)
