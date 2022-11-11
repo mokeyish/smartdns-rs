@@ -26,4 +26,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           RUSTTARGET: ${{ matrix.target }}
-          EXTRA_FILES: "README.md README_zh-CN.md LICENSE"
+          EXTRA_FILES: "README.md README_zh-CN.md LICENSE etc/smartdns/smartdns.conf"

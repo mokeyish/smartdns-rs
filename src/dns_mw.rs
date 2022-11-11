@@ -1,6 +1,6 @@
 
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use trust_dns_client::{rr::{Record, RData}, op::ResponseCode};
 use trust_dns_resolver::error::ResolveErrorKind;
@@ -22,7 +22,8 @@ impl DnsMiddlewareHandler {
     
     pub async fn search(&self, req: & DnsRequest) -> Result<DnsResponse, DnsError> {
         let mut ctx = DnsContext{
-            cfg: self.cfg.clone()
+            cfg: self.cfg.clone(),
+            fastest_speed: Duration::default()
         };
         self.host.execute(&mut ctx, req).await
     }

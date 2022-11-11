@@ -136,6 +136,9 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
         Tcp => 53,
         Tls => 853,
         Https => 443,
+        #[cfg(feature = "mdns")]
+        #[cfg_attr(docsrs, doc(cfg(feature = "mdns")))]
+        Mdns => 5353,
         _ => todo!(),
     }
 }
