@@ -6,7 +6,7 @@ use std::{
 };
 
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
-use trust_dns_client::rr::{rdata::SOA, RData};
+use trust_dns_proto::rr::rdata::SOA;
 use trust_dns_resolver::{
     config::{Protocol, TlsClientConfig},
     error::ResolveError,
@@ -14,19 +14,23 @@ use trust_dns_resolver::{
 };
 use url::Host;
 
-use crate::dns_conf::SmartDnsConfig;
 use crate::log::{debug, warn};
 use crate::preset_ns;
 use crate::{dns_client, dns_server::Request as OriginRequest, dns_url::DnsUrl};
+use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig};
+
+pub use trust_dns_proto::rr::{self, RData, Record};
 
 pub use trust_dns_resolver::{
     config::{NameServerConfig, NameServerConfigGroup},
+    error::ResolveErrorKind,
     lookup::Lookup,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DnsContext {
     pub cfg: Arc<SmartDnsConfig>,
+    pub client: Arc<DnsClient>,
     pub fastest_speed: Duration,
 }
 

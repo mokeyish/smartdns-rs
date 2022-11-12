@@ -8,12 +8,14 @@ use trust_dns_resolver::error::ResolveErrorKind;
 
 use crate::{
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
+    dns_client::DnsClient,
     dns_conf::SmartDnsConfig,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
 pub struct DnsMiddlewareHandler {
     pub cfg: Arc<SmartDnsConfig>,
+    client: Arc<DnsClient>,
     host: MiddlewareHost<DnsContext, DnsRequest, DnsResponse, DnsError>,
 }
 
@@ -21,6 +23,7 @@ impl DnsMiddlewareHandler {
     pub async fn search(&self, req: &DnsRequest) -> Result<DnsResponse, DnsError> {
         let mut ctx = DnsContext {
             cfg: self.cfg.clone(),
+            client: self.client.clone(),
             fastest_speed: Duration::default(),
         };
         self.host.execute(&mut ctx, req).await
@@ -46,10 +49,11 @@ impl DnsMiddlewareBuilder {
         self
     }
 
-    pub fn build(self, cfg: SmartDnsConfig) -> DnsMiddlewareHandler {
+    pub fn build(self, cfg: SmartDnsConfig, client: Arc<DnsClient>) -> DnsMiddlewareHandler {
         DnsMiddlewareHandler {
             host: self.builder.build(),
             cfg: Arc::new(cfg),
+            client,
         }
     }
 }
