@@ -2,7 +2,7 @@
 
 use cfg_if::cfg_if;
 use clap::Parser;
-use std::{path::Path, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime,
@@ -37,8 +37,8 @@ use dns_server::{MiddlewareBasedRequestHandler, ServerFuture};
 use infra::middleware;
 use log::logger;
 
-use crate::dns_conf::SmartDnsConfig;
 use crate::log::{debug, error, info};
+use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig, matcher::DomainNameServerMatcher};
 
 /// Start smartdns server.
 ///
@@ -134,6 +134,11 @@ fn main() {
 
     // build handle pipeline.
     let middleware = {
+        let dns_client = Arc::new(DnsClient::new(
+            DomainNameServerMatcher::create(&cfg),
+            cfg.servers.clone(),
+        ));
+
         let mut middleware_builder = DnsMiddlewareBuilder::new();
 
         // check if audit enabled.
@@ -152,7 +157,11 @@ fn main() {
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {
-            middleware_builder = middleware_builder.with(DnsCacheMiddleware::new(&cfg));
+            middleware_builder = middleware_builder.with(DnsCacheMiddleware::new(
+                &runtime,
+                &cfg,
+                dns_client.clone(),
+            ));
         }
 
         // check if speed_check enabled.
@@ -162,7 +171,7 @@ fn main() {
 
         middleware_builder = middleware_builder.with(NameServerMiddleware::new(&cfg));
 
-        MiddlewareBasedRequestHandler::new(middleware_builder.build(cfg))
+        MiddlewareBasedRequestHandler::new(middleware_builder.build(cfg, dns_client.clone()))
     };
 
     let mut server = ServerFuture::new(middleware);
