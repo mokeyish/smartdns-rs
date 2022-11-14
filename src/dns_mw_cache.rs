@@ -7,11 +7,11 @@ use std::time::Instant;
 use crate::dns::*;
 use crate::dns_client::DnsClient;
 use crate::dns_conf::SmartDnsConfig;
-use crate::log::debug;
+use crate::log::{debug, error};
 use crate::middleware::*;
 
 use lru::LruCache;
-use tokio::runtime::Runtime;
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use trust_dns_proto::op::Query;
@@ -21,7 +21,7 @@ pub struct DnsCacheMiddleware {
 }
 
 impl DnsCacheMiddleware {
-    pub fn new(rt: &Runtime, cfg: &SmartDnsConfig, client: Arc<DnsClient>) -> Self {
+    pub fn new(cfg: &SmartDnsConfig, client: Arc<DnsClient>) -> Self {
         let positive_min_ttl = Some(Duration::from_secs(cfg.rr_ttl_min.unwrap_or(cfg.rr_ttl())));
         let positive_max_ttl = Some(Duration::from_secs(cfg.rr_ttl_max.unwrap_or(cfg.rr_ttl())));
 
@@ -37,7 +37,7 @@ impl DnsCacheMiddleware {
         ));
 
         if cfg.prefetch_domain {
-            cache.prefetch_domain(rt, client);
+            cache.prefetch_domain(client);
         }
 
         Self { cache }
@@ -288,39 +288,63 @@ impl DnsLruCache {
         lookup
     }
 
-    fn prefetch_domain(&self, rt: &Runtime, client: Arc<DnsClient>) {
-        let prefetch_cache = self.cache.clone();
+    fn prefetch_domain(&self, client: Arc<DnsClient>) {
+        let (tx, mut rx) = mpsc::channel::<Query>(10);
 
-        rt.spawn(async move {
-            loop {
-                sleep(Duration::from_secs(1)).await;
+        {
+            // prefetch domain.
+            let cache = self.cache.clone();
 
-                let mut cache = prefetch_cache.lock().await;
-
-                let mut now = Instant::now();
-
-                for (query, entry) in cache.iter_mut() {
-                    if entry.is_current(now) {
-                        continue;
-                    }
-                    now = Instant::now();
-
-                    debug!("Prefetch domain {}", query.name());
-
-                    if let Ok(lookup) = client
-                        .lookup(query.name().to_owned(), query.query_type())
-                        .await
-                    {
-                        if let Some(record) = lookup.records().iter().min_by_key(|r| r.ttl()) {
-                            let ttl = Duration::from_secs(u64::from(record.ttl()));
-                            entry.valid_until = now + ttl;
+            tokio::spawn(async move {
+                loop {
+                    if let Some(query) = rx.recv().await {
+                        let now = Instant::now();
+                        if let Ok(lookup) = client
+                            .lookup(query.name().to_owned(), query.query_type())
+                            .await
+                        {
+                            if let Some(record) = lookup.records().iter().min_by_key(|r| r.ttl()) {
+                                let ttl = Duration::from_secs(u64::from(record.ttl()));
+                                if let Some(entry) = cache.lock().await.peek_mut(&query) {
+                                    entry.valid_until = now + ttl;
+                                }
+                            }
                         }
                     }
                 }
+            });
+        }
 
-                // debug!("Prefetch domains elapsed {:?}", now.elapsed());
-            }
-        });
+        {
+            // check expired domain.
+            let cache = self.cache.clone();
+
+            tokio::spawn(async move {
+                loop {
+                    sleep(Duration::from_secs(1)).await;
+                    let now = Instant::now();
+                    let mut cache = cache.lock().await;
+                    let len = cache.len();
+                    if len == 0 {
+                        continue;
+                    }
+                    for (query, entry) in cache.iter_mut() {
+                        if entry.is_current(now) || !query.query_type().is_ip_addr() {
+                            continue;
+                        }
+                        if tx.send(query.to_owned()).await.is_err() {
+                            error!("Failed to send query to prefetch domain!",);
+                        }
+                    }
+
+                    debug!(
+                        "Check prefetch domains(total: {}) elapsed {:?}",
+                        len,
+                        now.elapsed()
+                    );
+                }
+            });
+        }
     }
 }
 

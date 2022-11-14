@@ -134,6 +134,7 @@ fn main() {
 
     // build handle pipeline.
     let middleware = {
+        let _guard = runtime.enter();
         let dns_client = Arc::new(DnsClient::new(
             DomainNameServerMatcher::create(&cfg),
             cfg.servers.clone(),
@@ -143,10 +144,8 @@ fn main() {
 
         // check if audit enabled.
         if cfg.audit_enable && cfg.audit_file.is_some() {
-            middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(
-                &runtime,
-                cfg.audit_file.as_ref().unwrap(),
-            ));
+            middleware_builder =
+                middleware_builder.with(DnsAuditMiddleware::new(cfg.audit_file.as_ref().unwrap()));
         }
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware);
@@ -157,11 +156,8 @@ fn main() {
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {
-            middleware_builder = middleware_builder.with(DnsCacheMiddleware::new(
-                &runtime,
-                &cfg,
-                dns_client.clone(),
-            ));
+            middleware_builder =
+                middleware_builder.with(DnsCacheMiddleware::new(&cfg, dns_client.clone()));
         }
 
         // check if speed_check enabled.
