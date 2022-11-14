@@ -1,15 +1,12 @@
 use std::fs::File;
-use std::io::{LineWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 
 use chrono::prelude::*;
 use smallvec::SmallVec;
-use tokio::{
-    runtime::Runtime,
-    sync::mpsc::{self, Sender},
-};
+use tokio::sync::mpsc::{self, Sender};
 
 use trust_dns_client::rr::Record;
 use trust_dns_client::rr::RecordType;
@@ -65,15 +62,15 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddl
 }
 
 impl DnsAuditMiddleware {
-    pub fn new<P: AsRef<Path>>(rt: &Runtime, path: P) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
         let audit_file = path.as_ref().to_owned();
 
         let (audit_tx, mut audit_rx) = mpsc::channel::<DnsAuditRecord>(100);
 
-        rt.spawn(async move {
+        tokio::spawn(async move {
             let audit_file = audit_file;
 
-            const BUF_SIZE: usize = 128;
+            const BUF_SIZE: usize = 10;
             let mut buf: SmallVec<[DnsAuditRecord; BUF_SIZE]> = SmallVec::new();
 
             while let Some(audit) = audit_rx.recv().await {
@@ -183,11 +180,14 @@ fn record_audit_to_file<P: AsRef<Path>>(audit_file: P, audit_records: &[DnsAudit
     }
 
     if let Ok(file) = File::options().create(true).append(true).open(audit_file) {
-        let mut writer = LineWriter::new(file);
+        let mut writer = BufWriter::new(file);
         for audit in audit_records {
-            if writer.write_all(audit.to_string().as_bytes()).is_err() {
-                warn!("write audit to file '{:?}' failed", audit_file);
+            if writeln!(writer, "{}", audit.to_string()).is_err() {
+                warn!("Write audit to file '{:?}' failed", audit_file);
             }
+        }
+        if writer.flush().is_err() {
+            warn!("Flush audit to file '{:?}' failed", audit_file);
         }
     }
 }
