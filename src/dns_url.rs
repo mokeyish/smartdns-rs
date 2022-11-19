@@ -14,6 +14,7 @@ pub struct DnsUrl {
     host: Host,
     port: Option<u16>,
     path: Option<String>,
+    enable_sni: Option<bool>,
 }
 
 impl DnsUrl {
@@ -41,6 +42,17 @@ impl DnsUrl {
             },
             _ => "",
         }
+    }
+
+    pub fn get_domain(&self) -> Option<&str> {
+        if let Host::Domain(domain) = &self.host {
+            Some(domain.as_str())
+        } else {
+            None
+        }
+    }
+    pub fn enable_sni(&self) -> Option<bool> {
+        self.enable_sni
     }
 }
 
@@ -81,6 +93,18 @@ impl FromStr for DnsUrl {
 
         let host = host.unwrap();
 
+        let enable_sni = url
+            .query_pairs()
+            .into_iter()
+            .filter_map(|q| {
+                if q.0 == "enable_sni" {
+                    bool::from_str(q.1.to_string().as_str()).ok()
+                } else {
+                    None
+                }
+            })
+            .next();
+
         Ok(Self {
             proto,
             host: host.to_owned(),
@@ -90,6 +114,7 @@ impl FromStr for DnsUrl {
             } else {
                 Some(url.path().to_string())
             },
+            enable_sni,
         })
     }
 }
@@ -260,5 +285,17 @@ mod tests {
         assert_eq!(url.port(), 53);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://[240e:1f:1::1]");
+    }
+
+    #[test]
+    fn test_parse_enable_sni_false() {
+        let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
+        assert_eq!(url.enable_sni(), Some(false));
+    }
+
+    #[test]
+    fn test_parse_enable_sni_true() {
+        let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
+        assert_eq!(url.enable_sni(), Some(false));
     }
 }

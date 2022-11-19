@@ -284,6 +284,16 @@ impl FromStr for DnsServer {
     }
 }
 
+impl From<DnsUrl> for DnsServer {
+    fn from(url: DnsUrl) -> Self {
+        Self {
+            url,
+            group: None,
+            exclude_default_group: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DomainAddressRule {
     pub domain: LowerName,
