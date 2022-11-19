@@ -25,6 +25,7 @@ mod infra;
 mod log;
 mod matcher;
 mod preset_ns;
+mod third_ext;
 
 use dns_mw::DnsMiddlewareBuilder;
 use dns_mw_addr::AddressMiddleware;
@@ -38,7 +39,9 @@ use infra::middleware;
 use log::logger;
 
 use crate::log::{debug, error, info};
-use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig, matcher::DomainNameServerMatcher};
+use crate::{
+    dns_client::DnsClient, dns_conf::SmartDnsConfig, matcher::DomainNameServerGroupMatcher,
+};
 
 /// Start smartdns server.
 ///
@@ -136,8 +139,9 @@ fn main() {
     let middleware = {
         let _guard = runtime.enter();
         let dns_client = Arc::new(DnsClient::new(
-            DomainNameServerMatcher::create(&cfg),
+            DomainNameServerGroupMatcher::create(&cfg),
             cfg.servers.clone(),
+            Default::default(),
         ));
 
         let mut middleware_builder = DnsMiddlewareBuilder::new();

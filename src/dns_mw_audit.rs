@@ -274,7 +274,7 @@ mod tests {
             .read_to_string(&mut s)
             .unwrap();
 
-        assert_eq!(s, "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34");
+        assert_eq!(s, "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34\n");
 
         std::fs::remove_file(file).unwrap();
 

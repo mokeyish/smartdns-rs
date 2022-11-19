@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use trust_dns_client::rr::LowerName;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DomainMatcher<T: Debug>(HashMap<LowerName, T>);
 
 impl<T: Debug> DomainMatcher<T> {
@@ -53,7 +53,7 @@ impl DomainMatcher<DomainAddress> {
     }
 }
 
-pub type DomainNameServerMatcher = DomainMatcher<String>;
+pub type DomainNameServerGroupMatcher = DomainMatcher<String>;
 
 impl DomainMatcher<String> {
     pub fn create(cfg: &SmartDnsConfig) -> DomainMatcher<String> {
