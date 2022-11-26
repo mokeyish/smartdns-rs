@@ -46,6 +46,7 @@ futures-intrusive = "0.5"
 surge-ping = { version = "0.7.4", git = "https://github.com/mokeyish/surge-ping.git", branch = "unpriviledged_ping"}
 rand = "0.8.5"
 smallvec = "1.10.0"
+csv = "1.1"
 # rnp = "0.1"
 # boomphf = "0.5.9"
 

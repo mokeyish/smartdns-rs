@@ -194,6 +194,13 @@ impl DnsClient {
         }
     }
 
+    pub fn find_server_group(&self, domain: &LowerName) -> &str {
+        self.matcher
+            .find(domain)
+            .map(|s| s.as_str())
+            .unwrap_or("default")
+    }
+
     pub async fn lookup_nameserver_ip(
         &self,
         name: Name,
@@ -278,17 +285,15 @@ impl DnsClient {
         &self,
         name: N,
         record_type: RecordType,
+        group_name: Option<&str>,
     ) -> Result<Lookup, DnsError> {
         let name = match name.into_name() {
             Ok(name) => name,
             Err(err) => return Err(err.into()),
         };
 
-        let group_name = self
-            .matcher
-            .find(&name.to_owned().into())
-            .map(|s| s.as_str())
-            .unwrap_or("default");
+        let group_name =
+            group_name.unwrap_or_else(|| self.find_server_group(&name.to_owned().into()));
 
         if let Some(resolver) = self.get_or_create_resolver(group_name).await {
             resolver
@@ -689,10 +694,9 @@ mod tests {
 
     #[test]
     fn test_nameserver_quad9_tls_resolve() {
+        let dns_url = DnsUrl::from_str("tls://dns.quad9.net?enable_sni=false").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder()
-                .add_server_group(NameServerConfigGroup::quad9_tls())
-                .build();
+            let client = DnsClient::builder().add_server(dns_url).build();
             assert_google(&client).await;
             assert_alidns(&client).await;
         })

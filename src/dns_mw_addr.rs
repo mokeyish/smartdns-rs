@@ -55,6 +55,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
 
                     if let Some(rdata) = rdata {
                         let lookup = Lookup::from_rdata(req.query().original().to_owned(), rdata);
+                        ctx.lookup_source = LookupSource::Static;
                         return Ok(lookup);
                     }
                 }

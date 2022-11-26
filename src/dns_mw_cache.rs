@@ -60,6 +60,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
 
         if cached_val.is_some() {
             debug!("name: {} using caching", query.name());
+            ctx.lookup_source = LookupSource::Cache;
             return cached_val.unwrap();
         }
 
@@ -330,7 +331,7 @@ impl DnsLruCache {
                             }
                             let now = Instant::now();
                             if let Ok(lookup) = client
-                                .lookup(query.name().to_owned(), query.query_type())
+                                .lookup(query.name().to_owned(), query.query_type(), None)
                                 .await
                             {
                                 let min_ttl = lookup
@@ -373,7 +374,7 @@ impl DnsLruCache {
             let prefetch_notify = self.prefetch_notify.clone();
 
             const MIN_INTERVAL: Duration = Duration::from_secs(1);
-            const MIN_TTL: Duration = Duration::from_secs(45);
+            const MIN_TTL: Duration = Duration::from_secs(10);
 
             tokio::spawn(async move {
                 let mut last_check = Instant::now();
@@ -396,15 +397,18 @@ impl DnsLruCache {
                     let mut most_recent = Duration::from_secs(MAX_TTL as u64);
 
                     for (query, entry) in cache.iter_mut() {
-                        // Prefetch the domain that ttl greater than 45s to reduce cpu usage.
-                        if entry.origin_ttl() < MIN_TTL || !query.query_type().is_ip_addr() {
+                        // only prefetch query type ip addr
+                        if !query.query_type().is_ip_addr() {
+                            continue;
+                        }
+                        // Prefetch the domain that ttl greater than 10s to reduce cpu usage.
+                        if entry.origin_ttl() < MIN_TTL {
+                            println!("skiping {:?}, ttl:{:?}", query.name(), entry.origin_ttl());
                             continue;
                         }
                         if entry.is_current(now) {
                             let ttl = entry.ttl(now);
-                            if !ttl.is_zero() {
-                                most_recent = most_recent.min(ttl);
-                            }
+                            most_recent = most_recent.min(ttl);
                             continue;
                         }
 
@@ -423,8 +427,7 @@ impl DnsLruCache {
                     tokio::spawn(async move {
                         let dura = most_recent.max(MIN_INTERVAL);
                         debug!("Check domain prefetch after {:?} seconds", dura);
-
-                        sleep(most_recent.max(MIN_INTERVAL)).await;
+                        sleep(dura).await;
                         prefetch_notify.notify_one();
                     });
                 }

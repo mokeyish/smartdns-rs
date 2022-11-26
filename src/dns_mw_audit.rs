@@ -8,12 +8,10 @@ use chrono::prelude::*;
 use smallvec::SmallVec;
 use tokio::sync::mpsc::{self, Sender};
 
-use trust_dns_client::rr::Record;
-use trust_dns_client::rr::RecordType;
-use trust_dns_resolver::Name;
+use trust_dns_proto::op::Query;
 
 use crate::dns::*;
-use crate::log::{debug, warn};
+use crate::log::warn;
 use crate::middleware::*;
 
 pub struct DnsAuditMiddleware {
@@ -36,21 +34,18 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddl
 
         let duration = start.elapsed();
 
-        let records = res
-            .as_ref()
-            .map(|lookup| lookup.records().to_vec())
-            .unwrap_or_default();
         let audit = DnsAuditRecord::new(
+            req.id(),
             now,
             req.src().to_string(),
-            req.query().original().name().to_owned(),
-            req.query().query_type().to_owned(),
-            records,
+            req.query().original().to_owned(),
+            res.clone(),
             duration,
             ctx.fastest_speed,
+            ctx.lookup_source.clone(),
         );
 
-        debug!("{}", audit.to_string_without_date());
+        // debug!("{}", audit.to_string_without_date());
 
         self.audit_sender
             .send(audit)
@@ -89,64 +84,75 @@ impl DnsAuditMiddleware {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DnsAuditRecord {
-    source_host: String,
-    query: Name,
-    query_type: RecordType,
-    result: Vec<Record>,
+    id: u16,
+    client: String,
+    query: Query,
+    result: Result<DnsResponse, DnsError>,
     speed: Duration,
     elapsed: Duration,
     date: DateTime<Local>,
+    lookup_source: LookupSource,
 }
 
 impl DnsAuditRecord {
     fn new(
+        id: u16,
         now: DateTime<Local>,
         source_host: String,
-        query: Name,
-        query_type: RecordType,
-        result: Vec<Record>,
+        query: Query,
+        result: Result<DnsResponse, DnsError>,
         elapsed: Duration,
         speed: Duration,
+        lookup_source: LookupSource,
     ) -> Self {
         Self {
+            id,
             date: now,
-            source_host,
+            client: source_host,
             query,
-            query_type,
             result,
             elapsed,
             speed,
+            lookup_source,
         }
     }
 
     fn fmt_result(&self) -> String {
-        if self.result.is_empty() {
-            "query failed".to_string()
-        } else {
-            self.result
+        self.result
+            .as_ref()
+            .map(|lookup| lookup.records().to_vec())
+            .unwrap_or_default();
+
+        if let Ok(lookup) = self.result.as_ref() {
+            lookup
+                .records()
                 .iter()
                 .map(|record| {
                     format!(
-                        "{}",
+                        "{} {} {}",
                         record
                             .data()
                             .map(|data| data.to_string())
-                            .unwrap_or_default()
+                            .unwrap_or_default(),
+                        record.ttl(),
+                        record.rr_type()
                     )
                 })
                 .collect::<Vec<_>>()
-                .join(",")
+                .join("|")
+        } else {
+            "query failed".to_string()
         }
     }
 
     fn to_string_without_date(&self) -> String {
         format!(
             "{} query {}, type: {}, elapsed: {:?}, speed: {:?}, result {}",
-            self.source_host,
-            self.query,
-            self.query_type,
+            self.client,
+            self.query.name(),
+            self.query.query_type(),
             self.elapsed,
             self.speed,
             self.fmt_result()
@@ -159,9 +165,9 @@ impl ToString for DnsAuditRecord {
         format!(
             "[{}] {} query {}, type: {}, elapsed: {:?}, speed: {:?}, result {}",
             self.date.format("%Y-%m-%d %H:%M:%S,%3f"),
-            self.source_host,
-            self.query,
-            self.query_type,
+            self.client,
+            self.query.name(),
+            self.query.query_type(),
             self.elapsed,
             self.speed,
             self.fmt_result()
@@ -179,15 +185,66 @@ fn record_audit_to_file<P: AsRef<Path>>(audit_file: P, audit_records: &[DnsAudit
         }
     }
 
-    if let Ok(file) = File::options().create(true).append(true).open(audit_file) {
-        let mut writer = BufWriter::new(file);
-        for audit in audit_records {
-            if writeln!(writer, "{}", audit.to_string()).is_err() {
-                warn!("Write audit to file '{:?}' failed", audit_file);
+    if matches!(audit_file.extension(), Some(ext) if ext == "csv") {
+        // write as csv
+
+        let write_header = !audit_file.exists();
+
+        if let Ok(file) = File::options().create(true).append(true).open(audit_file) {
+            let mut writer = csv::Writer::from_writer(file);
+            if write_header {
+                if writer
+                    .write_record(&[
+                        "id",
+                        "timestamp",
+                        "client",
+                        "name",
+                        "type",
+                        "elapsed",
+                        "speed",
+                        "state",
+                        "result",
+                        "lookup_source",
+                    ])
+                    .is_err()
+                {
+                    warn!("Write audit header to  csv file '{:?}' failed", audit_file);
+                }
+            }
+
+            for audit in audit_records {
+                writer
+                    .write_record(&[
+                        audit.id.to_string().as_str(),
+                        audit.date.timestamp().to_string().as_str(),
+                        audit.client.as_str(),
+                        audit.query.name().to_string().as_str(),
+                        audit.query.query_type().to_string().as_str(),
+                        format!("{:?}", audit.elapsed).as_str(),
+                        format!("{:?}", audit.speed).as_str(),
+                        if audit.result.is_ok() {
+                            "success"
+                        } else {
+                            "failed"
+                        },
+                        audit.fmt_result().as_str(),
+                        format!("{:?}", audit.lookup_source).as_str(),
+                    ])
+                    .unwrap();
             }
         }
-        if writer.flush().is_err() {
-            warn!("Flush audit to file '{:?}' failed", audit_file);
+    } else {
+        // write as nornmal log format.
+        if let Ok(file) = File::options().create(true).append(true).open(audit_file) {
+            let mut writer = BufWriter::new(file);
+            for audit in audit_records {
+                if writeln!(writer, "{}", audit.to_string()).is_err() {
+                    warn!("Write audit to file '{:?}' failed", audit_file);
+                }
+            }
+            if writer.flush().is_err() {
+                warn!("Flush audit to file '{:?}' failed", audit_file);
+            }
         }
     }
 }
@@ -197,67 +254,76 @@ mod tests {
 
     use std::io::Read;
     use std::str::FromStr;
-
-    use trust_dns_client::rr::RData;
+    use trust_dns_proto::op::Query;
+    use trust_dns_proto::rr::{RData, RecordType};
 
     use super::*;
 
     #[test]
     fn test_dns_audit_to_string() {
         let now = "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap();
+        let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
+        let result = Ok(Lookup::from_rdata(
+            query.to_owned(),
+            RData::A("93.184.216.34".parse().unwrap()),
+        ));
 
         let audit = DnsAuditRecord::new(
+            11,
             now,
             "127.0.0.1".to_string(),
-            Name::from_str("www.example.com").unwrap(),
-            RecordType::A,
-            vec![Record::from_rdata(
-                Name::from_str("www.example.com").unwrap(),
-                30,
-                RData::A("93.184.216.34".parse().unwrap()),
-            )],
+            query,
+            result,
             Duration::from_millis(10),
             Duration::from_millis(11),
+            LookupSource::Server("default".to_string()),
         );
 
-        assert_eq!(audit.to_string(), "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34");
+        assert_eq!(audit.to_string(), "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A");
     }
 
     #[test]
     fn test_dns_audit_to_string_without_date() {
         let now = "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap();
 
+        let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
+        let result = Ok(Lookup::from_rdata(
+            query.to_owned(),
+            RData::A("93.184.216.34".parse().unwrap()),
+        ));
+
         let audit = DnsAuditRecord::new(
+            11,
             now,
             "127.0.0.1".to_string(),
-            Name::from_str("www.example.com").unwrap(),
-            RecordType::A,
-            vec![Record::from_rdata(
-                Name::from_str("www.example.com").unwrap(),
-                30,
-                RData::A("93.184.216.34".parse().unwrap()),
-            )],
+            query,
+            result,
             Duration::from_millis(10),
             Duration::from_millis(11),
+            LookupSource::Server("default".to_string()),
         );
 
-        assert_eq!(audit.to_string_without_date(), "127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34");
+        assert_eq!(audit.to_string_without_date(), "127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A");
     }
 
     #[test]
     fn test_record_audit_to_file() {
+        let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
+
+        let result = Ok(Lookup::from_rdata(
+            query.to_owned(),
+            RData::A("93.184.216.34".parse().unwrap()),
+        ));
+
         let audit = DnsAuditRecord::new(
+            11,
             "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
             "127.0.0.1".to_string(),
-            Name::from_str("www.example.com").unwrap(),
-            RecordType::A,
-            vec![Record::from_rdata(
-                Name::from_str("www.example.com").unwrap(),
-                30,
-                RData::A("93.184.216.34".parse().unwrap()),
-            )],
+            query,
+            result,
             Duration::from_millis(10),
             Duration::from_millis(11),
+            LookupSource::Server("default".to_string()),
         );
 
         let file = format!("./logs/test-{}-audit.log", Local::now().timestamp_millis());
@@ -274,7 +340,70 @@ mod tests {
             .read_to_string(&mut s)
             .unwrap();
 
-        assert_eq!(s, "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34\n");
+        assert_eq!(s, "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A\n");
+
+        std::fs::remove_file(file).unwrap();
+
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn test_record_audit_to_csv_file() {
+        let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
+
+        let result = Ok(Lookup::from_rdata(
+            query.to_owned(),
+            RData::A("93.184.216.34".parse().unwrap()),
+        ));
+
+        let audit1 = DnsAuditRecord::new(
+            11,
+            "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
+            "127.0.0.1".to_string(),
+            query.clone(),
+            result.clone(),
+            Duration::from_millis(10),
+            Duration::from_millis(11),
+            LookupSource::Server("default1".to_string()),
+        );
+
+        let audit2 = DnsAuditRecord::new(
+            12,
+            "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
+            "127.0.0.1".to_string(),
+            query,
+            result,
+            Duration::from_millis(10),
+            Duration::from_millis(11),
+            LookupSource::Server("default2".to_string()),
+        );
+
+        let file = format!("./logs/test-{}-audit.csv", Local::now().timestamp_millis());
+        let file = Path::new(file.as_str());
+
+        record_audit_to_file(file, &[audit1]);
+
+        assert!(file.exists());
+
+        let mut s = String::new();
+
+        std::fs::File::open(file)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
+
+        assert_eq!(s, "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n");
+
+        record_audit_to_file(file, &[audit2]);
+
+        let mut s = String::new();
+
+        std::fs::File::open(file)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
+
+        assert_eq!(s, "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n12,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default2\n");
 
         std::fs::remove_file(file).unwrap();
 
