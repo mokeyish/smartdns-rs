@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use trust_dns_proto::rr::rdata::SOA;
@@ -22,6 +23,35 @@ pub struct DnsContext {
     pub cfg: Arc<SmartDnsConfig>,
     pub client: Arc<DnsClient>,
     pub fastest_speed: Duration,
+    pub lookup_source: LookupSource,
+}
+
+#[derive(Clone)]
+pub enum LookupSource {
+    None,
+    Cache,
+    Static,
+    Zone(String),
+    Server(String),
+}
+
+impl Debug for LookupSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Cache => write!(f, "Cache"),
+            Self::Static => write!(f, "Static"),
+            Self::Zone(arg0) => write!(f, "Zone: {}", arg0),
+            Self::Server(arg0) => write!(f, "Server: {}", arg0),
+        }
+    }
+}
+
+impl Default for LookupSource {
+    #[inline]
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 pub type DnsRequest = OriginRequest;

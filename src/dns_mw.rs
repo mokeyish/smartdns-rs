@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use trust_dns_client::{
     op::ResponseCode,
@@ -24,7 +24,8 @@ impl DnsMiddlewareHandler {
         let mut ctx = DnsContext {
             cfg: self.cfg.clone(),
             client: self.client.clone(),
-            fastest_speed: Duration::default(),
+            fastest_speed: Default::default(),
+            lookup_source: Default::default(),
         };
         self.host.execute(&mut ctx, req).await
     }

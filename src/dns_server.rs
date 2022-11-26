@@ -97,8 +97,6 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                     );
 
                     let info = async {
-                        let _request_info = request.request_info();
-
                         let res = async {
                             // let query = request_info.query;
 
@@ -140,7 +138,7 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                                     let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
                                         match self.handler.search(req).await {
                                             Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
-                                            Err(_err) => Err(LookupError::NameExists),
+                                            Err(err) => Err(LookupError::ResolveError(err)),
                                         };
 
                                     lookup_result
