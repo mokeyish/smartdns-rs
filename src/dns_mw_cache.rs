@@ -8,7 +8,7 @@ use std::time::Instant;
 use crate::dns::*;
 use crate::dns_client::DnsClient;
 use crate::dns_conf::SmartDnsConfig;
-use crate::log::{debug, error, warn};
+use crate::log::{debug, error};
 use crate::middleware::*;
 
 use lru::LruCache;
@@ -192,14 +192,18 @@ impl DnsLruCache {
 
         self.notify_prefetch_domain(ttl);
 
-        self.cache.lock().await.put(
-            query,
-            DnsCacheEntry {
-                lookup: Ok(lookup.clone()),
-                valid_until,
-                origin_ttl: ttl,
-            },
-        );
+        if let Ok(mut cache) = self.cache.try_lock() {
+            cache.put(
+                query,
+                DnsCacheEntry {
+                    lookup: Ok(lookup.clone()),
+                    valid_until,
+                    origin_ttl: ttl,
+                },
+            );
+        } else {
+            debug!("Get dns cache lock to write failed");
+        }
 
         lookup
     }
@@ -271,7 +275,13 @@ impl DnsLruCache {
     /// Based on the query, see if there are any records available
     async fn get(&self, query: &Query, now: Instant) -> Option<Result<Lookup, DnsError>> {
         let mut out_of_date = false;
-        let mut cache = self.cache.lock().await;
+        let mut cache = match self.cache.try_lock() {
+            Ok(t) => t,
+            Err(err) => {
+                debug!("Get dns cache lock to read failed, {:?}", err);
+                return None;
+            }
+        };
         let lookup = cache.get_mut(query).and_then(|value| {
             if value.is_current(now) {
                 out_of_date = false;
@@ -310,7 +320,7 @@ impl DnsLruCache {
     }
 
     fn prefetch_domain(&self, client: Arc<DnsClient>) {
-        let (tx, mut rx) = mpsc::channel::<Query>(100);
+        let (tx, mut rx) = mpsc::channel::<Vec<Query>>(100);
 
         {
             // prefetch domain.
@@ -320,47 +330,50 @@ impl DnsLruCache {
                 let querying: Arc<Mutex<HashSet<Query>>> = Default::default();
 
                 loop {
-                    if let Some(query) = rx.recv().await {
+                    if let Some(queries) = rx.recv().await {
                         let client = client.clone();
                         let cache = cache.clone();
                         let querying = querying.clone();
 
-                        if tokio::spawn(async move {
+                        for query in queries {
                             if !querying.lock().await.insert(query.clone()) {
-                                return;
+                                continue;
                             }
-                            let now = Instant::now();
-                            if let Ok(lookup) = client
-                                .lookup(query.name().to_owned(), query.query_type(), None)
-                                .await
-                            {
-                                let min_ttl = lookup
-                                    .records()
-                                    .iter()
-                                    .min_by_key(|r| r.ttl())
-                                    .map(|r| Duration::from_secs(u64::from(r.ttl())));
 
-                                debug!(
-                                    "Prefetch domain {}, elapsed {:?}, ttl {:?}",
-                                    query.name(),
-                                    now.elapsed(),
-                                    min_ttl.unwrap_or_default()
-                                );
+                            let querying = querying.clone();
+                            let cache = cache.clone();
 
-                                if let Some(min_ttl) = min_ttl {
-                                    if let Some(entry) = cache.lock().await.peek_mut(&query) {
-                                        entry.valid_until = now + min_ttl;
-                                        entry.origin_ttl = min_ttl;
-                                        entry.lookup = Ok(lookup);
+                            let (client, name, typ) =
+                                (client.clone(), query.name().to_owned(), query.query_type());
+
+                            tokio::spawn(async move {
+                                let now = Instant::now();
+                                if let Ok(lookup) = client.lookup(name.clone(), typ, None).await {
+                                    let min_ttl = lookup
+                                        .records()
+                                        .iter()
+                                        .min_by_key(|r| r.ttl())
+                                        .map(|r| Duration::from_secs(u64::from(r.ttl())));
+
+                                    debug!(
+                                        "Prefetch domain {} {}, elapsed {:?}, ttl {:?}",
+                                        name,
+                                        typ,
+                                        now.elapsed(),
+                                        min_ttl.unwrap_or_default()
+                                    );
+
+                                    if let Some(min_ttl) = min_ttl {
+                                        if let Some(entry) = cache.lock().await.peek_mut(&query) {
+                                            entry.valid_until = now + min_ttl;
+                                            entry.origin_ttl = min_ttl;
+                                            entry.lookup = Ok(lookup);
+                                        }
                                     }
                                 }
-                            }
-                            querying.lock().await.remove(&query);
-                        })
-                        .await
-                        .is_err()
-                        {
-                            warn!("")
+
+                                querying.lock().await.remove(&query);
+                            });
                         }
                     }
                 }
@@ -374,7 +387,7 @@ impl DnsLruCache {
             let prefetch_notify = self.prefetch_notify.clone();
 
             const MIN_INTERVAL: Duration = Duration::from_secs(1);
-            const MIN_TTL: Duration = Duration::from_secs(10);
+            const MIN_TTL: Duration = Duration::from_secs(5);
 
             tokio::spawn(async move {
                 let mut last_check = Instant::now();
@@ -387,41 +400,55 @@ impl DnsLruCache {
                     }
 
                     last_check = now;
-
-                    let mut cache = cache.lock().await;
-                    let len = cache.len();
-                    if len == 0 {
-                        continue;
-                    }
-
                     let mut most_recent = Duration::from_secs(MAX_TTL as u64);
 
-                    for (query, entry) in cache.iter_mut() {
-                        // only prefetch query type ip addr
-                        if !query.query_type().is_ip_addr() {
-                            continue;
-                        }
-                        // Prefetch the domain that ttl greater than 10s to reduce cpu usage.
-                        if entry.origin_ttl() < MIN_TTL {
-                            println!("skiping {:?}, ttl:{:?}", query.name(), entry.origin_ttl());
-                            continue;
-                        }
-                        if entry.is_current(now) {
-                            let ttl = entry.ttl(now);
-                            most_recent = most_recent.min(ttl);
+                    let mut expired = vec![];
+
+                    {
+                        let mut cache = cache.lock().await;
+                        let len = cache.len();
+                        if len == 0 {
                             continue;
                         }
 
-                        if tx.send(query.to_owned()).await.is_err() {
-                            error!("Failed to send query to prefetch domain!",);
+                        for (query, entry) in cache.iter_mut() {
+                            // only prefetch query type ip addr
+                            if !query.query_type().is_ip_addr() {
+                                continue;
+                            }
+                            // Prefetch the domain that ttl greater than 10s to reduce cpu usage.
+                            if entry.origin_ttl() < MIN_TTL {
+                                debug!(
+                                    "skiping {} {}, ttl:{:?}",
+                                    query.name(),
+                                    query.query_type(),
+                                    entry.origin_ttl()
+                                );
+                                continue;
+                            }
+                            if entry.is_current(now) {
+                                let ttl = entry.ttl(now);
+                                most_recent = most_recent.min(ttl);
+                                continue;
+                            }
+
+                            expired.push(query.to_owned());
                         }
+                        debug!(
+                            "Check prefetch domains(total: {}) elapsed {:?}",
+                            len,
+                            now.elapsed()
+                        );
                     }
 
-                    debug!(
-                        "Check prefetch domains(total: {}) elapsed {:?}",
-                        len,
-                        now.elapsed()
-                    );
+                    if !expired.is_empty() {
+                        let tx = tx.clone();
+                        tokio::spawn(async move {
+                            if tx.send(expired).await.is_err() {
+                                error!("Failed to send queries to prefetch domain!",);
+                            }
+                        });
+                    }
 
                     let prefetch_notify = prefetch_notify.clone();
                     tokio::spawn(async move {

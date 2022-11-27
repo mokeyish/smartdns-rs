@@ -5,6 +5,7 @@ AUDIT_CSV=""
 SERVER="127.0.0.1"
 PORT="8053"
 FAIL_ONLY=0
+NO_WAIT=0
 HELP=0
 
 
@@ -14,6 +15,7 @@ while [ -n "$1" ]; do
             -s|--server) SERVER="$2"; shift;;
             -p|--port) PORT="$2"; shift;;
             -f|--fail-only) FAIL_ONLY=1;;
+            -n|--no-wait) NO_WAIT=1;;
             -h|--help) HELP=1; break;;
             -*)
                 echo "Invalid option: $1" >&2
@@ -40,6 +42,7 @@ help_doc() {
 			-s | --server           The server address (default: 127.0.0.1)
 			-p | --port             The server port (default: 8053)
 			-f | --fail-only        Only replay fails
+            -n | --no-wait          Replay without sleep.
 			-h | --help             display this help
 
 	EOF
@@ -82,7 +85,7 @@ do
         fi
     fi
 
-    if [ $LAST_TIME -gt 0 ]; then
+    if [ $NO_WAIT -eq 0 -a $LAST_TIME -gt 0 ]; then
         INTERVAL=$(($TIMESTAMP-$LAST_TIME))
         if [ $INTERVAL -gt 0 ]; then
             sleep $INTERVAL
