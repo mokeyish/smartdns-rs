@@ -13,12 +13,18 @@ use trust_dns_resolver::Name;
 use crate::dns_url::DnsUrl;
 use crate::log::{error, info, warn};
 
+const DEFAULT_SERVER:&'static str = "https://cloudflare-dns.com/dns-query";
+
 #[derive(Debug, Default, Clone)]
 pub struct SmartDnsConfig {
     pub server_name: Name,
     pub user: Option<String>,
+    
     pub audit_enable: bool,
     pub audit_file: Option<PathBuf>,
+    pub audit_size: Option<u64>,
+    pub audit_num: Option<usize>,
+
     pub log_level: Option<String>,
     pub binds: Vec<BindServer>,
     pub binds_tcp: Vec<BindServer>,
@@ -63,6 +69,13 @@ impl SmartDnsConfig {
                 ..Default::default()
             })
         }
+
+        let server_count: usize = cfg.servers.iter().map(|(_, o)| o.len()).sum();
+
+        if server_count == 0 {
+            cfg.servers.get_mut("default").unwrap().push(DnsServer::from_str(DEFAULT_SERVER).unwrap());
+        }
+
 
         if let Some(ss) = cfg.servers.get("default") {
             for s in ss {
@@ -398,6 +411,8 @@ impl FromStr for SpeedCheckMode {
 }
 
 mod parse {
+    use byte_unit::Byte;
+
     use super::*;
     use std::{collections::hash_map::Entry, ffi::OsStr, net::AddrParseError};
 
@@ -452,6 +467,8 @@ mod parse {
                         "cache-size" => self.cache_size = usize::from_str(options).ok(),
                         "audit-enable" => self.audit_enable = parse_bool(options),
                         "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
+                        "audit-size" => self.audit_size = Some(Byte::from_str(options).expect("parse byte size failed. support KB,MB,GB").get_bytes() as u64),
+                        "audit-num" => self.audit_num = usize::from_str(options).ok(),
                         "log-level" => self.log_level = Some(options.to_string()),
                         "dnsmasq-lease-file" => self.dnsmasq_lease_file = Some(options.to_string()),
                         "bind" => self.config_bind(options, false),
@@ -881,6 +898,22 @@ mod parse {
                 cfg.speed_check_mode.get(1).unwrap(),
                 &SpeedCheckMode::Tcp(123)
             );
+        }
+
+        #[test]
+        fn test_parse_config_audit_size_1() {
+            use byte_unit::n_mb_bytes;
+            let mut cfg = SmartDnsConfig::new();
+            cfg.config_item("audit-size 80mb");
+            assert_eq!(cfg.audit_size, Some(n_mb_bytes(80) as u64));
+        }
+
+        #[test]
+        fn test_parse_config_audit_size_2() {
+            use byte_unit::n_gb_bytes;
+            let mut cfg = SmartDnsConfig::new();
+            cfg.config_item("audit-size 30 gb");
+            assert_eq!(cfg.audit_size, Some(n_gb_bytes(30) as u64));
         }
 
         #[test]
