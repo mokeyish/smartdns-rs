@@ -1,0 +1,36 @@
+# .github/workflows/test.yml
+
+name: Test
+
+on: push
+
+jobs:
+  release:
+    name: test ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+    runs-on: ${{matrix.os}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@master
+
+      - name: Install Rust Toolchain Components
+        uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+          
+      - name: Test
+        uses: actions-rs/cargo@v1.0.3
+        with:
+          use-cross: ${{ matrix.os == 'ubuntu-latest' }}
+          command: test

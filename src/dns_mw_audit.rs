@@ -279,7 +279,7 @@ mod tests {
             LookupSource::Server("default".to_string()),
         );
 
-        assert_eq!(audit.to_string(), "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A");
+        assert_eq!(audit.to_string(), format!("[{}] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A", now.format("%Y-%m-%d %H:%M:%S,%3f")));
     }
 
     #[test]
@@ -315,9 +315,11 @@ mod tests {
             RData::A("93.184.216.34".parse().unwrap()),
         ));
 
+        let now = "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap();
+
         let audit = DnsAuditRecord::new(
             11,
-            "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
+            now,
             "127.0.0.1".to_string(),
             query,
             result,
@@ -340,7 +342,7 @@ mod tests {
             .read_to_string(&mut s)
             .unwrap();
 
-        assert_eq!(s, "[2022-11-11 20:18:11,099] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A\n");
+        assert_eq!(s, format!("[{}] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A\n", now.format("%Y-%m-%d %H:%M:%S,%3f")));
 
         std::fs::remove_file(file).unwrap();
 
