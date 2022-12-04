@@ -73,6 +73,10 @@ impl Service {
                     cmd_path = "/sbin/smartdns";
                     conf_path = "/etc/smartdns/smartdns.conf";
                     <dyn ServiceManager>::native().expect("")
+                } else if #[cfg(target_os = "windows")]  {
+                    cmd_path = "C:\\Windows\\System32\\smartdns";
+                    conf_path = "C:\\ProgramData\\smartdns\\smartdns.conf";
+                    <dyn ServiceManager>::native().expect("")
                 } else {
                     <dyn ServiceManager>::native().expect("")
                 }
