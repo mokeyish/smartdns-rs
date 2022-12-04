@@ -18,7 +18,9 @@
         }
       },
       "args": [
-        "-c", "tests/example/smartdns.conf", 
+        "run",
+        // "-c", "tests/example/smartdns.conf",
+        "-c", "etc/smartdns/smartdns.conf",
         "-d"
       ],
       "cwd": "${workspaceFolder}"

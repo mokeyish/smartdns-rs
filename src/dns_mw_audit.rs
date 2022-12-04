@@ -1,5 +1,4 @@
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
@@ -11,6 +10,7 @@ use tokio::sync::mpsc::{self, Sender};
 use trust_dns_proto::op::Query;
 
 use crate::dns::*;
+use crate::infra::mapped_file::MappedFile;
 use crate::log::warn;
 use crate::middleware::*;
 
@@ -57,22 +57,23 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddl
 }
 
 impl DnsAuditMiddleware {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P, audit_size: u64, audit_num: usize) -> Self {
         let audit_file = path.as_ref().to_owned();
 
         let (audit_tx, mut audit_rx) = mpsc::channel::<DnsAuditRecord>(100);
 
         tokio::spawn(async move {
-            let audit_file = audit_file;
+            let mut audit_file = MappedFile::open(audit_file, audit_size, Some(audit_num));
 
             const BUF_SIZE: usize = 10;
             let mut buf: SmallVec<[DnsAuditRecord; BUF_SIZE]> = SmallVec::new();
+
 
             while let Some(audit) = audit_rx.recv().await {
                 buf.push(audit);
 
                 if buf.len() == BUF_SIZE {
-                    record_audit_to_file(audit_file.as_path(), buf.as_slice());
+                    record_audit_to_file(&mut audit_file, buf.as_slice());
                     buf.clear();
                 }
             }
@@ -175,26 +176,14 @@ impl ToString for DnsAuditRecord {
     }
 }
 
-fn record_audit_to_file<P: AsRef<Path>>(audit_file: P, audit_records: &[DnsAuditRecord]) {
-    use std::fs;
-    let audit_file = audit_file.as_ref();
-
-    if let Some(dir) = audit_file.parent() {
-        if !dir.exists() && fs::create_dir_all(dir).is_err() {
-            return;
-        }
-    }
+fn record_audit_to_file(audit_file: &mut MappedFile, audit_records: &[DnsAuditRecord]) {
 
     if matches!(audit_file.extension(), Some(ext) if ext == "csv") {
         // write as csv
 
-        let write_header = !audit_file.exists();
-
-        if let Ok(file) = File::options().create(true).append(true).open(audit_file) {
-            let mut writer = csv::Writer::from_writer(file);
-            if write_header {
-                if writer
-                    .write_record(&[
+        if audit_file.peamble().is_none() {
+            let mut writer = csv::Writer::from_writer(vec![]);
+            writer.write_record(&[
                         "id",
                         "timestamp",
                         "client",
@@ -205,45 +194,40 @@ fn record_audit_to_file<P: AsRef<Path>>(audit_file: P, audit_records: &[DnsAudit
                         "state",
                         "result",
                         "lookup_source",
-                    ])
-                    .is_err()
-                {
-                    warn!("Write audit header to  csv file '{:?}' failed", audit_file);
-                }
-            }
+                    ]).unwrap();
+            
+            audit_file.set_peamble(Some(writer.into_inner().unwrap().into_boxed_slice()))
 
-            for audit in audit_records {
-                writer
-                    .write_record(&[
-                        audit.id.to_string().as_str(),
-                        audit.date.timestamp().to_string().as_str(),
-                        audit.client.as_str(),
-                        audit.query.name().to_string().as_str(),
-                        audit.query.query_type().to_string().as_str(),
-                        format!("{:?}", audit.elapsed).as_str(),
-                        format!("{:?}", audit.speed).as_str(),
-                        if audit.result.is_ok() {
-                            "success"
-                        } else {
-                            "failed"
-                        },
-                        audit.fmt_result().as_str(),
-                        format!("{:?}", audit.lookup_source).as_str(),
-                    ])
-                    .unwrap();
-            }
         }
+
+        let mut writer = csv::Writer::from_writer(audit_file);
+
+        for audit in audit_records {
+            writer
+                .write_record(&[
+                    audit.id.to_string().as_str(),
+                    audit.date.timestamp().to_string().as_str(),
+                    audit.client.as_str(),
+                    audit.query.name().to_string().as_str(),
+                    audit.query.query_type().to_string().as_str(),
+                    format!("{:?}", audit.elapsed).as_str(),
+                    format!("{:?}", audit.speed).as_str(),
+                    if audit.result.is_ok() {
+                        "success"
+                    } else {
+                        "failed"
+                    },
+                    audit.fmt_result().as_str(),
+                    format!("{:?}", audit.lookup_source).as_str(),
+                ])
+                .unwrap();
+        }
+
     } else {
         // write as nornmal log format.
-        if let Ok(file) = File::options().create(true).append(true).open(audit_file) {
-            let mut writer = BufWriter::new(file);
-            for audit in audit_records {
-                if writeln!(writer, "{}", audit.to_string()).is_err() {
-                    warn!("Write audit to file '{:?}' failed", audit_file);
-                }
-            }
-            if writer.flush().is_err() {
-                warn!("Flush audit to file '{:?}' failed", audit_file);
+        for audit in audit_records {
+            if writeln!(audit_file, "{}", audit.to_string()).is_err() {
+                warn!("Write audit to file '{:?}' failed", audit_file.path());
             }
         }
     }
@@ -331,7 +315,7 @@ mod tests {
         let file = format!("./logs/test-{}-audit.log", Local::now().timestamp_millis());
         let file = Path::new(file.as_str());
 
-        record_audit_to_file(file, &[audit]);
+        record_audit_to_file(&mut MappedFile::open(file, 102400, None), &[audit]);
 
         assert!(file.exists());
 
@@ -383,7 +367,7 @@ mod tests {
         let file = format!("./logs/test-{}-audit.csv", Local::now().timestamp_millis());
         let file = Path::new(file.as_str());
 
-        record_audit_to_file(file, &[audit1]);
+        record_audit_to_file(&mut MappedFile::open(file, 102400, None), &[audit1]);
 
         assert!(file.exists());
 
@@ -396,7 +380,7 @@ mod tests {
 
         assert_eq!(s, "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n");
 
-        record_audit_to_file(file, &[audit2]);
+        record_audit_to_file(&mut MappedFile::open(file, 102400, None), &[audit2]);
 
         let mut s = String::new();
 

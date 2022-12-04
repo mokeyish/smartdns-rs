@@ -2,12 +2,17 @@
 
 use cfg_if::cfg_if;
 use clap::Parser;
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     net::{TcpListener, UdpSocket},
     runtime,
 };
 
+mod cli;
 mod dns;
 mod dns_client;
 mod dns_conf;
@@ -25,6 +30,7 @@ mod infra;
 mod log;
 mod matcher;
 mod preset_ns;
+mod service;
 mod third_ext;
 
 use dns_mw::DnsMiddlewareBuilder;
@@ -43,20 +49,7 @@ use crate::{
     dns_client::DnsClient, dns_conf::SmartDnsConfig, matcher::DomainNameServerGroupMatcher,
 };
 
-/// Start smartdns server.
-///
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Config file
-    #[arg(short = 'c', long)]
-    conf: Option<std::path::PathBuf>,
-
-    #[arg(short = 'd', long)]
-    debug: bool,
-}
-
-pub fn banner() {
+fn banner() {
     info!("");
     info!(r#"     _____                      _       _____  _   _  _____ "#);
     info!(r#"    / ____|                    | |     |  __ \| \ | |/ ____|"#);
@@ -67,10 +60,44 @@ pub fn banner() {
     info!("");
 }
 
-fn main() {
-    let args = Args::parse();
+/// The app name
+const NAME: &'static str = "Smart-DNS";
 
-    logger(if args.debug {
+/// The default configuration.
+const DEFAULT_CONF: &'static str = include_str!("../etc/smartdns/smartdns.conf");
+
+/// Returns a version as specified in Cargo.toml
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+fn main() {
+    use cli::*;
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Run { conf, debug } => {
+            run_server(conf, debug);
+        }
+        Commands::Service {
+            command: service_command,
+        } => {
+            use service::*;
+            use ServiceCommands::*;
+            match service_command {
+                Install => install(),
+                Uninstall{purge} => uninstall(purge),
+                Start => start(),
+                Stop => stop(),
+                Restart => restart(),
+                Status => status()
+            }
+        }
+    }
+}
+
+fn run_server(conf: Option<PathBuf>, debug: bool) {
+    logger(if debug {
         tracing::Level::DEBUG
     } else {
         tracing::Level::INFO
@@ -78,8 +105,8 @@ fn main() {
 
     info!("Smart-DNS 🐋 {} starting", trust_dns_client::version());
 
-    let cfg = if let Some(ref conf) = args.conf {
-        info!("loading configuration from: {:?}", args.conf);
+    let cfg = if let Some(ref conf) = conf {
+        info!("loading configuration from: {:?}", conf);
         SmartDnsConfig::load_from_file(conf.as_path())
     } else {
         cfg_if! {
@@ -149,7 +176,11 @@ fn main() {
         // check if audit enabled.
         if cfg.audit_enable && cfg.audit_file.is_some() {
             middleware_builder =
-                middleware_builder.with(DnsAuditMiddleware::new(cfg.audit_file.as_ref().unwrap()));
+                middleware_builder.with(DnsAuditMiddleware::new(
+                    cfg.audit_file.as_ref().unwrap(),
+                    cfg.audit_size(),
+                    cfg.audit_num()
+                ));
         }
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware);
@@ -221,17 +252,15 @@ fn main() {
     match runtime.block_on(server.block_until_done()) {
         Ok(()) => {
             // we're exiting for some reason...
-            info!("Smart-DNS {} stopping", trust_dns_client::version());
+            info!("{} {} stopping", NAME, version());
         }
         Err(e) => {
-            let error_msg = format!(
-                "Smart-DNS {} has encountered an error: {}",
-                trust_dns_client::version(),
-                e
-            );
+            let error_msg = format!("{} {} has encountered an error: {}", NAME, version(), e);
 
             error!("{}", error_msg);
             panic!("{}", error_msg);
         }
     };
 }
+
+
