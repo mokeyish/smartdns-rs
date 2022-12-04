@@ -95,7 +95,7 @@ jobs:
       - name: Publish zip archive macos
         if: ${{ contains(matrix.target, 'darwin') }}
         env:
-          ARCHIVE_FILE: smartdns-${{ matrix.target }}.tar.gz
+          ARCHIVE_FILE: smartdns-${{ matrix.target }}.zip
         run: |
           cp target/${{ matrix.target }}/release/smartdns $DIST_DIR
           zip -9r $ARCHIVE_FILE $DIST_DIR
@@ -109,7 +109,7 @@ jobs:
         run: |
           cp target/${{ matrix.target }}/release/smartdns.exe $DIST_DIR
           7z a -tzip $ARCHIVE_FILE $DIST_DIR
-          shasum -a256 $ARCHIVE_FILE > $ARCHIVE_FILE-sha256sum.txt
+          echo ${{ hashFiles(format(' smartdns-{0}.zip', matrix.target)) }} > $ARCHIVE_FILE-sha256sum.txt
           echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
         shell: bash
     
