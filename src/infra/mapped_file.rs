@@ -1,14 +1,12 @@
-
 use std::ffi::OsStr;
-use std::fs::File;
-use std::path::{PathBuf, Path};
-use std::io::{Write, self};
 use std::fs;
+use std::fs::File;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 use chrono::Local;
 
-const DATE_FMT:& 'static str = "%Y%m%d-%H%M%S%f";
-
+const DATE_FMT: &'static str = "%Y%m%d-%H%M%S%f";
 
 pub struct MappedFile {
     num: Option<usize>,
@@ -16,18 +14,24 @@ pub struct MappedFile {
     path: PathBuf,
     file: Option<File>,
     len: u64,
-    peamble_bytes: Option<Box<[u8]>>
+    peamble_bytes: Option<Box<[u8]>>,
 }
 
 impl MappedFile {
-
     pub fn open<P: AsRef<Path>>(path: P, size: u64, num: Option<usize>) -> Self {
         let path = path.as_ref().to_path_buf();
-        Self { path, size, num, file: None, len: 0, peamble_bytes: None }
+        Self {
+            path,
+            size,
+            num,
+            file: None,
+            len: 0,
+            peamble_bytes: None,
+        }
     }
 
     pub fn peamble(&self) -> Option<&[u8]> {
-        self.peamble_bytes.as_ref().map(|x|&x[..])
+        self.peamble_bytes.as_ref().map(|x| &x[..])
     }
 
     pub fn set_peamble(&mut self, bytes: Option<Box<[u8]>>) {
@@ -54,17 +58,24 @@ impl MappedFile {
         if self.len > 0 || self.file.is_some() {
             self.len
         } else {
-            fs::metadata(self.path.as_path()).map(|m|m.len()).unwrap_or_default()
+            fs::metadata(self.path.as_path())
+                .map(|m| m.len())
+                .unwrap_or_default()
         }
     }
 
     pub fn mapped_files(&self) -> io::Result<Vec<PathBuf>> {
-        match (self.path.file_stem().map(|s| s.to_str().map(|s|s.to_string())), self.path.parent()) {
+        match (
+            self.path
+                .file_stem()
+                .map(|s| s.to_str().map(|s| s.to_string())),
+            self.path.parent(),
+        ) {
             (Some(Some(base_name)), Some(parent)) => {
                 let mut files = fs::read_dir(parent)?
                 .filter_map(|o| o.ok())
                 .filter_map(|o| {
-                    if self.path.extension() == o.path().extension() && 
+                    if self.path.extension() == o.path().extension() &&
                         matches!(o.file_name().to_str(), Some(s) if s.starts_with(base_name.as_str())) {
                         Some(o.path())
                     } else {
@@ -74,8 +85,8 @@ impl MappedFile {
                 .collect::<Vec<_>>();
                 files.sort_by(|a, b| b.cmp(a));
                 Ok(files)
-            },
-            _ => Ok(Default::default())
+            }
+            _ => Ok(Default::default()),
         }
     }
 
@@ -105,12 +116,10 @@ impl MappedFile {
         }
 
         match self.file {
-            Some(ref mut file) => {
-                Ok(file)
-            },
+            Some(ref mut file) => Ok(file),
             None => {
                 match {
-                    let mut opt =  File::options();
+                    let mut opt = File::options();
                     opt.create(true).write(true);
                     if self.path.exists() {
                         if self.is_full() {
@@ -123,20 +132,19 @@ impl MappedFile {
                 } {
                     Ok(mut file) => {
                         self.len = file.metadata().unwrap().len();
-                        if self.len == 0 &&self.peamble_bytes.is_some() {
+                        if self.len == 0 && self.peamble_bytes.is_some() {
                             let bytes = self.peamble().unwrap();
                             file.write(bytes)?;
                             self.len = bytes.len() as u64;
                         }
                         self.file = Some(file);
                         Ok(self.file.as_mut().unwrap())
-                    },
+                    }
                     Err(err) => Err(err),
                 }
-            },
+            }
         }
     }
-
 
     fn backup_files(&mut self) -> io::Result<()> {
         match (self.path.file_stem(), self.path.parent()) {
@@ -152,24 +160,23 @@ impl MappedFile {
                     new_path = new_path.with_extension(ext);
                 }
                 fs::copy(self.path.as_path(), new_path)?;
-            }, _=> ()
+            }
+            _ => (),
         }
 
         let files = self.mapped_files()?;
         match self.num {
             Some(n) if n <= files.len() => {
-            for f in &files[n..] {
-                fs::remove_file(f)?;
+                for f in &files[n..] {
+                    fs::remove_file(f)?;
+                }
             }
-            },
-            _ => ()
+            _ => (),
         }
 
         Ok(())
     }
-
 }
-
 
 impl Write for MappedFile {
     #[inline]
@@ -197,8 +204,6 @@ impl Write for MappedFile {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
 
@@ -206,7 +211,6 @@ mod tests {
 
     #[test]
     pub fn test_write_file() -> io::Result<()> {
-
         let file_path = format!("./logs/abc-{:#x}.txt", Local::now().timestamp());
 
         let mut file = MappedFile::open(file_path, 2, Some(3));
@@ -220,7 +224,6 @@ mod tests {
         assert_eq!(file.mapped_files().unwrap().len(), 3);
         file.write_all(b"ee")?;
         assert_eq!(file.mapped_files().unwrap().len(), 3);
-
 
         file.remove_files().unwrap();
 

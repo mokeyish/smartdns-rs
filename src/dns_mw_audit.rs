@@ -68,7 +68,6 @@ impl DnsAuditMiddleware {
             const BUF_SIZE: usize = 10;
             let mut buf: SmallVec<[DnsAuditRecord; BUF_SIZE]> = SmallVec::new();
 
-
             while let Some(audit) = audit_rx.recv().await {
                 buf.push(audit);
 
@@ -177,27 +176,27 @@ impl ToString for DnsAuditRecord {
 }
 
 fn record_audit_to_file(audit_file: &mut MappedFile, audit_records: &[DnsAuditRecord]) {
-
     if matches!(audit_file.extension(), Some(ext) if ext == "csv") {
         // write as csv
 
         if audit_file.peamble().is_none() {
             let mut writer = csv::Writer::from_writer(vec![]);
-            writer.write_record(&[
-                        "id",
-                        "timestamp",
-                        "client",
-                        "name",
-                        "type",
-                        "elapsed",
-                        "speed",
-                        "state",
-                        "result",
-                        "lookup_source",
-                    ]).unwrap();
-            
-            audit_file.set_peamble(Some(writer.into_inner().unwrap().into_boxed_slice()))
+            writer
+                .write_record(&[
+                    "id",
+                    "timestamp",
+                    "client",
+                    "name",
+                    "type",
+                    "elapsed",
+                    "speed",
+                    "state",
+                    "result",
+                    "lookup_source",
+                ])
+                .unwrap();
 
+            audit_file.set_peamble(Some(writer.into_inner().unwrap().into_boxed_slice()))
         }
 
         let mut writer = csv::Writer::from_writer(audit_file);
@@ -222,7 +221,6 @@ fn record_audit_to_file(audit_file: &mut MappedFile, audit_records: &[DnsAuditRe
                 ])
                 .unwrap();
         }
-
     } else {
         // write as nornmal log format.
         for audit in audit_records {

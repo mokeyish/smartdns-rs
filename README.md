@@ -54,7 +54,7 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 
    程序会安装到 `/usr/local/bin/smartdns`
 
-   服务会安装到 `/Library/LaunchDaemons/sys.dns.smartdns-rs.plist`
+   服务会安装到 `/Library/LaunchDaemons/smartdns-rs.plist`
 
 2. 启动服务
 
@@ -86,7 +86,7 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 
    程序会安装到 `/sbin/smartdns`
 
-   服务会安装到 `/etc/systemd/system/dns-smartdns-rs.service`
+   服务会安装到 `/etc/systemd/system/smartdns-rs.service`
 
 2. 启动服务
 

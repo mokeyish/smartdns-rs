@@ -13,13 +13,13 @@ use trust_dns_resolver::Name;
 use crate::dns_url::DnsUrl;
 use crate::log::{error, info, warn};
 
-const DEFAULT_SERVER:&'static str = "https://cloudflare-dns.com/dns-query";
+const DEFAULT_SERVER: &'static str = "https://cloudflare-dns.com/dns-query";
 
 #[derive(Debug, Default, Clone)]
 pub struct SmartDnsConfig {
     pub server_name: Name,
     pub user: Option<String>,
-    
+
     pub audit_enable: bool,
     pub audit_file: Option<PathBuf>,
     pub audit_size: Option<u64>,
@@ -53,6 +53,45 @@ impl SmartDnsConfig {
         }
     }
 
+    pub fn load<P: AsRef<Path>>(path: Option<P>) -> Self {
+        if let Some(ref conf) = path {
+            let path = conf.as_ref();
+
+            info!("loading configuration from: {:?}", path);
+            SmartDnsConfig::load_from_file(path)
+        } else {
+            cfg_if! {
+                if #[cfg(target_os = "android")] {
+                    let candidate_path = [
+                        "/data/data/com.termux/files/usr/etc/smartdns.conf",
+                        "/data/data/com.termux/files/usr/etc/smartdns/smartdns.conf"
+                    ];
+
+                } else if #[cfg(target_os = "windows")] {
+                    let candidate_path  = [""];
+                } else {
+                    let candidate_path = [
+                        "/etc/smartdns.conf",
+                        "/etc/smartdns/smartdns.conf",
+                        "/usr/local/etc/smartdns.conf",
+                        "/usr/local/etc/smartdns/smartdns.conf"
+                    ];
+                }
+            };
+
+            candidate_path
+                .iter()
+                .map(Path::new)
+                .filter(|p| p.exists())
+                .map(|p| {
+                    info!("loading configuration from: {:?}", p);
+                    SmartDnsConfig::load_from_file(p)
+                })
+                .next()
+                .expect("No configuation file found.")
+        }
+    }
+
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Self {
         let path = path.as_ref();
 
@@ -73,9 +112,11 @@ impl SmartDnsConfig {
         let server_count: usize = cfg.servers.iter().map(|(_, o)| o.len()).sum();
 
         if server_count == 0 {
-            cfg.servers.get_mut("default").unwrap().push(DnsServer::from_str(DEFAULT_SERVER).unwrap());
+            cfg.servers
+                .get_mut("default")
+                .unwrap()
+                .push(DnsServer::from_str(DEFAULT_SERVER).unwrap());
         }
-
 
         if let Some(ss) = cfg.servers.get("default") {
             for s in ss {
@@ -467,7 +508,13 @@ mod parse {
                         "cache-size" => self.cache_size = usize::from_str(options).ok(),
                         "audit-enable" => self.audit_enable = parse_bool(options),
                         "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
-                        "audit-size" => self.audit_size = Some(Byte::from_str(options).expect("parse byte size failed. support KB,MB,GB").get_bytes() as u64),
+                        "audit-size" => {
+                            self.audit_size = Some(
+                                Byte::from_str(options)
+                                    .expect("parse byte size failed. support KB,MB,GB")
+                                    .get_bytes() as u64,
+                            )
+                        }
                         "audit-num" => self.audit_num = usize::from_str(options).ok(),
                         "log-level" => self.log_level = Some(options.to_string()),
                         "dnsmasq-lease-file" => self.dnsmasq_lease_file = Some(options.to_string()),

@@ -1,15 +1,10 @@
 #![allow(dead_code)]
 
-use cfg_if::cfg_if;
-use clap::Parser;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
-};
+use cli::*;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, UdpSocket},
-    runtime,
+    runtime, signal,
 };
 
 mod cli;
@@ -44,7 +39,7 @@ use dns_server::{MiddlewareBasedRequestHandler, ServerFuture};
 use infra::middleware;
 use log::logger;
 
-use crate::log::{debug, error, info};
+use crate::log::{debug, info};
 use crate::{
     dns_client::DnsClient, dns_conf::SmartDnsConfig, matcher::DomainNameServerGroupMatcher,
 };
@@ -71,10 +66,22 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+#[cfg(not(windows))]
 fn main() {
-    use cli::*;
-    let cli = Cli::parse();
+    run_command(Cli::parse());
+}
 
+#[cfg(windows)]
+fn main() -> windows_service::Result<()> {
+    if matches!(std::env::args().last(), Some(flag) if flag == "--ws7642ea814a90496daaa54f2820254f12")
+    {
+        return service::windows_service::run();
+    }
+    run_command(Cli::parse());
+    Ok(())
+}
+
+fn run_command(cli: Cli) {
     match cli.command {
         Commands::Run { conf, debug } => {
             run_server(conf, debug);
@@ -86,11 +93,11 @@ fn main() {
             use ServiceCommands::*;
             match service_command {
                 Install => install(),
-                Uninstall{purge} => uninstall(purge),
+                Uninstall { purge } => uninstall(purge),
                 Start => start(),
                 Stop => stop(),
                 Restart => restart(),
-                Status => status()
+                Status => status(),
             }
         }
     }
@@ -103,42 +110,9 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
         tracing::Level::INFO
     });
 
-    info!("Smart-DNS 🐋 {} starting", trust_dns_client::version());
+    info!("Smart-DNS 🐋 {} starting", version());
 
-    let cfg = if let Some(ref conf) = conf {
-        info!("loading configuration from: {:?}", conf);
-        SmartDnsConfig::load_from_file(conf.as_path())
-    } else {
-        cfg_if! {
-            if #[cfg(target_os = "android")] {
-                let candidate_path = [
-                    "/data/data/com.termux/files/usr/etc/smartdns.conf",
-                    "/data/data/com.termux/files/usr/etc/smartdns/smartdns.conf"
-                ];
-
-            } else if #[cfg(target_os = "windows")] {
-                let candidate_path  = [""];
-            } else {
-                let candidate_path = [
-                    "/etc/smartdns.conf",
-                    "/etc/smartdns/smartdns.conf",
-                    "/usr/local/etc/smartdns.conf",
-                    "/usr/local/etc/smartdns/smartdns.conf"
-                ];
-            }
-        };
-
-        candidate_path
-            .iter()
-            .map(Path::new)
-            .filter(|p| p.exists())
-            .map(|p| {
-                info!("loading configuration from: {:?}", p);
-                SmartDnsConfig::load_from_file(p)
-            })
-            .next()
-            .expect("No configuation file found.")
-    };
+    let cfg = SmartDnsConfig::load(conf);
 
     info!(r#"whoami 👉 "{}""#, cfg.server_name);
 
@@ -175,12 +149,11 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
 
         // check if audit enabled.
         if cfg.audit_enable && cfg.audit_file.is_some() {
-            middleware_builder =
-                middleware_builder.with(DnsAuditMiddleware::new(
-                    cfg.audit_file.as_ref().unwrap(),
-                    cfg.audit_size(),
-                    cfg.audit_num()
-                ));
+            middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(
+                cfg.audit_file.as_ref().unwrap(),
+                cfg.audit_size(),
+                cfg.audit_num(),
+            ));
         }
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware);
@@ -246,21 +219,16 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
     // config complete, starting!
 
     banner();
+
     info!("awaiting connections...");
 
     info!("Server starting up");
-    match runtime.block_on(server.block_until_done()) {
-        Ok(()) => {
-            // we're exiting for some reason...
-            info!("{} {} stopping", NAME, version());
-        }
-        Err(e) => {
-            let error_msg = format!("{} {} has encountered an error: {}", NAME, version(), e);
 
-            error!("{}", error_msg);
-            panic!("{}", error_msg);
-        }
-    };
+    runtime.block_on(async {
+        signal::ctrl_c().await.unwrap();
+        // we're exiting for some reason...
+        info!("{} {} shutdown", NAME, version());
+    });
+
+    drop(runtime);
 }
-
-
