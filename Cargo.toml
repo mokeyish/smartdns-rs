@@ -1,6 +1,6 @@
 [package]
 name = "smartdns"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["YISH <mokeyish@hotmail.com>"]
 edition = "2021"
 
