@@ -1,6 +1,6 @@
 [package]
 name = "smartdns"
-version = "0.1.1"
+version = "0.1.4"
 authors = ["YISH <mokeyish@hotmail.com>"]
 edition = "2021"
 
@@ -32,7 +32,7 @@ async-trait = "0.1.43"
 time = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "fmt", "env-filter"] }
-tokio = { version = "1.21", features = ["time", "rt"] }
+tokio = { version = "1.21", features = ["time", "rt", "signal"] }
 url = "2.3.1"
 trust-dns-proto = { version = "0.22.0", features = ["dns-over-https-rustls"]}
 trust-dns-client = { version = "0.22.0", features = ["dns-over-https-rustls"]}
@@ -48,10 +48,14 @@ surge-ping = { version = "0.7.4", git = "https://github.com/mokeyish/surge-ping.
 rand = "0.8.5"
 smallvec = "1.10.0"
 csv = "1.1"
-service-manager = "0.2.0"
+service-manager = { version = "0.2.0", git = "https://github.com/chipsenkbeil/service-manager-rs.git", branch = "main"}
 byte-unit = "4.0.17"
 # rnp = "0.1"
 # boomphf = "0.5.9"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.43.0", features = ["Win32_System_Console", "Win32_Foundation"] }
+windows-service = "0.5.0"
 
 
 [build-dependencies]

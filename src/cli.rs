@@ -1,4 +1,6 @@
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
+
+pub use clap::Parser;
 
 /// Smart-DNS.
 ///
@@ -35,8 +37,7 @@ pub enum ServiceCommands {
     Install,
 
     /// Uninstall the Smart-DNS service.
-    Uninstall{
-
+    Uninstall {
         /// Purge both the binary and config files.
         #[arg(short = 'p', long)]
         purge: bool,
@@ -52,7 +53,7 @@ pub enum ServiceCommands {
     Restart,
 
     /// Print the service status of Smart-DNS
-    Status
+    Status,
 }
 
 #[cfg(test)]
@@ -119,9 +120,7 @@ mod tests {
         assert_eq!(
             cli.command,
             Commands::Service {
-                command: ServiceCommands::Uninstall {
-                    purge: false
-                }
+                command: ServiceCommands::Uninstall { purge: false }
             }
         );
     }

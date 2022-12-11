@@ -68,15 +68,13 @@ impl SmartDnsConfig {
     }
 
     pub fn audit_size(&self) -> u64 {
-        use byte_unit::n_kb_bytes;     
+        use byte_unit::n_kb_bytes;
         self.audit_size.unwrap_or(n_kb_bytes(128) as u64)
     }
-    
+
     pub fn audit_num(&self) -> usize {
         self.audit_num.unwrap_or(2)
     }
-
-
 }
 
 pub trait DefaultSOA {
