@@ -9,7 +9,7 @@ use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig};
 
 pub use trust_dns_proto::{
     op,
-    rr::{self, Name, RData, Record},
+    rr::{self, Name, RData, Record, RecordType},
 };
 
 pub use trust_dns_resolver::{

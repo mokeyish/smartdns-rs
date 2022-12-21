@@ -50,6 +50,7 @@ smallvec = "1.10.0"
 csv = "1.1"
 service-manager = { version = "0.2.0", git = "https://github.com/chipsenkbeil/service-manager-rs.git", branch = "main"}
 byte-unit = "4.0.17"
+ipnet = "2.7"
 # rnp = "0.1"
 # boomphf = "0.5.9"
 

@@ -7,9 +7,11 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use cfg_if::cfg_if;
+use ipnet::IpNet;
 use trust_dns_client::rr::{domain, LowerName};
 use trust_dns_resolver::Name;
 
+use crate::dns::RecordType;
 use crate::dns_url::DnsUrl;
 use crate::log::{error, info, warn};
 
@@ -17,31 +19,239 @@ const DEFAULT_SERVER: &'static str = "https://cloudflare-dns.com/dns-query";
 
 #[derive(Debug, Default, Clone)]
 pub struct SmartDnsConfig {
+    /// dns server name, default is host name
+    ///
+    /// ```
+    /// server-name,
+    ///
+    /// example:
+    ///   server-name smartdns
+    /// ```
     pub server_name: Name,
+
+    /// whether resolv local hostname to ip address
+    pub resolv_hostanme: Option<bool>,
+
+    /// dns server run user
+    ///
+    /// ```
+    /// user [username]
+    ///
+    /// exmaple:
+    ///   user nobody
+    /// ```
     pub user: Option<String>,
 
+    /// Local domain suffix appended to DHCP names and hosts file entries.
+    pub domain: Option<Name>,
+
+    /// Include another configuration options
+    ///
+    /// conf-file [file]
+    /// ```
+    /// example:
+    ///   conf-file blacklist-ip.conf
+    /// ```
+    conf_file: Option<PathBuf>,
+
+    /// dns server bind ip and port, default dns server port is 53, support binding multi ip and port
+    pub binds: Vec<BindServer>,
+    /// bind tcp server
+    pub binds_tcp: Vec<BindServer>,
+
+    /// tcp connection idle timeout
+    ///
+    /// tcp-idle-time [second]
+    pub tcp_idle_time: Option<u64>,
+
+    /// dns cache size
+    ///
+    /// ```
+    /// cache-size [number]
+    ///   0: for no cache
+    /// ```
+    pub cache_size: Option<usize>,
+    /// enable persist cache when restart
+    pub cache_persist: Option<bool>,
+    /// cache persist file
+    pub cache_file: Option<PathBuf>,
+
+    /// prefetch domain
+    ///
+    /// ```
+    /// prefetch-domain [yes|no]
+    ///
+    /// example:
+    ///   prefetch-domain yes
+    /// ```
+    pub prefetch_domain: bool,
+
+    /// cache serve expired
+    ///
+    /// serve-expired [yes|no]
+    /// ```
+    /// example:
+    ///   serve-expired yes
+    /// ```
+    pub serve_expired: Option<bool>,
+    /// cache serve expired TTL
+    ///
+    /// serve-expired-ttl [num]
+    /// ```
+    /// example:
+    ///   serve-expired-ttl 0
+    /// ```
+    pub serve_expired_ttl: Option<usize>,
+    /// reply TTL value to use when replying with expired data
+    ///
+    /// serve-expired-reply-ttl [num]
+    /// ```
+    /// example:
+    ///   serve-expired-reply-ttl 30
+    /// ```
+    pub serve_expired_reply_ttl: Option<usize>,
+
+    /// List of hosts that supply bogus NX domain results
+    pub bogus_nxdomain: Vec<IpNet>,
+
+    /// List of IPs that will be filtered when nameserver is configured -blacklist-ip parameter
+    pub blacklist_ip: Vec<IpNet>,
+
+    /// List of IPs that will be accepted when nameserver is configured -whitelist-ip parameter
+    pub whitelist_ip: Vec<IpNet>,
+
+    /// List of IPs that will be ignored
+    pub ignore_ip: Vec<IpNet>,
+
+    /// speed check mode
+    ///
+    /// speed-check-mode [ping|tcp:port|none|,]
+    /// ```ini
+    /// example:
+    ///   speed-check-mode ping,tcp:80,tcp:443
+    ///   speed-check-mode tcp:443,ping
+    ///   speed-check-mode none
+    /// ```
+    pub speed_check_mode: Vec<SpeedCheckMode>,
+
+    /// force AAAA query return SOA
+    ///
+    /// force-AAAA-SOA [yes|no]
+    pub force_aaaa_soa: Option<bool>,
+
+    /// force specific qtype return soa
+    ///
+    /// force-qtype-SOA [qtypeid |...]
+    ///
+    /// qtypeid: https://en.wikipedia.org/wiki/List_of_DNS_record_types
+    /// ```ini
+    /// example:
+    ///   force-qtype-SOA 65 28
+    /// ```
+    pub force_qtype_soa: Option<RecordType>,
+
+    /// Enable IPV4, IPV6 dual stack IP optimization selection strategy
+    ///
+    /// dualstack-ip-selection [yes|no]
+    pub dualstack_ip_selection: Option<bool>,
+    /// dualstack-ip-selection-threshold [num] (0~1000)
+    pub dualstack_ip_selection_threshold: Option<u16>,
+    /// dualstack-ip-allow-force-AAAA [yes|no]
+    pub dualstack_ip_allow_force_aaaa: Option<bool>,
+
+    /// edns client subnet
+    ///
+    /// ```
+    /// example:
+    ///   edns-client-subnet [ip/subnet]
+    ///   edns-client-subnet 192.168.1.1/24
+    ///   edns-client-subnet 8::8/56
+    /// ```
+    pub edns_client_subnet: Vec<IpNet>,
+
+    /// ttl for all resource record
+    pub rr_ttl: Option<u64>,
+    /// minimum ttl for resource record
+    pub rr_ttl_min: Option<u64>,
+    /// maximum ttl for resource record
+    pub rr_ttl_max: Option<u64>,
+    /// maximum reply ttl for resource record
+    pub rr_ttl_reply_max: Option<u64>,
+
+    /// Maximum number of IPs returned to the client|8|number of IPs, 1~16
+    pub max_reply_ip_num: Option<u8>,
+
+    /// response mode
+    ///
+    /// response-mode [first-ping|fastest-ip|fastest-response]
+    pub response_mode: Option<ResponseMode>,
+
+    /// set log level
+    ///
+    /// log-level [level], level=fatal, error, warn, notice, info, debug
+    pub log_level: Option<String>,
+    /// file path of log file.
+    pub log_file: Option<PathBuf>,
+    /// size of each log file, support k,m,g
+    pub log_size: Option<u64>,
+    /// number of logs, 0 means disable log
+    pub log_num: Option<u64>,
+
+    /// dns audit
+    ///
+    /// enable or disable audit.
     pub audit_enable: bool,
+    /// audit file
+    ///
+    /// ```
+    /// example 1:
+    ///   audit-file /var/log/smartdns-audit.log
+    ///
+    /// example 2:
+    ///   audit-file /var/log/smartdns-audit.csv
+    /// ```
     pub audit_file: Option<PathBuf>,
+    /// audit-size size of each audit file, support k,m,g
     pub audit_size: Option<u64>,
+    /// number of audit files.
     pub audit_num: Option<usize>,
 
-    pub log_level: Option<String>,
-    pub binds: Vec<BindServer>,
-    pub binds_tcp: Vec<BindServer>,
+    /// Support reading dnsmasq dhcp file to resolve local hostname
+    pub dnsmasq_lease_file: Option<PathBuf>,
+
+    /// certificate file
+    pub ca_file: Option<PathBuf>,
+    /// certificate path
+    pub ca_path: Option<PathBuf>,
+
+    /// remote dns server list
     pub servers: HashMap<String, Vec<DnsServer>>,
+
+    /// specific nameserver to domain
+    ///
+    /// nameserver /domain/[group|-]
+    ///
+    /// ```
+    /// example:
+    ///   nameserver /www.example.com/office, Set the domain name to use the appropriate server group.
+    ///   nameserver /www.example.com/-, ignore this domain
+    /// ```
     pub forward_rules: Vec<ForwardRuleItem>,
+
+    /// specific address to domain
+    ///
+    /// address /domain/[ip|-|-4|-6|#|#4|#6]
+    ///
+    /// ```
+    /// example:
+    ///   address /www.example.com/1.2.3.4, return ip 1.2.3.4 to client
+    ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
+    ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
+    /// ```
     pub address_rules: Vec<AddressRuleItem>,
-    pub conf_file: Option<PathBuf>,
+
     pub resolv_file: Option<String>,
-    pub prefetch_domain: bool,
-    pub cache_size: Option<usize>,
-    pub serve_expired: bool,
     pub domain_sets: HashMap<String, HashSet<LowerName>>,
-    pub dnsmasq_lease_file: Option<String>,
-    pub rr_ttl: Option<u64>,
-    pub rr_ttl_min: Option<u64>,
-    pub rr_ttl_max: Option<u64>,
-    pub speed_check_mode: Vec<SpeedCheckMode>,
 }
 
 impl SmartDnsConfig {
@@ -258,13 +468,16 @@ impl BindServer {
 }
 
 /// remote udp dns server list
+///
 /// server [IP]:[PORT] [-blacklist-ip] [-whitelist-ip] [-check-edns] [-group [group] ...] [-exclude-default-group]
+///
 /// default port is 53
-///   -blacklist-ip: filter result with blacklist ip
-///   -whitelist-ip: filter result whth whitelist ip,  result in whitelist-ip will be accepted.
-///   -check-edns: result must exist edns RR, or discard result.
-///   -group [group]: set server to group, use with nameserver /domain/group.
-///   -exclude-default-group: exclude this server from default group.
+///   - -blacklist-ip: filter result with blacklist ip
+///   - -whitelist-ip: filter result whth whitelist ip,  result in whitelist-ip will be accepted.
+///   - -check-edns: result must exist edns RR, or discard result.
+///   - -group [group]: set server to group, use with nameserver /domain/group.
+///   - -exclude-default-group: exclude this server from default group.
+/// ```
 /// server 8.8.8.8 -blacklist-ip -check-edns -group g1 -group g2
 ///
 /// remote tcp dns server list
@@ -293,6 +506,7 @@ impl BindServer {
 ///   -no-check-certificate: no check certificate.
 /// default port is 443
 /// server-https https://cloudflare-dns.com/dns-query
+/// ```
 #[derive(Debug, Clone)]
 pub struct DnsServer {
     pub url: DnsUrl,
@@ -451,6 +665,31 @@ impl FromStr for SpeedCheckMode {
     }
 }
 
+/// response mode
+///
+/// response-mode [first-ping|fastest-ip|fastest-response]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponseMode {
+    FirstPing,
+    FastestIp,
+    FastestResponse,
+}
+
+impl FromStr for ResponseMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mode = match s.trim().to_lowercase().as_str() {
+            "first-ping" => Self::FastestIp,
+            "fastest-ip" => Self::FastestIp,
+            "fastest-response" => Self::FastestResponse,
+            _ => return Err(()),
+        };
+
+        Ok(mode)
+    }
+}
+
 mod parse {
     use byte_unit::Byte;
 
@@ -493,38 +732,92 @@ mod parse {
                     let options = conf_line[sp_idx..].trim_start();
 
                     match conf_name {
-                        "server" | "server-tcp" | "server-tls" | "server-https" => {
-                            self.config_server(conf_name, options)
-                        }
-                        "user" => self.user = Some(options.to_string()),
-                        "nameserver" => self.config_nameserver(options),
-                        "address" => self.config_address(options),
-                        "conf-file" => self.load_file(options).expect("load_file failed"),
                         "server-name" => {
                             self.server_name = options.parse().expect("unsupported server name.")
                         }
-                        "resolv-file" => self.resolv_file = Some(options.to_string()),
-                        "prefetch-domain" => self.prefetch_domain = parse_bool(options),
-                        "cache-size" => self.cache_size = usize::from_str(options).ok(),
-                        "audit-enable" => self.audit_enable = parse_bool(options),
-                        "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
-                        "audit-size" => {
-                            self.audit_size = Some(
-                                Byte::from_str(options)
-                                    .expect("parse byte size failed. support KB,MB,GB")
-                                    .get_bytes() as u64,
-                            )
-                        }
-                        "audit-num" => self.audit_num = usize::from_str(options).ok(),
-                        "log-level" => self.log_level = Some(options.to_string()),
-                        "dnsmasq-lease-file" => self.dnsmasq_lease_file = Some(options.to_string()),
+                        "resolv-hostname" => self.resolv_hostanme = Some(parse_bool(options)),
+                        "user" => self.user = Some(options.to_string()),
+                        "domain" => self.domain = options.parse().ok(),
+                        "conf-file" => self.load_file(options).expect("load_file failed"),
                         "bind" => self.config_bind(options, false),
                         "bind-tcp" => self.config_bind(options, true),
-                        "serve-expired" => self.serve_expired = parse_bool(options),
+                        "tcp-idle-time" => self.tcp_idle_time = options.parse().ok(),
+                        "cache-size" => self.cache_size = options.parse().ok(),
+                        "cache-persist" => self.cache_persist = Some(parse_bool(options)),
+                        "cache-file" => self.cache_file = Some(Path::new(options).to_owned()),
+                        "prefetch-domain" => self.prefetch_domain = parse_bool(options),
+                        "serve-expired" => self.serve_expired = Some(parse_bool(options)),
+                        "serve-expired-ttl" => self.serve_expired_ttl = options.parse().ok(),
+                        "serve-expired-reply-ttl" => {
+                            self.serve_expired_reply_ttl = options.parse().ok()
+                        }
+                        "bogus-nxdomain" => match options.parse() {
+                            Ok(v) => self.bogus_nxdomain.push(v),
+                            _ => (),
+                        },
+                        "blacklist-ip" => match options.parse() {
+                            Ok(v) => self.blacklist_ip.push(v),
+                            _ => (),
+                        },
+                        "whitelist-ip" => match options.parse() {
+                            Ok(v) => self.whitelist_ip.push(v),
+                            _ => (),
+                        },
+                        "ignore-ip" => match options.parse() {
+                            Ok(v) => self.ignore_ip.push(v),
+                            _ => (),
+                        },
                         "speed-check-mode" => self.config_speed_check_mode(options),
+                        "force-AAAA-SOA" => self.force_aaaa_soa = Some(parse_bool(options)),
+                        "force-qtype-SOA" => {
+                            self.force_qtype_soa = u16::from_str(options).ok().map(RecordType::from)
+                        }
+                        "dualstack-ip-selection-threshold" => {
+                            self.dualstack_ip_selection_threshold = options.parse().ok()
+                        }
+                        "dualstack-ip-allow-force-AAAA" => {
+                            self.dualstack_ip_allow_force_aaaa = Some(parse_bool(options))
+                        }
+                        "dualstack-ip-selection" => {
+                            self.dualstack_ip_selection = Some(parse_bool(options))
+                        }
+                        "edns-client-subnet" => match options.parse() {
+                            Ok(v) => self.edns_client_subnet.push(v),
+                            _ => (),
+                        },
                         "rr-ttl" => self.rr_ttl = options.parse().ok(),
                         "rr-ttl-min" => self.rr_ttl_min = options.parse().ok(),
                         "rr-ttl-max" => self.rr_ttl_max = options.parse().ok(),
+                        "rr-ttl-reply-max" => self.rr_ttl_reply_max = options.parse().ok(),
+                        "max-reply-ip-num" => self.max_reply_ip_num = options.parse().ok(),
+                        "response-mode" => self.response_mode = options.parse().ok(),
+                        "log-level" => self.log_level = Some(options.to_string()),
+                        "log-file" => self.log_file = Some(Path::new(options).to_owned()),
+                        "log-size" => {
+                            self.log_size = Byte::from_str(options)
+                                .map(|size| size.get_bytes() as u64)
+                                .ok()
+                        }
+                        "log-num" => self.log_num = options.parse().ok(),
+                        "audit-enable" => self.audit_enable = parse_bool(options),
+                        "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
+                        "audit-size" => {
+                            self.audit_size = Byte::from_str(options)
+                                .map(|size| size.get_bytes() as u64)
+                                .ok()
+                        }
+                        "audit-num" => self.audit_num = options.parse().ok(),
+                        "dnsmasq-lease-file" => {
+                            self.dnsmasq_lease_file = Some(Path::new(options).to_owned())
+                        }
+                        "ca-file" => self.ca_file = Some(Path::new(options).to_owned()),
+                        "ca-path" => self.ca_path = Some(Path::new(options).to_owned()),
+                        "server" | "server-tcp" | "server-tls" | "server-https" => {
+                            self.config_server(conf_name, options)
+                        }
+                        "nameserver" => self.config_nameserver(options),
+                        "address" => self.config_address(options),
+                        "resolv-file" => self.resolv_file = Some(options.to_string()),
                         "domain-set" => self
                             .config_domain_set(options)
                             .expect("load domain-set failed"),
