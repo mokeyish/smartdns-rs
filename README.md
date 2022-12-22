@@ -1,6 +1,6 @@
 # SmartDNS-rs
 
-[English](https://github.com/mokeyish/smartdns-rs/blob/master/README.md) | 中文
+[English](https://github.com/mokeyish/smartdns-rs/blob/master/README_en-US.md) | 中文
 
 SmartDNS-rs 🐋 一个是受 [C 语言版 smartdns](https://github.com/pymumu/smartdns)  启发而开发的，并与其配置兼容的运行在本地的跨平台 DNS 服务器，
 它接受来自本地客户端的 DNS 查询请求，然后从多个上游 DNS 服务器获取 DNS 查询结果，并将访问速度最快的结果返回给客户端，
@@ -52,10 +52,6 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
    sudo ./smartdns service install
    ```
 
-   程序会安装到 `/usr/local/bin/smartdns`
-
-   服务会安装到 `/Library/LaunchDaemons/smartdns-rs.plist`
-
 2. 启动服务
 
    ```shell
@@ -83,10 +79,6 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
    ```shell
    sudo ./smartdns service install
    ```
-
-   程序会安装到 `/sbin/smartdns`
-
-   服务会安装到 `/etc/systemd/system/smartdns-rs.service`
 
 2. 启动服务
 
