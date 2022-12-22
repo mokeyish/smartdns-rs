@@ -27,7 +27,7 @@ pub struct SmartDnsConfig {
     /// example:
     ///   server-name smartdns
     /// ```
-    pub server_name: Name,
+    pub server_name: Option<Name>,
 
     /// whether resolv local hostname to ip address
     pub resolv_hostanme: Option<bool>,
@@ -257,7 +257,6 @@ pub struct SmartDnsConfig {
 impl SmartDnsConfig {
     pub fn new() -> Self {
         Self {
-            server_name: "SmartDNS".parse().unwrap(),
             servers: HashMap::from([("default".to_string(), Default::default())]),
             ..Default::default()
         }
@@ -732,9 +731,7 @@ mod parse {
                     let options = conf_line[sp_idx..].trim_start();
 
                     match conf_name {
-                        "server-name" => {
-                            self.server_name = options.parse().expect("unsupported server name.")
-                        }
+                        "server-name" => self.server_name = options.parse().ok(),
                         "resolv-hostname" => self.resolv_hostanme = Some(parse_bool(options)),
                         "user" => self.user = Some(options.to_string()),
                         "domain" => self.domain = options.parse().ok(),
@@ -1260,7 +1257,7 @@ mod parse {
         fn test_parse_load_config_file_b() {
             let cfg = SmartDnsConfig::load_from_file("tests/test_confs/b_main.conf");
 
-            assert_eq!(cfg.server_name, "SmartDNS123".parse().unwrap());
+            assert_eq!(cfg.server_name, "SmartDNS123".parse().ok());
             assert_eq!(
                 cfg.forward_rules.first().unwrap().domain,
                 DomainOrDomainSet::from_str("doh.pub").unwrap().into()

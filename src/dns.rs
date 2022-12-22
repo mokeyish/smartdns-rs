@@ -24,6 +24,7 @@ pub struct DnsContext {
     pub client: Arc<DnsClient>,
     pub fastest_speed: Duration,
     pub lookup_source: LookupSource,
+    pub no_cache: bool,
 }
 
 #[derive(Clone)]
@@ -59,6 +60,20 @@ pub type DnsResponse = Lookup;
 pub type DnsError = ResolveError;
 
 impl SmartDnsConfig {
+    pub fn server_name(&self) -> Name {
+        match self.server_name {
+            Some(ref server_name) => Some(server_name.clone()),
+            None => match hostname::get() {
+                Ok(name) => match name.to_str() {
+                    Some(s) => Name::from_str(s).ok(),
+                    None => None,
+                },
+                Err(_) => None,
+            },
+        }
+        .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
+    }
+
     pub fn rr_ttl(&self) -> u64 {
         self.rr_ttl.unwrap_or(300)
     }
