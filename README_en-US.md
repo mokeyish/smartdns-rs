@@ -1,6 +1,6 @@
 # SmartDNS-rs
 
-English | [中文](https://github.com/mokeyish/smartdns-rs/blob/master/README_zh-CN.md)
+English | [中文](https://github.com/mokeyish/smartdns-rs/blob/master/README.md)
 
 A local DNS server imspired by [c smartdns](https://github.com/pymumu/smartdns) to accepts DNS query requests from local clients, obtains DNS query results from multiple upstream DNS servers, and returns the fastest access results to clients.
 Avoiding DNS pollution and improving network access speed, supports high-performance ad filtering.
@@ -22,8 +22,111 @@ Open your terminal and execute these commands:
 ```shell
 git clone https://github.com/mokeyish/smartdns-rs.git
 cd smartdns-rs
+
+# build
 cargo build --release
+
+# print help
+cargo build --release
+
+# run
+sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 ```
+
+## Installing as system service
+
+Please download smartdns-rs from [here](https://github.com/mokeyish/smartdns-rs/releases). 
+Unzip and execute the following command for service management
+
+
+You can use the following command to view the help of service management commands：
+
+```shell
+./smartdns service help
+```
+
+### MacOS
+
+1. Install service
+
+   ```shell
+   sudo ./smartdns service install
+   ```
+
+2. Start service
+
+   ```shell
+   sudo ./smartdns service start
+   ```
+
+3. Stop service
+
+   ```shell
+   sudo ./smartdns service stop
+   ```
+
+4. Uninstall service
+
+   ```shell
+   sudo ./smartdns service uninstall
+   ```
+
+### Linux
+
+Currently only support `systemd`.
+
+1. Install service
+
+   ```shell
+   sudo ./smartdns service install
+   ```
+
+2. Start service
+
+   ```shell
+   sudo ./smartdns service start
+   ```
+
+3. Stop Service
+
+   ```shell
+   sudo ./smartdns service stop
+   ```
+
+4. Uninstall service
+
+   ```shell
+   sudo ./smartdns service uninstall
+   ```
+
+### Windows
+
+Run cmd or powershell as administrator to execute the command below.
+
+1. Install service
+
+   ```powershell
+   ./smartdns service install
+   ```
+
+2. Start service
+
+   ```powershell
+   ./smartdns service start
+   ```
+
+3. Stop service
+
+   ```powershell
+   ./smartdns service stop
+   ```
+
+4. Uninstall service
+
+   ```powershell
+   ./smartdns service uninstall
+   ```
+
 
 ## Others
 
