@@ -30,7 +30,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
     ) -> Result<DnsResponse, DnsError> {
         match req.query().query_type() {
             // handle AAAA and A only.
-            record_type @ (RecordType::AAAA | RecordType::A) => {
+            RecordType::AAAA | RecordType::A if self.map.len() > 0 => {
                 let name = req.query().name();
                 if let Some(addr) = self.map.find(name) {
                     let rdata = match addr {
@@ -59,14 +59,6 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
                         return Ok(lookup);
                     }
                 }
-
-                if let Some(lookup) = ctx
-                    .client
-                    .lookup_nameserver_ip(name.clone().into(), record_type)
-                    .await
-                {
-                    return Ok(lookup);
-                }
             }
             RecordType::PTR
                 if req.query().name() == &Name::from_str("whoami").unwrap().into()
@@ -74,7 +66,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
             {
                 return Ok(Lookup::from_rdata(
                     req.query().original().to_owned(),
-                    RData::PTR(ctx.cfg.server_name.clone()),
+                    RData::PTR(ctx.cfg.server_name()),
                 ));
             }
             _ => (),

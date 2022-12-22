@@ -26,6 +26,7 @@ impl DnsMiddlewareHandler {
             client: self.client.clone(),
             fastest_speed: Default::default(),
             lookup_source: Default::default(),
+            no_cache: false,
         };
         self.host.execute(&mut ctx, req).await
     }

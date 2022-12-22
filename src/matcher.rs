@@ -23,6 +23,10 @@ impl<T: Debug> DomainMatcher<T> {
 
         None
     }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 pub type DomainAddressMatcher = DomainMatcher<DomainAddress>;

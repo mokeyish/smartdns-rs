@@ -68,13 +68,15 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
 
         let res = match res {
             Ok(lookup) => {
-                self.cache
-                    .insert_records(
-                        query.original().to_owned(),
-                        lookup.records().to_owned().into_iter(),
-                        Instant::now(),
-                    )
-                    .await;
+                if !ctx.no_cache {
+                    self.cache
+                        .insert_records(
+                            query.original().to_owned(),
+                            lookup.records().to_owned().into_iter(),
+                            Instant::now(),
+                        )
+                        .await;
+                }
 
                 Ok(lookup)
             }

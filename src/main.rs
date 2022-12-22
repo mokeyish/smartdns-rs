@@ -56,7 +56,7 @@ fn banner() {
 }
 
 /// The app name
-const NAME: &'static str = "Smart-DNS";
+const NAME: &'static str = "SmartDNS";
 
 /// The default configuration.
 const DEFAULT_CONF: &'static str = include_str!("../etc/smartdns/smartdns.conf");
@@ -114,7 +114,7 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
 
     let cfg = SmartDnsConfig::load(conf);
 
-    info!(r#"whoami 👉 "{}""#, cfg.server_name);
+    info!(r#"whoami 👉 "{}""#, cfg.server_name());
 
     // if !args.debug {
     //     cfg.log_level.as_ref().map(|lvl| {
@@ -158,9 +158,7 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware);
 
-        if cfg.address_rules.len() > 0 {
-            middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
-        }
+        middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {
