@@ -156,9 +156,11 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
             ));
         }
 
-        middleware_builder = middleware_builder.with(DnsZoneMiddleware);
+        middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
 
-        middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
+        if cfg.address_rules.len() > 0 {
+            middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
+        }
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {

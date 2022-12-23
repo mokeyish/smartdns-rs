@@ -1,6 +1,6 @@
 # SmartDNS-rs
 
-English | [中文](https://github.com/mokeyish/smartdns-rs/blob/master/README.md)
+English | [中文](https://github.com/mokeyish/smartdns-rs/blob/main/README.md)
 
 A local DNS server imspired by [c smartdns](https://github.com/pymumu/smartdns) to accepts DNS query requests from local clients, obtains DNS query results from multiple upstream DNS servers, and returns the fastest access results to clients.
 Avoiding DNS pollution and improving network access speed, supports high-performance ad filtering.
@@ -10,10 +10,6 @@ Note: The c version of smartdns is very functional, but because it only supports
 ---
 
 **Currently under development, please do not use in production environment.**
-
-## Configuration parameter
-
-Please refer to [here](https://github.com/pymumu/smartdns/blob/master/ReadMe_en.md#configuration-parameter) for configuration.
 
 ## Building
 
@@ -45,7 +41,16 @@ You can use the following command to view the help of service management command
 ./smartdns service help
 ```
 
-### MacOS
+- MacOS
+  - [x] launchctl
+- Windows
+  - [x] Sc - [https://learn.microsoft.com/en-us/sc](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc754599(v=ws.11))
+- Linux
+  - [x] Systemd - https://en.wikipedia.org/wiki/Systemd
+  - [ ] OpenRc - https://en.wikipedia.org/wiki/OpenRC
+  - [ ] Procd(OpenWrt) - https://openwrt.org/docs/techref/procd
+
+### Linux / MacOS
 
 1. Install service
 
@@ -60,34 +65,6 @@ You can use the following command to view the help of service management command
    ```
 
 3. Stop service
-
-   ```shell
-   sudo ./smartdns service stop
-   ```
-
-4. Uninstall service
-
-   ```shell
-   sudo ./smartdns service uninstall
-   ```
-
-### Linux
-
-Currently only support `systemd`.
-
-1. Install service
-
-   ```shell
-   sudo ./smartdns service install
-   ```
-
-2. Start service
-
-   ```shell
-   sudo ./smartdns service start
-   ```
-
-3. Stop Service
 
    ```shell
    sudo ./smartdns service stop
@@ -126,6 +103,10 @@ Run cmd or powershell as administrator to execute the command below.
    ```powershell
    ./smartdns service uninstall
    ```
+
+## Configuration parameter
+
+Please refer to [here](https://github.com/pymumu/smartdns/blob/master/ReadMe_en.md#configuration-parameter) for configuration.
 
 
 ## Others

@@ -52,6 +52,7 @@ service-manager = { version = "0.2.0", git = "https://github.com/chipsenkbeil/se
 hostname ={ version = "*", git = "https://github.com/mokeyish/hostname.git", branch = "dev"}
 byte-unit = "4.0.17"
 ipnet = "2.7"
+local-ip-address = "0.4.9"
 # rnp = "0.1"
 # boomphf = "0.5.9"
 
