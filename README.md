@@ -1,6 +1,6 @@
 # SmartDNS-rs
 
-[English](https://github.com/mokeyish/smartdns-rs/blob/master/README_en-US.md) | 中文
+[English](https://github.com/mokeyish/smartdns-rs/blob/main/README_en-US.md) | 中文
 
 SmartDNS-rs 🐋 一个是受 [C 语言版 smartdns](https://github.com/pymumu/smartdns)  启发而开发的，并与其配置兼容的运行在本地的跨平台 DNS 服务器，
 它接受来自本地客户端的 DNS 查询请求，然后从多个上游 DNS 服务器获取 DNS 查询结果，并将访问速度最快的结果返回给客户端，
@@ -11,7 +11,6 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 smartdns](https://github.com/pymumu/s
 ---
 
 **目前正在开发中，请勿用于生产环境。**
-
 
 
 ## 构建与运行
@@ -44,35 +43,19 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 ./smartdns service help
 ```
 
-### MacOS
+- MacOS
+  - [x] launchctl
+- Windows
+  - [x] Sc - [https://learn.microsoft.com/en-us/sc](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc754599(v=ws.11))
+- Linux
+  - [x] Systemd - https://en.wikipedia.org/wiki/Systemd
+  - [ ] OpenRc - https://en.wikipedia.org/wiki/OpenRC
+  - [ ] Procd(OpenWrt) - https://openwrt.org/docs/techref/procd
 
-1. 安装服务
 
-   ```shell
-   sudo ./smartdns service install
-   ```
 
-2. 启动服务
+### Linux / MacOS
 
-   ```shell
-   sudo ./smartdns service start
-   ```
-
-3. 关闭服务
-
-   ```shell
-   sudo ./smartdns service stop
-   ```
-
-4. 卸载服务
-
-   ```shell
-   sudo ./smartdns service uninstall
-   ```
-
-### Linux
-
-暂时支持 `systemd`.
 
 1. 安装服务
 
@@ -125,7 +108,6 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
    ```powershell
    ./smartdns service uninstall
    ```
-
 
 
 ## 配置文件说明
