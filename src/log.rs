@@ -1,32 +1,111 @@
-use std::{env, fmt};
+use std::{env, fmt, io, path::Path};
 
 use time::OffsetDateTime;
-use tracing::{Event, Subscriber};
+use tracing::{
+    dispatcher::{set_default, set_global_default},
+    subscriber::DefaultGuard,
+    Dispatch, Event, Subscriber,
+};
 use tracing_subscriber::{
-    fmt::{format, FmtContext, FormatEvent, FormatFields, FormattedFields},
+    fmt::{
+        format, writer::MakeWriterExt, FmtContext, FormatEvent, FormatFields, FormattedFields,
+        MakeWriter,
+    },
     prelude::__tracing_subscriber_SubscriberExt,
     registry::LookupSpan,
-    util::SubscriberInitExt,
+    EnvFilter,
 };
 
-pub use tracing::{debug, error, info, trace, warn};
+pub use tracing::{debug, error, info, trace, warn, Level};
 
-pub fn logger(level: tracing::Level) {
-    // Setup tracing for logging based on input
-    let filter = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(tracing::Level::WARN.into())
-        .parse(all_trust_dns(level))
-        .expect("failed to configure tracing/logging");
+type MappedFile = crate::infra::mapped_file::MutexMappedFile;
 
-    let formatter = tracing_subscriber::fmt::layer().event_format(TdnsFormatter { level });
+pub fn init_global_default<P: AsRef<Path>>(
+    path: P,
+    level: tracing::Level,
+    size: u64,
+    num: u64,
+) -> DefaultGuard {
+    let file = MappedFile::open(path.as_ref(), size, Some(num as usize));
 
-    tracing_subscriber::registry()
-        .with(formatter)
-        .with(filter)
-        .init();
+    let writable = file
+        .0
+        .lock()
+        .unwrap()
+        .touch()
+        .map(|_| true)
+        .unwrap_or_else(|err| {
+            warn!("{:?}, {:?}", path.as_ref(), err);
+            false
+        });
+
+    let console_level = console_level();
+    let console_writer = io::stdout.with_max_level(console_level);
+
+    let dispatch = if writable {
+        // log hello
+        {
+            let writer = file.with_max_level(level);
+            let dispatch = make_dispatch(level, writer);
+
+            let _guard = set_default(&dispatch);
+            crate::hello_starting();
+        }
+
+        let file_writer =
+            MappedFile::open(path.as_ref(), size, Some(num as usize)).with_max_level(level);
+
+        make_dispatch(level.max(console_level), file_writer.and(console_writer))
+    } else {
+        make_dispatch(console_level, console_writer)
+    };
+
+    let guard = set_default(&dispatch);
+
+    set_global_default(dispatch).expect("");
+    guard
 }
 
-fn all_trust_dns(level: impl ToString) -> String {
+pub fn default() -> DefaultGuard {
+    let console_level = console_level();
+    let console_writer = io::stdout.with_max_level(console_level);
+    set_default(&make_dispatch(console_level, console_writer))
+}
+
+#[inline]
+fn make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send + Sync>(
+    level: tracing::Level,
+    writer: W,
+) -> Dispatch {
+    let layer = tracing_subscriber::fmt::layer()
+        .event_format(TdnsFormatter)
+        .with_writer(writer);
+
+    Dispatch::from(
+        tracing_subscriber::registry()
+            .with(layer)
+            .with(make_filter(level)),
+    )
+}
+
+fn console_level() -> Level {
+    if std::env::args().any(|arg| arg == "-d" || arg == "--debug") {
+        tracing::Level::DEBUG
+    } else {
+        tracing::Level::INFO
+    }
+}
+
+#[inline]
+fn make_filter(level: tracing::Level) -> EnvFilter {
+    EnvFilter::builder()
+        .with_default_directive(tracing::Level::WARN.into())
+        .parse(all_smart_dns(level))
+        .expect("failed to configure tracing/logging")
+}
+
+#[inline]
+fn all_smart_dns(level: impl ToString) -> String {
     format!(
         "named={level},smartdns={level},{env}",
         level = level.to_string().to_lowercase(),
@@ -34,13 +113,12 @@ fn all_trust_dns(level: impl ToString) -> String {
     )
 }
 
+#[inline]
 fn get_env() -> String {
     env::var("RUST_LOG").unwrap_or_default()
 }
 
-struct TdnsFormatter {
-    level: tracing::Level,
-}
+struct TdnsFormatter;
 
 impl<S, N> FormatEvent<S, N> for TdnsFormatter
 where
@@ -59,7 +137,7 @@ where
         // Format values from the event's's metadata:
         let metadata = event.metadata();
 
-        if self.level == tracing::Level::INFO {
+        if metadata.level() == &tracing::Level::INFO {
             write!(&mut writer, "{}:{}", now_secs, metadata.level())?;
         } else {
             write!(
@@ -96,5 +174,12 @@ where
         ctx.field_format().format_fields(writer.by_ref(), event)?;
 
         writeln!(writer)
+    }
+}
+
+impl<'a> MakeWriter<'a> for MappedFile {
+    type Writer = &'a MappedFile;
+    fn make_writer(&'a self) -> Self::Writer {
+        self
     }
 }

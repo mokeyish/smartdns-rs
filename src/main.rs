@@ -37,7 +37,6 @@ use dns_mw_spdt::DnsSpeedTestMiddleware;
 use dns_mw_zone::DnsZoneMiddleware;
 use dns_server::{MiddlewareBasedRequestHandler, ServerFuture};
 use infra::middleware;
-use log::logger;
 
 use crate::log::{debug, info};
 use crate::{
@@ -68,7 +67,7 @@ pub fn version() -> &'static str {
 
 #[cfg(not(windows))]
 fn main() {
-    run_command(Cli::parse());
+    Cli::parse().run();
 }
 
 #[cfg(windows)]
@@ -77,54 +76,54 @@ fn main() -> windows_service::Result<()> {
     {
         return service::windows_service::run();
     }
-    run_command(Cli::parse());
+    Cli::parse().run();
     Ok(())
 }
 
-fn run_command(cli: Cli) {
-    match cli.command {
-        Commands::Run { conf, debug } => {
-            run_server(conf, debug);
-        }
-        Commands::Service {
-            command: service_command,
-        } => {
-            use service::*;
-            use ServiceCommands::*;
-            match service_command {
-                Install => install(),
-                Uninstall { purge } => uninstall(purge),
-                Start => start(),
-                Stop => stop(),
-                Restart => restart(),
-                Status => status(),
+impl Cli {
+    #[inline]
+    pub fn run(self) {
+        let _guard = log::default();
+
+        match self.command {
+            Commands::Run { conf, .. } => {
+                run_server(conf);
+            }
+            Commands::Service {
+                command: service_command,
+            } => {
+                use service::*;
+                use ServiceCommands::*;
+                match service_command {
+                    Install => install(),
+                    Uninstall { purge } => uninstall(purge),
+                    Start => start(),
+                    Stop => stop(),
+                    Restart => restart(),
+                    Status => status(),
+                }
             }
         }
     }
 }
 
-fn run_server(conf: Option<PathBuf>, debug: bool) {
-    logger(if debug {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    });
-
-    info!("Smart-DNS 🐋 {} starting", version());
+fn run_server(conf: Option<PathBuf>) {
+    hello_starting();
 
     let cfg = SmartDnsConfig::load(conf);
 
-    info!(r#"whoami 👉 "{}""#, cfg.server_name());
+    let _guard = if cfg.log_enabled() {
+        Some(log::init_global_default(
+            cfg.log_file(),
+            cfg.log_level(),
+            cfg.log_size(),
+            cfg.log_num(),
+        ))
+    } else {
+        None
+    };
 
-    // if !args.debug {
-    //     cfg.log_level.as_ref().map(|lvl| {
-    //         if let Ok(lvl) = tracing::Level::from_str(lvl) {
-    //             logger(lvl);
-    //         } else {
-    //             warn!("log-level expect: debug,info,warn,error");
-    //         }
-    //     });
-    // }
+    cfg.summary();
 
     let runtime = runtime::Builder::new_multi_thread()
         .enable_all()
@@ -200,7 +199,7 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
 
     // and TCP as necessary
     for tcp_listener in tcp_socket_addrs {
-        info!("binding TCP to {:?}", tcp_listener);
+        debug!("binding TCP to {:?}", tcp_listener);
         let tcp_listener = runtime
             .block_on(TcpListener::bind(tcp_listener))
             .unwrap_or_else(|_| panic!("could not bind to tcp: {}", tcp_listener));
@@ -231,4 +230,9 @@ fn run_server(conf: Option<PathBuf>, debug: bool) {
     });
 
     drop(runtime);
+}
+
+#[inline]
+fn hello_starting() {
+    info!("Smart-DNS 🐋 {} starting", version());
 }

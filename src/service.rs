@@ -228,7 +228,6 @@ pub mod windows_service {
 
                 // Handle stop
                 ServiceControl::Stop => {
-                    std::fs::write("D:\\sss12366.txt", "即将发送 ctrl+c").unwrap();
                     unsafe {
                         windows::Win32::System::Console::GenerateConsoleCtrlEvent(
                             windows::Win32::System::Console::CTRL_C_EVENT,
@@ -266,7 +265,7 @@ pub mod windows_service {
             let args = std::env::args()
                 .filter(|s| s != "--ws7642ea814a90496daaa54f2820254f12")
                 .collect::<Vec<_>>();
-            crate::run_command(Cli::parse_from(args));
+                Cli::parse_from(args).run();
         }
 
         // Tell the system that service has stopped.

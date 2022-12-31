@@ -32,6 +32,7 @@ async-trait = "0.1.43"
 time = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["std", "fmt", "env-filter"] }
+# tracing-appender = "0.2"
 tokio = { version = "1.21", features = ["time", "rt", "signal"] }
 url = "2.3.1"
 trust-dns-proto = { version = "0.22.0", features = ["dns-over-https-rustls"]}
