@@ -13,7 +13,7 @@ use trust_dns_resolver::Name;
 
 use crate::dns::RecordType;
 use crate::dns_url::DnsUrl;
-use crate::log::{error, info, warn};
+use crate::log::{debug, error, info, warn};
 
 const DEFAULT_SERVER: &'static str = "https://cloudflare-dns.com/dns-query";
 
@@ -325,12 +325,6 @@ impl SmartDnsConfig {
                 .get_mut("default")
                 .unwrap()
                 .push(DnsServer::from_str(DEFAULT_SERVER).unwrap());
-        }
-
-        if let Some(ss) = cfg.servers.get("default") {
-            for s in ss {
-                info!("default server: {}", s.url.to_string());
-            }
         }
 
         cfg
@@ -695,8 +689,6 @@ mod parse {
     use super::*;
     use std::{collections::hash_map::Entry, ffi::OsStr, net::AddrParseError};
 
-    use crate::log::{info, warn};
-
     impl SmartDnsConfig {
         pub fn load_file<P: AsRef<Path>>(
             &mut self,
@@ -705,6 +697,7 @@ mod parse {
             let path = find_path(path, self.conf_file.as_ref());
 
             if path.exists() {
+                debug!("loading extra configuration from {:?}", path);
                 let file = File::open(path)?;
                 let reader = BufReader::new(file);
                 for line in reader.lines() {
@@ -846,7 +839,7 @@ mod parse {
                 }
 
                 if server.group.is_some() {
-                    info!(
+                    debug!(
                         "append server {} to group {}",
                         server.url.to_string(),
                         server.group.as_ref().unwrap()

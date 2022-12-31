@@ -3,6 +3,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use chrono::Local;
 
@@ -62,6 +63,20 @@ impl MappedFile {
                 .map(|m| m.len())
                 .unwrap_or_default()
         }
+    }
+
+    #[inline]
+    pub fn touch(&mut self) -> io::Result<()> {
+        if !self.path().exists() {
+            let dir = self
+                .path()
+                .parent()
+                .ok_or(io::Error::from(io::ErrorKind::NotFound))?;
+            fs::create_dir_all(dir)?;
+        }
+        let file = self.get_active_file()?;
+        file.sync_all()?;
+        Ok(())
     }
 
     pub fn mapped_files(&self) -> io::Result<Vec<PathBuf>> {
@@ -201,6 +216,35 @@ impl Write for MappedFile {
             }
         }
         Ok(())
+    }
+}
+
+pub struct MutexMappedFile(pub Mutex<MappedFile>);
+
+impl MutexMappedFile {
+    #[inline]
+    pub fn open<P: AsRef<Path>>(path: P, size: u64, num: Option<usize>) -> Self {
+        Self(Mutex::new(MappedFile::open(path, size, num)))
+    }
+}
+
+impl io::Write for MutexMappedFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.get_mut().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.get_mut().unwrap().flush()
+    }
+}
+
+impl io::Write for &MutexMappedFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.lock().unwrap().flush()
     }
 }
 
