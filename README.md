@@ -50,7 +50,7 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 - Linux
   - [x] Systemd - https://en.wikipedia.org/wiki/Systemd
   - [ ] OpenRc - https://en.wikipedia.org/wiki/OpenRC
-  - [ ] Procd(OpenWrt) - https://openwrt.org/docs/techref/procd
+  - [x] Procd(OpenWrt) - https://openwrt.org/docs/techref/procd
 
 
 

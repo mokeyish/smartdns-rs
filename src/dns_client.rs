@@ -294,7 +294,10 @@ impl DnsClient {
 
         let group_name =
             group_name.unwrap_or_else(|| self.find_server_group(&name.to_owned().into()));
-
+        debug!(
+            "query name: {} type: {} via [group:{}]",
+            name, record_type, group_name
+        );
         if let Some(resolver) = self.get_or_create_resolver(group_name).await {
             resolver
                 .lookup(name, record_type)

@@ -19,6 +19,10 @@ pub enum Commands {
         #[arg(short = 'c', long)]
         conf: Option<std::path::PathBuf>,
 
+        /// Pid file
+        #[arg(short = 'p', long)]
+        pid: Option<std::path::PathBuf>,
+
         /// Turn debugging information on
         #[arg(short = 'd', long)]
         debug: bool,
@@ -68,6 +72,7 @@ mod tests {
             cli.command,
             Commands::Run {
                 conf: Some(_),
+                pid: None,
                 debug: false
             }
         ));
@@ -77,6 +82,7 @@ mod tests {
             cli.command,
             Commands::Run {
                 conf: Some(_),
+                pid: None,
                 debug: false
             }
         ));
@@ -89,6 +95,7 @@ mod tests {
             cli.command,
             Commands::Run {
                 conf: Some(_),
+                pid: None,
                 debug: true
             }
         ));
@@ -98,7 +105,8 @@ mod tests {
             cli.command,
             Commands::Run {
                 conf: Some(_),
-                debug: true
+                pid: None,
+                debug: true,
             }
         ));
     }

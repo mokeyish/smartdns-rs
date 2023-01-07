@@ -120,6 +120,9 @@ impl Catalog {
 
     /// Recursively searches the catalog for a matching authority
     pub fn find(&self, name: &LowerName) -> Option<&(dyn AuthorityObject + 'static)> {
+        if self.authorities.is_empty() {
+            return None;
+        }
         debug!("searching authorities for: {}", name);
         self.authorities
             .get(name)

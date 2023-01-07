@@ -51,8 +51,18 @@ fn append_text_to_file<P: AsRef<Path> + Copy, T: AsRef<[u8]>>(file_path: P, text
 fn main() {
     if download(
         "https://cdn.jsdelivr.net/gh/pymumu/smartdns/etc/smartdns/smartdns.conf",
-        "./etc/smartdns/smartdns.conf",
+        "etc/smartdns/smartdns.conf",
     ) {
         // append_text_to_file("./etc/smartdns/smartdns.conf", "\nconf-file custom.conf\n");
     }
+
+    download(
+        "https://cdn.jsdelivr.net/gh/pymumu/smartdns/package/openwrt/files/etc/init.d/smartdns",
+        "src/service/linux/initd/openwrt/files/etc/init.d/smartdns-rs",
+    );
+
+    download(
+        "https://cdn.jsdelivr.net/gh/mullvad/windows-service-rs/src/shell_escape.rs",
+        "src/service/windows/shell_escape.rs",
+    );
 }
