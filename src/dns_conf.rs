@@ -266,7 +266,6 @@ impl SmartDnsConfig {
         if let Some(ref conf) = path {
             let path = conf.as_ref();
 
-            info!("loading configuration from: {:?}", path);
             SmartDnsConfig::load_from_file(path)
         } else {
             cfg_if! {
@@ -277,9 +276,10 @@ impl SmartDnsConfig {
                     ];
 
                 } else if #[cfg(target_os = "windows")] {
-                    let candidate_path  = [""];
+                    let candidate_path  = [crate::service::CONF_PATH];
                 } else {
                     let candidate_path = [
+                        crate::service::CONF_PATH,
                         "/etc/smartdns.conf",
                         "/etc/smartdns/smartdns.conf",
                         "/usr/local/etc/smartdns.conf",
@@ -292,10 +292,7 @@ impl SmartDnsConfig {
                 .iter()
                 .map(Path::new)
                 .filter(|p| p.exists())
-                .map(|p| {
-                    info!("loading configuration from: {:?}", p);
-                    SmartDnsConfig::load_from_file(p)
-                })
+                .map(|p| SmartDnsConfig::load_from_file(p))
                 .next()
                 .expect("No configuation file found.")
         }
@@ -305,7 +302,6 @@ impl SmartDnsConfig {
         let path = path.as_ref();
 
         let mut cfg = Self::new();
-        cfg.conf_file = Some(path.to_path_buf());
         cfg.load_file(path).expect("load conf file filed");
 
         if cfg.binds.is_empty() && cfg.binds_tcp.is_empty() {
@@ -697,12 +693,19 @@ mod parse {
             let path = find_path(path, self.conf_file.as_ref());
 
             if path.exists() {
-                debug!("loading extra configuration from {:?}", path);
+                if self.conf_file.is_none() {
+                    info!("loading configuration from: {:?}", path);
+                    self.conf_file = Some(path.to_path_buf());
+                } else {
+                    debug!("loading extra configuration from {:?}", path);
+                }
                 let file = File::open(path)?;
                 let reader = BufReader::new(file);
                 for line in reader.lines() {
                     self.config_item(line?.as_str());
                 }
+            } else {
+                warn!("configuration file {:?} does not exist", path);
             }
 
             Ok(())

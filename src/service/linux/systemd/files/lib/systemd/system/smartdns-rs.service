@@ -1,0 +1,19 @@
+[Unit]
+Description=SmartDNS Server
+After=network.target
+StartLimitBurst=0
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+PIDFile=/var/run/smartdns.pid
+ExecStart=/usr/sbin/smartdns run -p /var/run/smartdns.pid
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target
+Alias=smartdns-rs.service

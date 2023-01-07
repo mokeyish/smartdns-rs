@@ -38,9 +38,12 @@ use dns_mw_zone::DnsZoneMiddleware;
 use dns_server::{MiddlewareBasedRequestHandler, ServerFuture};
 use infra::middleware;
 
-use crate::log::{debug, info};
 use crate::{
     dns_client::DnsClient, dns_conf::SmartDnsConfig, matcher::DomainNameServerGroupMatcher,
+};
+use crate::{
+    infra::process_guard::ProcessGuardError,
+    log::{debug, error, info, warn},
 };
 
 fn banner() {
@@ -74,7 +77,7 @@ fn main() {
 fn main() -> windows_service::Result<()> {
     if matches!(std::env::args().last(), Some(flag) if flag == "--ws7642ea814a90496daaa54f2820254f12")
     {
-        return service::windows_service::run();
+        return service::windows::run();
     }
     Cli::parse().run();
     Ok(())
@@ -86,22 +89,56 @@ impl Cli {
         let _guard = log::default();
 
         match self.command {
-            Commands::Run { conf, .. } => {
+            Commands::Run { conf, pid, .. } => {
+                let _guard = pid
+                    .map(|pid| {
+                        use infra::process_guard;
+                        match process_guard::create(pid) {
+                            Ok(guard) => Some(guard),
+                            Err(err @ ProcessGuardError::AlreadyRunning(_)) => {
+                                panic!("{}", err)
+                            }
+                            Err(err) => {
+                                error!("{}", err);
+                                None
+                            }
+                        }
+                    })
+                    .unwrap_or_default();
+
                 run_server(conf);
             }
             Commands::Service {
                 command: service_command,
             } => {
-                use service::*;
                 use ServiceCommands::*;
+                let sm = crate::service::service_manager();
                 match service_command {
-                    Install => install(),
-                    Uninstall { purge } => uninstall(purge),
-                    Start => start(),
-                    Stop => stop(),
-                    Restart => restart(),
-                    Status => status(),
+                    Install => sm.install(),
+                    Uninstall { purge } => sm.uninstall(purge),
+                    Start => sm.start(),
+                    Stop => sm.stop(),
+                    Restart => sm.restart(),
+                    Status => match sm.status() {
+                        Ok(status) => {
+                            let out = match status {
+                                service::ServiceStatus::Running(out) => Some(out),
+                                service::ServiceStatus::Dead(out) => Some(out),
+                                service::ServiceStatus::Unknown => None,
+                            };
+                            if let Some(out) = out {
+                                if let Ok(out) = String::from_utf8(out.stdout) {
+                                    info!("\n{}", out);
+                                } else {
+                                    warn!("get service status failed.");
+                                }
+                            }
+                            Ok(())
+                        }
+                        Err(err) => Err(err),
+                    },
                 }
+                .unwrap();
             }
         }
     }
@@ -124,6 +161,19 @@ fn run_server(conf: Option<PathBuf>) {
     };
 
     cfg.summary();
+
+    #[cfg(target_os = "linux")]
+    let _user_guard = {
+        if let Some(user) = cfg.user.as_ref() {
+            run_user::with(user.as_str(), None)
+                .unwrap_or_else(|err| {
+                    panic!("run with user {} failed. {}", user.as_str(), err);
+                })
+                .into()
+        } else {
+            None
+        }
+    };
 
     let runtime = runtime::Builder::new_multi_thread()
         .enable_all()
@@ -235,4 +285,48 @@ fn run_server(conf: Option<PathBuf>) {
 #[inline]
 fn hello_starting() {
     info!("Smart-DNS 🐋 {} starting", version());
+}
+
+#[cfg(target_os = "linux")]
+mod run_user {
+    use std::{collections::HashSet, io};
+
+    use caps::{CapSet, Capability};
+
+    pub fn with(
+        username: &str,
+        groupname: Option<&str>,
+    ) -> io::Result<users::switch::SwitchUserGuard> {
+        let mut caps = HashSet::new();
+        caps.insert(Capability::CAP_NET_ADMIN);
+        caps.insert(Capability::CAP_NET_BIND_SERVICE);
+        caps.insert(Capability::CAP_NET_RAW);
+        switch_user(username, groupname, Some(&caps))
+    }
+
+    #[inline]
+    fn switch_user(
+        username: &str,
+        groupname: Option<&str>,
+        caps: Option<&HashSet<Capability>>,
+    ) -> io::Result<users::switch::SwitchUserGuard> {
+        use users::{get_group_by_name, get_user_by_name, switch::switch_user_group};
+
+        let user = get_user_by_name(username);
+
+        let group = groupname.map(get_group_by_name).unwrap_or_default();
+
+        match (user, group) {
+            (Some(user), None) => switch_user_group(user.uid(), user.primary_group_id()),
+            (Some(user), Some(group)) => switch_user_group(user.uid(), group.gid()),
+            _ => Err(io::ErrorKind::Other.into()),
+        }
+        .map(|guard| {
+            if let Some(caps) = caps {
+                caps::set(None, CapSet::Effective, caps).unwrap();
+                caps::set(None, CapSet::Permitted, caps).unwrap();
+            }
+            guard
+        })
+    }
 }

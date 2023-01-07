@@ -90,10 +90,11 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                     }
 
                     debug!(
-                        "query received: {} {} {}",
+                        "query received: {} {} {} client: {}",
                         request.id(),
                         request.query(),
-                        request.query().query_type()
+                        request.query().query_type(),
+                        request.src()
                     );
 
                     let info = async {

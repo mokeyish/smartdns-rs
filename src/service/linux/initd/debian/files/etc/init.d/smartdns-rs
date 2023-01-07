@@ -1,0 +1,51 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          smartdns
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:
+# Short-Description: A cross platform local DNS server written in rust to obtain the fastest website IP for the best Internet experience, support DoT, DoH. 
+### END INIT INFO
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+DESC="smartdns daemon"
+NAME=smartdns-rs
+DAEMON=/usr/sbin/smartdns
+PIDFILE=/var/run/smartdns.pid
+SCRIPTNAME=/etc/init.d/"$NAME"
+EXTRA_OPTS="run -c /etc/smartdns/smartdns.conf"
+USER=root
+
+test -f $DAEMON || exit 0
+
+. /lib/lsb/init-functions
+
+case "$1" in
+start)	log_daemon_msg "Starting SmartDNS" "smartdns"
+        start-stop-daemon --start --background --no-close --pidfile $PIDFILE --make-pidfile --user $USER --chuid $USER --startas $DAEMON -- $EXTRA_OPTS >> /dev/null 2>&1
+        log_end_msg $?
+	;;
+stop)	log_daemon_msg "Stopping SmartDNS" "smartdns"
+        start-stop-daemon --stop --pidfile $PIDFILE --retry 10
+	log_end_msg $?
+        ;;
+restart) log_daemon_msg "Restarting SmartDNS" "smartdns"
+        $0 stop
+        $0 start
+        ;;
+reload|force-reload) log_daemon_msg "Reloading SmartDNS" "smartdns"
+        log_end_msg 0
+        ;;
+enable|disable) log_daemon_msg "Enable/disable SmartDNS" "smartdns"
+        log_end_msg 0
+        ;;
+status)
+        status_of_proc -p $PIDFILE $DAEMON $NAME && exit 0 || exit $?
+        ;;
+*)	log_action_msg "Usage: /etc/init.d/cron {start|stop|status|restart|reload|force-reload}"
+        exit 2
+        ;;
+esac
+exit 0
