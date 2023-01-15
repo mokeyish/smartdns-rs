@@ -19,6 +19,7 @@ readme = "README.md"
 [features]
 
 failed_tests=[]
+disable_icmp_ping=[]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

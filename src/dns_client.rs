@@ -11,6 +11,7 @@ use crate::log::{debug, warn};
 use crate::matcher::DomainNameServerGroupMatcher;
 use crate::preset_ns;
 use crate::third_ext::FutureTimeoutExt;
+use crate::trust_dns::NameServerConfigGroupExt;
 
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use std::collections::HashMap;
@@ -29,6 +30,7 @@ use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 use trust_dns_resolver::lookup_ip::LookupIp;
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{IntoName, TokioHandle, TryParseIp};
+use url::Host;
 
 const LOOKUP_TIMEOUT: u64 = 3;
 
@@ -85,8 +87,6 @@ impl IntoResolverConfig for NameServerConfigGroup {
 pub struct DnsClientBuilder {
     matcher: Option<DomainNameServerGroupMatcher>,
     servers: HashMap<String, Vec<DnsServer>>,
-
-    server_groups: HashMap<String, NameServerConfigGroup>,
 }
 
 impl DnsClientBuilder {
@@ -112,27 +112,12 @@ impl DnsClientBuilder {
         self
     }
 
-    pub fn add_server_group(mut self, server_group: NameServerConfigGroup) -> Self {
-        use std::collections::hash_map::Entry::*;
-
-        match self.server_groups.entry("default".to_string()) {
-            Occupied(mut o) => {
-                *(o.get_mut()) = server_group;
-            }
-            Vacant(v) => {
-                v.insert(server_group);
-            }
-        }
-
-        self
+    pub fn add_servers<S: Into<DnsServer>>(self, servers: Vec<S>) -> Self {
+        servers.into_iter().fold(self, |b, s| b.add_server(s))
     }
 
     pub fn build(self) -> DnsClient {
-        DnsClient::new(
-            self.matcher.unwrap_or_default(),
-            self.servers,
-            self.server_groups,
-        )
+        DnsClient::new(self.matcher.unwrap_or_default(), self.servers)
     }
 }
 
@@ -141,9 +126,8 @@ pub struct DnsClient {
     bootstrap_resolver: TokioAsyncResolver,
     matcher: DomainNameServerGroupMatcher,
     servers: HashMap<String, Vec<DnsServer>>,
-    server_groups: Mutex<HashMap<String, NameServerConfigGroup>>,
     resolvers: Mutex<HashMap<String, Arc<TokioAsyncResolver>>>,
-    nameserver_ip_store: Mutex<HashMap<Name, Vec<IpAddr>>>,
+    nameserver_ips: Mutex<HashMap<Name, Option<Vec<IpAddr>>>>,
 }
 
 impl DnsClient {
@@ -151,14 +135,12 @@ impl DnsClient {
         DnsClientBuilder {
             matcher: Default::default(),
             servers: Default::default(),
-            server_groups: Default::default(),
         }
     }
 
     pub fn new(
         matcher: DomainNameServerGroupMatcher,
         servers: HashMap<String, Vec<DnsServer>>,
-        server_groups: HashMap<String, NameServerConfigGroup>,
     ) -> Self {
         use crate::preset_ns::{ALIDNS, CLOUDFLARE, GOOGLE, QUAD9};
 
@@ -169,17 +151,29 @@ impl DnsClient {
             true,
         );
 
-        let mut nameserver_ips: Mutex<HashMap<Name, Vec<IpAddr>>> = Default::default();
+        let nameserver_ips = {
+            let mut map: HashMap<Name, Option<Vec<IpAddr>>> = Default::default();
 
-        let t = nameserver_ips.get_mut();
+            for (name, ips) in [ALIDNS, CLOUDFLARE, GOOGLE, QUAD9].map(|name| {
+                let mut domain_name = Name::from_str(name).unwrap();
+                domain_name.set_fqdn(true);
+                (domain_name, preset_ns::find_dns_ips(name).unwrap())
+            }) {
+                map.insert(name, Some(ips.to_vec()));
+            }
 
-        for (name, ips) in [ALIDNS, CLOUDFLARE, GOOGLE, QUAD9].map(|name| {
-            let mut domain_name = Name::from_str(name).unwrap();
-            domain_name.set_fqdn(true);
-            (domain_name, preset_ns::find_dns_ips(name).unwrap())
-        }) {
-            t.insert(name, ips.to_vec());
-        }
+            for server in servers.values().flatten() {
+                if let Host::Domain(domain) = server.url.host() {
+                    if let Ok(name) = Name::from_str(domain.to_lowercase().as_str()) {
+                        map.insert(name, None);
+                    } else {
+                        warn!("parse {} as domain name failed", domain);
+                    }
+                }
+            }
+
+            map
+        };
 
         let bootstrap_resolver: TokioAsyncResolver =
             create_resolver(bootstrap_servers).expect("Create bootstrap resolver failed.");
@@ -188,9 +182,8 @@ impl DnsClient {
             bootstrap_resolver,
             matcher,
             servers,
-            server_groups: Mutex::new(server_groups),
             resolvers: Default::default(),
-            nameserver_ip_store: nameserver_ips,
+            nameserver_ips: Mutex::new(nameserver_ips),
         }
     }
 
@@ -206,31 +199,37 @@ impl DnsClient {
         name: Name,
         record_type: RecordType,
     ) -> Option<Lookup> {
-        if let Some(ips) = self.nameserver_ip_store.lock().await.get(&name) {
-            let records = ips
-                .iter()
-                .filter(|ip| {
-                    if record_type == RecordType::A {
-                        ip.is_ipv4()
-                    } else if record_type == RecordType::AAAA {
-                        ip.is_ipv6()
-                    } else {
-                        false
-                    }
-                })
-                .map(|ip| match ip {
-                    IpAddr::V4(ip) => RData::A(*ip),
-                    IpAddr::V6(ip) => RData::AAAA(*ip),
-                })
-                .map(|r| Record::from_rdata(name.clone(), 0, r))
-                .collect();
+        match self.nameserver_ips.lock().await.get(&name) {
+            Some(ips) => {
+                let ips = match ips {
+                    Some(ips) => ips.clone(),
+                    None => self.resolver_nameserver_domain(name.clone()).await,
+                };
 
-            Some(Lookup::new_with_max_ttl(
-                Query::query(name, record_type),
-                records,
-            ))
-        } else {
-            None
+                let records = ips
+                    .iter()
+                    .filter(|ip| {
+                        if record_type == RecordType::A {
+                            ip.is_ipv4()
+                        } else if record_type == RecordType::AAAA {
+                            ip.is_ipv6()
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|ip| match ip {
+                        IpAddr::V4(ip) => RData::A(*ip),
+                        IpAddr::V6(ip) => RData::AAAA(*ip),
+                    })
+                    .map(|r| Record::from_rdata(name.clone(), 0, r))
+                    .collect();
+
+                Some(Lookup::new_with_max_ttl(
+                    Query::query(name, record_type),
+                    records,
+                ))
+            }
+            None => None,
         }
     }
 
@@ -309,6 +308,69 @@ impl DnsClient {
         }
     }
 
+    async fn resolver_nameserver_domain(&self, name: Name) -> Vec<IpAddr> {
+        let group_name = self.matcher.find(&LowerName::from(name.clone()));
+
+        let config = match group_name {
+            Some(group_name) => {
+                use futures::future;
+
+                let config = self
+                    .servers
+                    .get(group_name)
+                    .or_else(|| self.servers.get("bootstrap"))
+                    .or_else(|| self.servers.get("default"))
+                    .expect("default nameserver group not found!!!");
+
+                let config = future::join_all(
+                    config
+                        .iter()
+                        .map(|c| self.create_nameserver_config_group(&c.url, None)),
+                )
+                .await
+                .into_iter()
+                .flat_map(|x| x.into_iter())
+                .reduce(|mut p, c| {
+                    p.merge(c);
+                    p
+                });
+
+                config
+            }
+            None => None,
+        };
+
+        let namestr = name.to_string();
+
+        let mut addrs = match config {
+            Some(c) => {
+                if let Ok(resolver) = create_resolver(c) {
+                    resolver
+                        .lookup_ip(name)
+                        .await
+                        .map(|r| r.into_iter().collect::<Vec<_>>())
+                        .unwrap_or_default()
+                } else {
+                    Default::default()
+                }
+            }
+            None => self
+                .bootstrap_resolver
+                .lookup_ip(name)
+                .await
+                .map(|r| r.into_iter().collect::<Vec<_>>())
+                .unwrap_or_default(),
+        };
+
+        if addrs.is_empty() {
+            if let Some(ips) = preset_ns::find_dns_ips(namestr.as_str()) {
+                addrs.extend_from_slice(ips);
+            }
+        }
+
+        addrs
+    }
+
     async fn get_or_create_resolver(&self, group_name: &str) -> Option<Arc<TokioAsyncResolver>> {
         let resolver = async {
             let resolvers = self.resolvers.lock().await;
@@ -326,7 +388,11 @@ impl DnsClient {
             "default"
         };
 
-        let nameservers = self.get_or_create_nameserver_group(group_name).await;
+        let nameservers = self.create_nameserver_group(group_name).await;
+        let nameservers = match nameservers {
+            Some(v) => Some(v.filter_available().await),
+            None => None,
+        };
 
         if let Some(Ok(resolver)) = nameservers.map(|ss| create_resolver(ss)) {
             let resolver = Arc::new(resolver);
@@ -340,20 +406,7 @@ impl DnsClient {
         }
     }
 
-    async fn get_or_create_nameserver_group(
-        &self,
-        group_name: &str,
-    ) -> Option<NameServerConfigGroup> {
-        let config = async {
-            let nameservers = self.server_groups.lock().await;
-            nameservers.get(group_name).map(|n| n.clone())
-        }
-        .await;
-
-        if config.is_some() {
-            return config;
-        }
-
+    async fn create_nameserver_group(&self, group_name: &str) -> Option<NameServerConfigGroup> {
         let mut name_server_cfg_group = NameServerConfigGroup::new();
 
         let ss = self
@@ -366,60 +419,14 @@ impl DnsClient {
                 match Name::from_str(domain) {
                     Ok(domain_name) => {
                         //
-                        let config = if let Some(g_name) =
-                            self.matcher.find(&LowerName::from(domain_name.clone()))
-                        {
-                            use futures::future;
+                        let addrs = self.resolver_nameserver_domain(domain_name.clone()).await;
 
-                            let config = self
-                                .servers
-                                .get(g_name)
-                                .expect("default nameserver group not found!!!");
-
-                            let config = future::join_all(
-                                config
-                                    .iter()
-                                    .map(|c| self.create_nameserver_config_group(&c.url, None)),
-                            )
-                            .await
-                            .into_iter()
-                            .flat_map(|x| x.into_iter())
-                            .reduce(|mut p, c| {
-                                p.merge(c);
-                                p
-                            });
-
-                            config
-                        } else {
-                            None
-                        };
-
-                        let addrs = match config {
-                            Some(c) => {
-                                if let Ok(resolver) = create_resolver(c) {
-                                    resolver
-                                        .lookup_ip(domain)
-                                        .await
-                                        .map(|r| r.into_iter().collect::<Vec<_>>())
-                                        .unwrap_or_default()
-                                } else {
-                                    Default::default()
-                                }
-                            }
-                            None => self
-                                .bootstrap_resolver
-                                .lookup_ip(domain)
-                                .await
-                                .map(|r| r.into_iter().collect::<Vec<_>>())
-                                .unwrap_or_default(),
-                        };
-
-                        self.nameserver_ip_store
+                        self.nameserver_ips
                             .lock()
                             .await
                             .entry(domain_name)
-                            .and_modify(|v| *v = addrs.clone())
-                            .or_insert(addrs.clone());
+                            .and_modify(|v| *v = Some(addrs.clone()))
+                            .or_insert(Some(addrs.clone()));
 
                         if let Some(s) = self
                             .create_nameserver_config_group(&s.url, Some(addrs))
@@ -454,24 +461,14 @@ impl DnsClient {
             name_server_cfg_group
         };
 
-        async {
-            self.server_groups
-                .lock()
-                .await
-                .insert(group_name.to_string(), name_server_cfg_group.clone());
-        }
-        .await;
-
         Some(name_server_cfg_group)
     }
 
-    pub async fn create_nameserver_config_group(
+    async fn create_nameserver_config_group(
         &self,
         url: &DnsUrl,
         addrs: Option<Vec<IpAddr>>,
     ) -> Option<NameServerConfigGroup> {
-        use url::Host;
-
         let mut host = None;
 
         if url.proto().is_encrypted() {
@@ -623,11 +620,10 @@ static DOT_TLS_CONFIG: once_cell::sync::Lazy<Arc<ClientConfig>> =
 mod tests {
     use std::str::FromStr;
 
-    use tokio::runtime::Runtime;
-
-    use crate::dns_url::DnsUrl;
-
     use super::*;
+    use crate::{dns_url::DnsUrl, preset_ns::ALIDNS_IPS};
+    use tokio::runtime::Runtime;
+    use trust_dns_resolver::config::CLOUDFLARE_IPS;
 
     async fn assert_google(client: &DnsClient) {
         let name = "dns.google";
@@ -663,10 +659,14 @@ mod tests {
 
     #[test]
     fn test_nameserver_cloudflare_resolve() {
+        // todo:// support alias.
+        let dns_urls = CLOUDFLARE_IPS
+            .iter()
+            .map(|ip| DnsUrl::from(ip))
+            .collect::<Vec<_>>();
+
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder()
-                .add_server_group(NameServerConfigGroup::cloudflare())
-                .build();
+            let client = DnsClient::builder().add_servers(dns_urls).build();
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -674,11 +674,9 @@ mod tests {
 
     #[test]
     fn test_nameserver_cloudflare_https_resolve() {
+        let dns_url = DnsUrl::from_str("https://cloudflare-dns.com/dns-query").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder()
-                .add_server_group(NameServerConfigGroup::cloudflare_https())
-                .build();
-
+            let client = DnsClient::builder().add_server(dns_url).build();
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -706,18 +704,6 @@ mod tests {
     }
 
     #[test]
-    fn test_nameserver_quad9_https_resolve() {
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder()
-                .add_server_group(NameServerConfigGroup::quad9_https())
-                .build();
-
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
-    }
-
-    #[test]
     fn test_nameserver_quad9_dns_url_https_resolve() {
         let dns_url = DnsUrl::from_str("https://dns.quad9.net/dns-query").unwrap();
         Runtime::new().unwrap().block_on(async {
@@ -729,28 +715,14 @@ mod tests {
 
     #[test]
     fn test_nameserver_alidns_resolve() {
-        let server_ips = &[IpAddr::from_str("223.5.5.5").unwrap()];
-        let config = NameServerConfigGroup::from_ips_clear(server_ips, 53, true);
+        // todo:// support alias.
+        let dns_urls = ALIDNS_IPS
+            .iter()
+            .map(|ip| DnsUrl::from(ip))
+            .collect::<Vec<_>>();
 
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server_group(config).build();
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
-    }
-
-    #[test]
-    fn test_nameserver_alidns_https_resolve() {
-        let server_ips = &[IpAddr::from_str("223.5.5.5").unwrap()];
-        let config = NameServerConfigGroup::from_ips_https(
-            server_ips,
-            443,
-            "dns.alidns.com".to_string(),
-            true,
-        );
-
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server_group(config).build();
+            let client = DnsClient::builder().add_servers(dns_urls).build();
             assert_google(&client).await;
             assert_alidns(&client).await;
         })

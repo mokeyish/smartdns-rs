@@ -51,6 +51,16 @@ pub struct PingOutput {
 
 impl PingOutput {
     #[inline]
+    pub fn seq(&self) -> u16 {
+        self.seq
+    }
+
+    #[inline]
+    pub fn duration(&self) -> &Result<Duration, PingError> {
+        &self.duration
+    }
+
+    #[inline]
     pub fn is_timeout(&self) -> bool {
         matches!(self.duration, Err(PingError::Timeout))
     }
@@ -148,6 +158,30 @@ impl Clone for PingError {
     }
 }
 
+#[cfg(feature = "disable_icmp_ping")]
+mod icmp_ping {
+    //! ignore, Github actions not surpport icmp ping.
+
+    use std::{net::IpAddr, time::Duration};
+
+    use super::{PingError, PingOutput};
+    pub async fn ping(
+        ipaddr: IpAddr,
+        times: u16,
+        _timeout: Duration,
+    ) -> Result<Vec<PingOutput>, PingError> {
+        Ok((0..times)
+            .into_iter()
+            .map(|seq| PingOutput {
+                seq,
+                duration: Ok(Duration::from_millis(1)),
+                destination: super::PingAddr::Icmp(ipaddr),
+            })
+            .collect())
+    }
+}
+
+#[cfg(not(feature = "disable_icmp_ping"))]
 mod icmp_ping {
     use std::{net::IpAddr, time::Duration};
 
