@@ -1,13 +1,16 @@
-use std::str::FromStr;
 use std::string::ToString;
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    str::FromStr,
+};
 use trust_dns_resolver::config::Protocol;
 use url::{Host, Url};
 
 /// alias: system、google、cloudflare、quad9
-/// udp://8.8.8.8 or 8.8.8.8   => traditional dns server
-/// tcp://8.8.8.8:53           => dns over tcp
-/// tls://8.8.8.8:853          => DOT: dns over tls
-/// https://1.1.1.1/dns-query  => DOH: dns over https
+/// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => traditional dns server
+/// tcp://8.8.8.8:53                            => dns over tcp
+/// tls://8.8.8.8:853                           => DOT: dns over tls
+/// https://1.1.1.1/dns-query                   => DOH: dns over https
 #[derive(Debug, Clone)]
 pub struct DnsUrl {
     proto: Protocol,
@@ -147,6 +150,30 @@ impl From<url::ParseError> for DnsUrlParseErr {
     }
 }
 
+impl From<&Ipv4Addr> for DnsUrl {
+    #[inline]
+    fn from(ip: &Ipv4Addr) -> Self {
+        ip.to_string().parse().unwrap()
+    }
+}
+
+impl From<&Ipv6Addr> for DnsUrl {
+    #[inline]
+    fn from(ip: &Ipv6Addr) -> Self {
+        format!("[{}]", ip).parse().unwrap()
+    }
+}
+
+impl From<&IpAddr> for DnsUrl {
+    #[inline]
+    fn from(ip: &IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(ip) => ip.into(),
+            IpAddr::V6(ip) => ip.into(),
+        }
+    }
+}
+
 fn dns_proto_default_port(proto: &Protocol) -> u16 {
     use Protocol::*;
     match *proto {
@@ -163,6 +190,8 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
 
 #[cfg(test)]
 mod tests {
+
+    use trust_dns_resolver::config::CLOUDFLARE_IPS;
 
     use super::*;
 
@@ -194,6 +223,13 @@ mod tests {
         assert_eq!(url.port(), 8053);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://8.8.8.8:8053");
+    }
+
+    #[test]
+    fn test_parse_udp_ipv6() {
+        for ip in CLOUDFLARE_IPS.iter().map(|ip| DnsUrl::from(ip)) {
+            assert!(ip.proto.is_datagram());
+        }
     }
 
     #[test]

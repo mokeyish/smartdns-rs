@@ -34,3 +34,4 @@ jobs:
         with:
           use-cross: ${{ matrix.os == 'ubuntu-latest' }}
           command: test
+          args: --features=disable_icmp_ping

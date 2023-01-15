@@ -27,6 +27,7 @@ mod matcher;
 mod preset_ns;
 mod service;
 mod third_ext;
+mod trust_dns;
 
 use dns_mw::DnsMiddlewareBuilder;
 use dns_mw_addr::AddressMiddleware;
@@ -191,7 +192,6 @@ fn run_server(conf: Option<PathBuf>) {
         let dns_client = Arc::new(DnsClient::new(
             DomainNameServerGroupMatcher::create(&cfg),
             cfg.servers.clone(),
-            Default::default(),
         ));
 
         let mut middleware_builder = DnsMiddlewareBuilder::new();
