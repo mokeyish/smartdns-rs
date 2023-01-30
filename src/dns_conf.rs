@@ -911,9 +911,9 @@ mod parse {
 
             while let Some(p) = parts.next() {
                 match p {
-                    "-n" => set_name = parts.next(),
-                    "-f" => set_path = parts.next(),
-                    _ => (),
+                    "-n" | "-name" => set_name = parts.next(),
+                    "-f" | "-file" => set_path = parts.next(),
+                    _ => warn!(">> domain-set: unexpected options {}.", p),
                 }
             }
 
@@ -947,6 +947,8 @@ mod parse {
                         }
                     }
                 }
+            } else {
+                warn!(">> domain-set: file {:?} not exist.", path);
             }
 
             Ok(())
@@ -969,16 +971,18 @@ mod parse {
         if !path.exists() && !path.is_absolute() {
             if let Some(base_conf_file) = base_conf_file {
                 if let Some(parent) = base_conf_file.parent() {
-                    let new_path = parent.join(path.as_path());
-                    if !new_path.exists()
-                        && match base_conf_file.file_name() {
+                    let mut new_path = parent.join(path.as_path());
+                    
+                    if !new_path.exists() && match base_conf_file.file_name() {
                             Some(file_name) if file_name == OsStr::new("smartdns.conf") => true,
                             _ => false,
                         }
                     {
                         // eg: /etc/smartdns.d/custom.conf
-                        path = parent.join("smartdns.d").join(path);
-                    } else {
+                        new_path = parent.join("smartdns.d").join(path.as_path());
+                    }
+
+                    if new_path.exists() {
                         path = new_path;
                     }
                 }
