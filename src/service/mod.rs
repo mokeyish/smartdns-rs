@@ -15,7 +15,7 @@ mod service_manager;
 pub use service_manager::ServiceStatus;
 
 cfg_if! {
-    if #[cfg(target_os = "linux")] {
+    if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod linux;
         use linux::create_service_definition;
         pub use linux::{BIN_PATH, CONF_PATH};
