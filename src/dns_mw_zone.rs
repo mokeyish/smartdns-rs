@@ -8,7 +8,6 @@ use crate::dns::*;
 use crate::dns_conf::SmartDnsConfig;
 use crate::log::debug;
 use crate::middleware::*;
-use crate::third_ext::IpAddrToArpa;
 
 pub struct DnsZoneMiddleware {
     catalog: Catalog,
@@ -24,11 +23,15 @@ impl DnsZoneMiddleware {
             set.insert(Name::from_str("whoami").unwrap().into());
             set.insert(Name::from_str("smartdns").unwrap().into());
 
-            use local_ip_address::list_afinet_netifas;
-            if let Ok(network_interfaces) = list_afinet_netifas() {
-                for (_, ip) in network_interfaces.iter() {
-                    if let Ok(n) = Name::from_str(ip.to_arpa().as_str()) {
-                        set.insert(n.into());
+            #[cfg(not(target_os = "android"))]
+            {
+                use crate::third_ext::IpAddrToArpa;
+                use local_ip_address::list_afinet_netifas;
+                if let Ok(network_interfaces) = list_afinet_netifas() {
+                    for (_, ip) in network_interfaces.iter() {
+                        if let Ok(n) = Name::from_str(ip.to_arpa().as_str()) {
+                            set.insert(n.into());
+                        }
                     }
                 }
             }

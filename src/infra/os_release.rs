@@ -1,5 +1,15 @@
 use std::{io, str::FromStr};
 
+#[cfg(target_os = "android")]
+pub fn get() -> io::Result<OsRelease> {
+    Ok(OsRelease {
+        id: "android".to_string(),
+        name: "android".to_string(),
+        pretty_name: "android".to_string(),
+        id_like: None,
+    })
+}
+
 #[cfg(target_os = "linux")]
 pub fn get() -> io::Result<OsRelease> {
     use std::fs;
