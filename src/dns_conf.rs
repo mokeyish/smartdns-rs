@@ -498,9 +498,26 @@ impl BindServer {
 /// ```
 #[derive(Debug, Clone)]
 pub struct DnsServer {
+    /// the nameserver url.
     pub url: DnsUrl,
+
+    /// set server to group, use with nameserver /domain/group.
     pub group: Option<String>,
+
+    /// filter result with blacklist ip
+    pub blacklist_ip: bool,
+
+    /// filter result with whitelist ip,  result in whitelist-ip will be accepted.
+    pub whitelist_ip: bool,
+
+    /// result must exist edns RR, or discard result.
+    pub check_edns: bool,
+
+    /// exclude this server from default group.
     pub exclude_default_group: bool,
+
+    /// use proxy to connect to server.
+    pub proxy: Option<String>,
 }
 
 impl FromStr for DnsServer {
@@ -511,18 +528,24 @@ impl FromStr for DnsServer {
         let mut server = None;
         let mut exclude_default_group = false;
         let mut group = None;
+        let mut blacklist_ip = false;
+        let mut whitelist_ip = false;
+        let mut check_edns = false;
+        let mut proxy = None;
 
         while let Some(part) = parts.next() {
             if part.is_empty() {
                 continue;
             }
             if part.starts_with('-') {
-                if part == "-group" {
-                    group = Some(parts.next().expect("group name").to_string());
-                } else if part == "-exclude-default-group" {
-                    exclude_default_group = true;
-                } else {
-                    warn!("unknown server options {}", part);
+                match part {
+                    "-exclude-default-group" => exclude_default_group = true,
+                    "-blacklist-ip" => blacklist_ip = true,
+                    "-whitelist-ip" => whitelist_ip = true,
+                    "-check-edns" => check_edns = true,
+                    "-group" => group = Some(parts.next().expect("group name").to_string()),
+                    "-proxy" => proxy = Some(parts.next().expect("proxy name").to_string()),
+                    _ => warn!("unknown server options {}", part),
                 }
             } else {
                 server = Some(part);
@@ -534,6 +557,10 @@ impl FromStr for DnsServer {
                 url,
                 group,
                 exclude_default_group,
+                blacklist_ip,
+                whitelist_ip,
+                check_edns,
+                proxy,
             })
         } else {
             Err(())
@@ -547,6 +574,10 @@ impl From<DnsUrl> for DnsServer {
             url,
             group: None,
             exclude_default_group: false,
+            blacklist_ip: false,
+            whitelist_ip: false,
+            check_edns: false,
+            proxy: None,
         }
     }
 }
@@ -832,8 +863,19 @@ mod parse {
         }
 
         #[inline]
-        fn config_server(&mut self, _typ: &str, options: &str) {
-            if let Ok(server) = DnsServer::from_str(options) {
+        fn config_server(&mut self, typ: &str, options: &str) {
+            let server_options = match typ {
+                "server-tcp" => Some(["tcp://", options.trim_start()].concat()),
+                "server-tls" => Some(["tls://", options.trim_start()].concat()),
+                _ => None,
+            };
+
+            let server_options = server_options
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or(options);
+
+            if let Ok(server) = DnsServer::from_str(server_options) {
                 if !server.exclude_default_group {
                     self.servers
                         .get_mut("default")
@@ -972,8 +1014,9 @@ mod parse {
             if let Some(base_conf_file) = base_conf_file {
                 if let Some(parent) = base_conf_file.parent() {
                     let mut new_path = parent.join(path.as_path());
-                    
-                    if !new_path.exists() && match base_conf_file.file_name() {
+
+                    if !new_path.exists()
+                        && match base_conf_file.file_name() {
                             Some(file_name) if file_name == OsStr::new("smartdns.conf") => true,
                             _ => false,
                         }

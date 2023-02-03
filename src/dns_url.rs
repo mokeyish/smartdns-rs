@@ -191,7 +191,7 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
 #[cfg(test)]
 mod tests {
 
-    use trust_dns_resolver::config::CLOUDFLARE_IPS;
+    use crate::preset_ns::CLOUDFLARE_IPS;
 
     use super::*;
 
