@@ -34,6 +34,9 @@ use url::Host;
 
 const LOOKUP_TIMEOUT: u64 = 3;
 
+/// The name of default nameserver group.
+pub const DEFAULT_NAME_SERVER_GROUP_NAME: &'static str = "default";
+
 fn create_resolver<T: IntoResolverConfig>(config: T) -> Result<TokioAsyncResolver, String> {
     let config = config.into();
 
@@ -98,7 +101,7 @@ impl DnsClientBuilder {
             .group
             .as_ref()
             .map(|s| s.to_string())
-            .unwrap_or("default".to_string());
+            .unwrap_or(DEFAULT_NAME_SERVER_GROUP_NAME.to_string());
 
         match self.servers.entry(group_name) {
             Occupied(mut o) => {
@@ -187,11 +190,16 @@ impl DnsClient {
         }
     }
 
-    pub fn find_server_group(&self, domain: &LowerName) -> &str {
+    pub fn find_server_group(&self, domain: &LowerName) -> Option<&[DnsServer]> {
+        let name = self.find_server_group_name(domain);
+        self.servers.get(name).map(|ns| ns.as_slice())
+    }
+
+    pub fn find_server_group_name(&self, domain: &LowerName) -> &str {
         self.matcher
             .find(domain)
             .map(|s| s.as_str())
-            .unwrap_or("default")
+            .unwrap_or(DEFAULT_NAME_SERVER_GROUP_NAME)
     }
 
     pub async fn lookup_nameserver_ip(
@@ -258,7 +266,7 @@ impl DnsClient {
                 .await
                 .unwrap_or(Err(ResolveErrorKind::Timeout.into()))
         } else {
-            self.get_or_create_resolver("default")
+            self.get_or_create_resolver(DEFAULT_NAME_SERVER_GROUP_NAME)
                 .await
                 .unwrap()
                 .lookup_ip(host)
@@ -292,7 +300,7 @@ impl DnsClient {
         };
 
         let group_name =
-            group_name.unwrap_or_else(|| self.find_server_group(&name.to_owned().into()));
+            group_name.unwrap_or_else(|| self.find_server_group_name(&name.to_owned().into()));
         debug!(
             "query name: {} type: {} via [group:{}]",
             name, record_type, group_name
@@ -319,7 +327,7 @@ impl DnsClient {
                     .servers
                     .get(group_name)
                     .or_else(|| self.servers.get("bootstrap"))
-                    .or_else(|| self.servers.get("default"))
+                    .or_else(|| self.servers.get(DEFAULT_NAME_SERVER_GROUP_NAME))
                     .expect("default nameserver group not found!!!");
 
                 let config = future::join_all(
@@ -621,9 +629,11 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::{dns_url::DnsUrl, preset_ns::ALIDNS_IPS};
+    use crate::{
+        dns_url::DnsUrl,
+        preset_ns::{ALIDNS_IPS, CLOUDFLARE_IPS},
+    };
     use tokio::runtime::Runtime;
-    use trust_dns_resolver::config::CLOUDFLARE_IPS;
 
     async fn assert_google(client: &DnsClient) {
         let name = "dns.google";
