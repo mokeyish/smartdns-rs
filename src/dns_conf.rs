@@ -58,6 +58,12 @@ pub struct SmartDnsConfig {
     pub binds: Vec<BindServer>,
     /// bind tcp server
     pub binds_tcp: Vec<BindServer>,
+    /// bind tls server
+    pub binds_tls: Vec<BindServer>,
+    /// bind https server
+    pub binds_https: Vec<BindServer>,
+    /// bind quic server
+    pub binds_quic: Vec<BindServer>,
 
     /// tcp connection idle timeout
     ///
@@ -380,6 +386,9 @@ pub struct BindServer {
 
     /// force AAAA query return SOA.
     pub force_aaaa_soa: bool,
+
+    /// ssl config
+    pub ssl_config: Option<SslConfig>,
 }
 
 impl FromStr for BindServer {
@@ -399,6 +408,11 @@ impl FromStr for BindServer {
         let mut no_dualstack_selection = false;
         let mut force_aaaa_soa = false;
 
+        // ssl parameters
+        let mut server_name = None;
+        let mut ssl_certificate = None;
+        let mut ssl_certificate_key = None;
+
         while let Some(part) = parts.next() {
             if part.starts_with('-') {
                 match part {
@@ -411,6 +425,13 @@ impl FromStr for BindServer {
                     "-no-rule-soa" => no_rule_soa = true,
                     "-no-dualstack-selection" => no_dualstack_selection = true,
                     "-force-aaaa-soa" => force_aaaa_soa = true,
+                    "-server-name" => server_name = parts.next().map(|p| p.to_string()),
+                    "-ssl-certificate" => {
+                        ssl_certificate = parts.next().map(|p| Path::new(p).to_path_buf())
+                    }
+                    "-ssl-certificate-key" => {
+                        ssl_certificate_key = parts.next().map(|p| Path::new(p).to_path_buf())
+                    }
                     opt => warn!("unknown option: {}", opt),
                 }
             } else {
@@ -427,6 +448,17 @@ impl FromStr for BindServer {
             .unwrap_or_default()
             .expect(&[s, "addr expect [::]:53 or 0.0.0.0:53"].concat());
 
+        let ssl_config = match (server_name, ssl_certificate, ssl_certificate_key) {
+            (Some(server_name), Some(ssl_certificate), Some(ssl_certificate_key)) => {
+                Some(SslConfig {
+                    server_name,
+                    certificate: ssl_certificate,
+                    certificate_key: ssl_certificate_key,
+                })
+            }
+            _ => None,
+        };
+
         Ok(Self {
             addr: sock_addrs,
             group,
@@ -438,6 +470,7 @@ impl FromStr for BindServer {
             no_rule_soa,
             no_dualstack_selection,
             force_aaaa_soa,
+            ssl_config,
         })
     }
 }
@@ -454,6 +487,13 @@ impl BindServer {
             || self.no_dualstack_selection
             || self.force_aaaa_soa
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SslConfig {
+    pub server_name: String,
+    pub certificate: PathBuf,
+    pub certificate_key: PathBuf,
 }
 
 /// remote udp dns server list
@@ -763,8 +803,26 @@ mod parse {
                         "user" => self.user = Some(options.to_string()),
                         "domain" => self.domain = options.parse().ok(),
                         "conf-file" => self.load_file(options).expect("load_file failed"),
-                        "bind" => self.config_bind(options, false),
-                        "bind-tcp" => self.config_bind(options, true),
+                        "bind" => match options.parse() {
+                            Ok(v) => self.binds.push(v),
+                            _ => (),
+                        },
+                        "bind-tcp" => match options.parse() {
+                            Ok(v) => self.binds_tcp.push(v),
+                            _ => (),
+                        },
+                        "bind-tls" => match options.parse() {
+                            Ok(v) => self.binds_tls.push(v),
+                            _ => (),
+                        },
+                        "bind-https" => match options.parse() {
+                            Ok(v) => self.binds_https.push(v),
+                            _ => (),
+                        },
+                        "bind-quic" => match options.parse() {
+                            Ok(v) => self.binds_quic.push(v),
+                            _ => (),
+                        },
                         "tcp-idle-time" => self.tcp_idle_time = options.parse().ok(),
                         "cache-size" => self.cache_size = options.parse().ok(),
                         "cache-persist" => self.cache_persist = Some(parse_bool(options)),
@@ -849,16 +907,6 @@ mod parse {
                     }
                 }
                 _ => (),
-            }
-        }
-
-        fn config_bind(&mut self, options: &str, bind_tcp: bool) {
-            if let Ok(bind) = BindServer::from_str(options) {
-                if bind_tcp {
-                    self.binds_tcp.push(bind);
-                } else {
-                    self.binds.push(bind);
-                }
             }
         }
 
@@ -1117,6 +1165,35 @@ mod parse {
         use trust_dns_resolver::config::Protocol;
 
         use super::*;
+
+        #[test]
+        fn test_config_bind_https() {
+            let mut cfg = SmartDnsConfig::new();
+
+            cfg.config_item(
+                "bind-https 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key",
+            );
+
+            assert!(!cfg.binds_https.is_empty());
+
+            let bind = cfg.binds_https.iter().next().unwrap();
+            let ssl_cfg = bind.ssl_config.as_ref().unwrap();
+
+            assert_eq!(
+                bind.addr.get(0),
+                "0.0.0.0:4453".parse::<SocketAddr>().ok().as_ref()
+            );
+
+            assert_eq!(ssl_cfg.server_name, "dns.example.com".to_string());
+            assert_eq!(
+                ssl_cfg.certificate,
+                Path::new("/etc/nginx/dns.example.com.crt").to_path_buf()
+            );
+            assert_eq!(
+                ssl_cfg.certificate_key,
+                Path::new("/etc/nginx/dns.example.com.key").to_path_buf()
+            );
+        }
 
         #[test]
         fn test_config_server_0() {
