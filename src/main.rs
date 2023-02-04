@@ -193,6 +193,8 @@ fn run_server(conf: Option<PathBuf>) {
         let dns_client = Arc::new(DnsClient::new(
             DomainNameServerGroupMatcher::create(&cfg),
             cfg.servers.clone(),
+            cfg.ca_path.clone(),
+            cfg.ca_file.clone(),
         ));
 
         let mut middleware_builder = DnsMiddlewareBuilder::new();

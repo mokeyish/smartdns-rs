@@ -1,5 +1,8 @@
 # SmartDNS-rs
 
+![Test](https://github.com/mokeyish/smartdns-rs/actions/workflows/test.yml/badge.svg?branch=main)
+![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/mokeyish/smartdns-rs?display_name=tag&include_prereleases)
+
 [English](https://github.com/mokeyish/smartdns-rs/blob/main/README_en-US.md) | 中文
 
 SmartDNS-rs 🐋 一个是受 [C 语言版 smartdns](https://github.com/pymumu/smartdns)  启发而开发的，并与其配置兼容的运行在本地的跨平台 DNS 服务器，
@@ -169,9 +172,9 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 | serve-expired-reply-ttl          | 回应的过期缓存 TTL                         | :construction:     | 5                                                            | 秒，0 表示停用超时，大于 0 表示指定的超时的秒数              | serve-expired-reply-ttl 30                                   |
 | dualstack-ip-selection           | 双栈 IP 优选                               | :construction:     | yes                                                          | [yes\|no]                                                    | dualstack-ip-selection yes                                   |
 | dualstack-ip-selection-threshold | 双栈 IP 优选阈值                           | :construction:     | 15ms                                                         | 单位为毫秒（ms）                                             | dualstack-ip-selection-threshold [0-1000]                    |
-| user                             | 进程运行用户                               | :construction:     | root                                                         | user [username]                                              | user nobody                                                  |
-| ca-file                          | 证书文件                                   | :construction:     | /etc/ssl/certs/ca-certificates.crt                           | 合法路径字符串                                               | ca-file /etc/ssl/certs/ca-certificates.crt                   |
-| ca-path                          | 证书文件路径                               | :construction:     | /etc/ssl/certs                                               | 合法路径字符串                                               | ca-path /etc/ssl/certs                                       |
+| user                             | 进程运行用户                               | :white_check_mark:     | root                                                         | user [username]                                              | user nobody                                                  |
+| ca-file                          | 证书文件                                   | :white_check_mark:     | /etc/ssl/certs/ca-certificates.crt                           | 合法路径字符串                                               | ca-file /etc/ssl/certs/ca-certificates.crt                   |
+| ca-path                          | 证书文件路径                               | :white_check_mark:     | /etc/ssl/certs                                               | 合法路径字符串                                               | ca-path /etc/ssl/certs                                       |
 
 ## 其他
 

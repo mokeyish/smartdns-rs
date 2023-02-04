@@ -1,5 +1,8 @@
 # SmartDNS-rs
 
+![Test](https://github.com/mokeyish/smartdns-rs/actions/workflows/test.yml/badge.svg?branch=main)
+![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/mokeyish/smartdns-rs?display_name=tag&include_prereleases)
+
 English | [中文](https://github.com/mokeyish/smartdns-rs/blob/main/README.md)
 
 A local DNS server imspired by [c smartdns](https://github.com/pymumu/smartdns) to accepts DNS query requests from local clients, obtains DNS query results from multiple upstream DNS servers, and returns the fastest access results to clients.

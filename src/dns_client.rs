@@ -17,6 +17,7 @@ use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::ToSocketAddrs;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -90,6 +91,8 @@ impl IntoResolverConfig for NameServerConfigGroup {
 pub struct DnsClientBuilder {
     matcher: Option<DomainNameServerGroupMatcher>,
     servers: HashMap<String, Vec<DnsServer>>,
+    ca_path: Option<PathBuf>,
+    ca_file: Option<PathBuf>,
 }
 
 impl DnsClientBuilder {
@@ -120,7 +123,12 @@ impl DnsClientBuilder {
     }
 
     pub fn build(self) -> DnsClient {
-        DnsClient::new(self.matcher.unwrap_or_default(), self.servers)
+        DnsClient::new(
+            self.matcher.unwrap_or_default(),
+            self.servers,
+            self.ca_path,
+            self.ca_file,
+        )
     }
 }
 
@@ -131,6 +139,7 @@ pub struct DnsClient {
     servers: HashMap<String, Vec<DnsServer>>,
     resolvers: Mutex<HashMap<String, Arc<TokioAsyncResolver>>>,
     nameserver_ips: Mutex<HashMap<Name, Option<Vec<IpAddr>>>>,
+    tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
 }
 
 impl DnsClient {
@@ -138,12 +147,16 @@ impl DnsClient {
         DnsClientBuilder {
             matcher: Default::default(),
             servers: Default::default(),
+            ca_path: Default::default(),
+            ca_file: Default::default(),
         }
     }
 
     pub fn new(
         matcher: DomainNameServerGroupMatcher,
         servers: HashMap<String, Vec<DnsServer>>,
+        ca_path: Option<PathBuf>,
+        ca_file: Option<PathBuf>,
     ) -> Self {
         use crate::preset_ns::{ALIDNS, CLOUDFLARE, GOOGLE, QUAD9};
 
@@ -181,12 +194,22 @@ impl DnsClient {
         let bootstrap_resolver: TokioAsyncResolver =
             create_resolver(bootstrap_servers).expect("Create bootstrap resolver failed.");
 
+        let tls_client_config = {
+            let config = create_tls_client_config(ca_path, ca_file);
+
+            let mut config_sni_disable = config.clone();
+            config_sni_disable.enable_sni = false;
+
+            (Arc::new(config), Arc::new(config_sni_disable))
+        };
+
         Self {
             bootstrap_resolver,
             matcher,
             servers,
             resolvers: Default::default(),
             nameserver_ips: Mutex::new(nameserver_ips),
+            tls_client_config,
         }
     }
 
@@ -556,11 +579,11 @@ impl DnsClient {
                     tls_dns_name: host.to_owned(),
                     trust_nx_responses: true,
                     bind_addr: None,
-                    tls_config: if let Some(false) = url.enable_sni() {
-                        Some(TlsClientConfig(DOT_TLS_CONFIG.clone()))
+                    tls_config: Some(TlsClientConfig(if url.enable_sni() {
+                        self.tls_client_config.0.clone()
                     } else {
-                        None
-                    },
+                        self.tls_client_config.1.clone()
+                    })),
                 })
                 .collect::<Vec<_>>(),
             Protocol::Tls => sock_addrs
@@ -570,11 +593,11 @@ impl DnsClient {
                     tls_dns_name: host.to_owned(),
                     trust_nx_responses: true,
                     bind_addr: None,
-                    tls_config: if let Some(false) = url.enable_sni() {
-                        Some(TlsClientConfig(DOT_TLS_CONFIG.clone()))
+                    tls_config: Some(TlsClientConfig(if url.enable_sni() {
+                        self.tls_client_config.0.clone()
                     } else {
-                        None
-                    },
+                        self.tls_client_config.1.clone()
+                    })),
                 })
                 .collect::<Vec<_>>(),
             _ => todo!(),
@@ -595,34 +618,61 @@ impl DnsClient {
     }
 }
 
-static DOT_TLS_CONFIG: once_cell::sync::Lazy<Arc<ClientConfig>> =
-    once_cell::sync::Lazy::new(|| {
-        const ALPN_H2: &[u8] = b"h2";
+fn create_tls_client_config(ca_path: Option<PathBuf>, ca_file: Option<PathBuf>) -> ClientConfig {
+    const ALPN_H2: &[u8] = b"h2";
 
-        let mut root_store = RootCertStore::empty();
+    let mut root_store = RootCertStore::empty();
+    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+        OwnedTrustAnchor::from_subject_spki_name_constraints(
+            ta.subject,
+            ta.spki,
+            ta.name_constraints,
+        )
+    }));
 
-        root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-            OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
+    let certs = {
+        let certs1 = rustls_native_certs::load_native_certs().unwrap_or_else(|err| {
+            warn!("load native certs failed.{}", err);
+            Default::default()
+        });
+
+        let certs2 = [ca_path, ca_file]
+            .into_iter()
+            .filter_map(|s| s)
+            .filter_map(
+                |path| match rustls_native_certs::load_certs_from_path(path.as_path()) {
+                    Ok(certs) => Some(certs),
+                    Err(err) => {
+                        warn!("load certs from path failed.{}", err);
+                        None
+                    }
+                },
             )
-        }));
+            .flatten();
 
-        let mut client_config = ClientConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_safe_default_protocol_versions()
-            .unwrap()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
+        certs1.into_iter().chain(certs2)
+    };
 
-        client_config.enable_sni = false;
+    for cert in certs {
+        root_store
+            .add(&rustls::Certificate(cert.0))
+            .unwrap_or_else(|err| {
+                warn!("load certs from path failed.{}", err);
+            })
+    }
 
-        client_config.alpn_protocols.push(ALPN_H2.to_vec());
+    let mut client_config = ClientConfig::builder()
+        .with_safe_default_cipher_suites()
+        .with_safe_default_kx_groups()
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
 
-        Arc::new(client_config)
-    });
+    client_config.alpn_protocols.push(ALPN_H2.to_vec());
+
+    client_config
+}
 
 #[cfg(test)]
 mod tests {
