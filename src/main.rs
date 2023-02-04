@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use cli::*;
+use dns_conf::BindServer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, UdpSocket},
@@ -224,7 +225,9 @@ fn run_server(conf: Option<PathBuf>) {
 
         middleware_builder = middleware_builder.with(NameServerMiddleware::new(&cfg));
 
-        MiddlewareBasedRequestHandler::new(middleware_builder.build(cfg, dns_client.clone()))
+        MiddlewareBasedRequestHandler::new(
+            middleware_builder.build(cfg.clone(), dns_client.clone()),
+        )
     };
 
     let mut server = ServerFuture::new(middleware);
@@ -262,8 +265,15 @@ fn run_server(conf: Option<PathBuf>) {
         );
 
         let _guard = runtime.enter();
-        server.register_listener(tcp_listener, Duration::from_secs(5));
+        server.register_listener(tcp_listener, Duration::from_secs(cfg.tcp_idle_time()));
     }
+
+    #[cfg(feature = "dns-over-tls")]
+    serve_tls(&cfg, &mut server, &cfg.binds_tls, &runtime);
+    #[cfg(feature = "dns-over-https")]
+    serve_https(&cfg, &mut server, &cfg.binds_https, &runtime);
+    #[cfg(feature = "dns-over-quic")]
+    serve_quic(&cfg, &mut server, &cfg.binds_quic, &runtime);
 
     // config complete, starting!
 
@@ -280,6 +290,167 @@ fn run_server(conf: Option<PathBuf>) {
     });
 
     drop(runtime);
+}
+
+#[cfg(feature = "dns-over-tls")]
+fn serve_tls(
+    cfg: &SmartDnsConfig,
+    server: &mut ServerFuture<MiddlewareBasedRequestHandler>,
+    binds: &[BindServer],
+    runtime: &runtime::Runtime,
+) {
+    use futures::TryFutureExt;
+    use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
+
+    for bind in binds {
+        if bind.ssl_config.is_none() {
+            continue;
+        }
+        let ssl_config = bind.ssl_config.as_ref().unwrap();
+
+        info!(
+            "loading cert for DNS over TLS named {} from {:?}",
+            ssl_config.server_name, ssl_config.certificate
+        );
+
+        let certificate = read_cert(ssl_config.certificate.as_path())
+            .expect("error loading tls certificate file");
+        let certificate_key = read_key(ssl_config.certificate_key.as_path())
+            .expect("error loading tls certificate_key file");
+
+        for addr in &bind.addr {
+            debug!("binding TLS to {:?}", addr);
+            let tls_listener = runtime.block_on(
+                TcpListener::bind(addr)
+                    .unwrap_or_else(|_| panic!("could not bind to tls: {}", addr)),
+            );
+
+            info!(
+                "listening for TLS on {:?}",
+                tls_listener
+                    .local_addr()
+                    .expect("could not lookup local address")
+            );
+
+            let _guard = runtime.enter();
+            server
+                .register_tls_listener(
+                    tls_listener,
+                    Duration::from_secs(cfg.tcp_idle_time()),
+                    (certificate.clone(), certificate_key.clone()),
+                )
+                .expect("could not register TLS listener");
+        }
+    }
+}
+
+#[cfg(feature = "dns-over-https")]
+fn serve_https(
+    cfg: &SmartDnsConfig,
+    server: &mut ServerFuture<MiddlewareBasedRequestHandler>,
+    binds: &[BindServer],
+    runtime: &runtime::Runtime,
+) {
+    use futures::TryFutureExt;
+    use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
+
+    for bind in binds {
+        if bind.ssl_config.is_none() {
+            continue;
+        }
+        let ssl_config = bind.ssl_config.as_ref().unwrap();
+
+        info!(
+            "loading cert for DNS over HTTPS named {} from {:?}",
+            ssl_config.server_name, ssl_config.certificate
+        );
+
+        let server_name = ssl_config.server_name.as_str();
+
+        let certificate = read_cert(ssl_config.certificate.as_path())
+            .expect("error loading tls certificate file");
+        let certificate_key = read_key(ssl_config.certificate_key.as_path())
+            .expect("error loading tls certificate_key file");
+
+        for addr in &bind.addr {
+            debug!("binding HTTPS to {:?}", addr);
+            let https_listener = runtime.block_on(
+                TcpListener::bind(addr)
+                    .unwrap_or_else(|_| panic!("could not bind to tls: {}", addr)),
+            );
+
+            info!(
+                "listening for HTTPS on {:?}",
+                https_listener
+                    .local_addr()
+                    .expect("could not lookup local address")
+            );
+
+            let _guard = runtime.enter();
+            server
+                .register_https_listener(
+                    https_listener,
+                    Duration::from_secs(cfg.tcp_idle_time()),
+                    (certificate.clone(), certificate_key.clone()),
+                    server_name.to_string(),
+                )
+                .expect("could not register HTTPS listener");
+        }
+    }
+}
+
+#[cfg(feature = "dns-over-quic")]
+fn serve_quic(
+    cfg: &SmartDnsConfig,
+    server: &mut ServerFuture<MiddlewareBasedRequestHandler>,
+    binds: &[BindServer],
+    runtime: &runtime::Runtime,
+) {
+    use futures::TryFutureExt;
+    use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
+
+    for bind in binds {
+        if bind.ssl_config.is_none() {
+            continue;
+        }
+        let ssl_config = bind.ssl_config.as_ref().unwrap();
+
+        info!(
+            "loading cert for DNS over QUIC named {} from {:?}",
+            ssl_config.server_name, ssl_config.certificate
+        );
+
+        let server_name = ssl_config.server_name.as_str();
+
+        let certificate = read_cert(ssl_config.certificate.as_path())
+            .expect("error loading tls certificate file");
+        let certificate_key = read_key(ssl_config.certificate_key.as_path())
+            .expect("error loading tls certificate_key file");
+
+        for addr in &bind.addr {
+            debug!("binding QUIC to {:?}", addr);
+            let quic_listener = runtime.block_on(
+                UdpSocket::bind(addr).unwrap_or_else(|_| panic!("could not bind to tls: {}", addr)),
+            );
+
+            info!(
+                "listening for QUIC on {:?}",
+                quic_listener
+                    .local_addr()
+                    .expect("could not lookup local address")
+            );
+
+            let _guard = runtime.enter();
+            server
+                .register_quic_listener(
+                    quic_listener,
+                    Duration::from_secs(cfg.tcp_idle_time()),
+                    (certificate.clone(), certificate_key.clone()),
+                    server_name.to_string(),
+                )
+                .expect("could not register QUIC listener");
+        }
+    }
 }
 
 #[inline]

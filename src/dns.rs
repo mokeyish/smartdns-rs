@@ -105,6 +105,10 @@ impl SmartDnsConfig {
         .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
     }
 
+    pub fn tcp_idle_time(&self) -> u64 {
+        self.tcp_idle_time.unwrap_or(30)
+    }
+
     pub fn rr_ttl(&self) -> u64 {
         self.rr_ttl.unwrap_or(300)
     }
