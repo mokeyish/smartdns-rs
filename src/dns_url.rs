@@ -54,8 +54,8 @@ impl DnsUrl {
             None
         }
     }
-    pub fn enable_sni(&self) -> Option<bool> {
-        self.enable_sni
+    pub fn enable_sni(&self) -> bool {
+        self.enable_sni.unwrap_or(true)
     }
 }
 
@@ -326,12 +326,12 @@ mod tests {
     #[test]
     fn test_parse_enable_sni_false() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
-        assert_eq!(url.enable_sni(), Some(false));
+        assert_eq!(url.enable_sni(), false);
     }
 
     #[test]
     fn test_parse_enable_sni_true() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
-        assert_eq!(url.enable_sni(), Some(false));
+        assert_eq!(url.enable_sni(), false);
     }
 }
