@@ -2,6 +2,9 @@
 name: Release
 
 on:
+  push:
+    branches:
+      - ci
   workflow_dispatch: {}
   release:
     types: [created]
@@ -48,9 +51,9 @@ jobs:
           # - target: x86_64-unknown-freebsd
           #   os: ubuntu-latest
           #   archive: tar.gz tar.xz tar.zst
-          - target: x86_64-unknown-netbsd
-            os: ubuntu-latest
-            archive: tar.gz tar.xz tar.zst
+          # - target: x86_64-unknown-netbsd
+          #   os: ubuntu-latest
+          #   archive: tar.gz tar.xz tar.zst
           # - target: wasm32-unknown-emscripten
           #   archive: tar.gz tar.xz tar.zst
 
@@ -62,14 +65,14 @@ jobs:
         uses: actions/checkout@master
 
       - name: Install Rust Toolchain Components
-        uses: actions-rs/toolchain@v1.0.7
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
 
       - name: Build
-        uses: actions-rs/cargo@v1.0.3
+        uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.os == 'ubuntu-latest' }}
           command: build
