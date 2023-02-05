@@ -1,9 +1,16 @@
 use cfg_if::cfg_if;
 use futures::Future;
 
-use std::io;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    io,
+    sync::Arc,
+};
 
-use crate::log::{debug, error, info, warn};
+use crate::{
+    dns_conf::ServerOpts,
+    log::{debug, error, info, warn},
+};
 use trust_dns_client::op::{Edns, Header, MessageType, OpCode, ResponseCode};
 use trust_dns_proto::rr::Record;
 pub use trust_dns_server::server::Request;
@@ -20,18 +27,46 @@ use trust_dns_server::{
 use crate::dns::DnsRequest;
 use crate::dns_mw::DnsMiddlewareHandler;
 
-pub struct MiddlewareBasedRequestHandler {
-    handler: DnsMiddlewareHandler,
+pub struct ServerRegistry {
+    servers: HashMap<ServerOpts, ServerFuture<ServerHandler>>,
+    handler: Arc<DnsMiddlewareHandler>,
 }
 
-impl MiddlewareBasedRequestHandler {
-    pub fn new(handler: DnsMiddlewareHandler) -> Self {
-        Self { handler }
+impl ServerRegistry {
+    pub fn new(middleware: Arc<DnsMiddlewareHandler>) -> Self {
+        Self {
+            servers: Default::default(),
+            handler: middleware,
+        }
+    }
+
+    pub fn with_opts(&mut self, server_opts: ServerOpts) -> &mut ServerFuture<ServerHandler> {
+        match self.servers.entry(server_opts.clone()) {
+            Entry::Occupied(v) => v.into_mut(),
+            Entry::Vacant(v) => v.insert(ServerFuture::new(ServerHandler {
+                handler: self.handler.clone(),
+                server_opts: server_opts.clone(),
+            })),
+        }
+    }
+}
+
+pub struct ServerHandler {
+    handler: Arc<DnsMiddlewareHandler>,
+    server_opts: ServerOpts,
+}
+
+impl ServerHandler {
+    pub fn new(handler: Arc<DnsMiddlewareHandler>, server_opts: ServerOpts) -> Self {
+        Self {
+            handler,
+            server_opts,
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl RequestHandler for MiddlewareBasedRequestHandler {
+impl RequestHandler for ServerHandler {
     async fn handle_request<R: ResponseHandler>(
         &self,
         request: &Request,
@@ -137,7 +172,7 @@ impl RequestHandler for MiddlewareBasedRequestHandler {
                                     let req: &DnsRequest = request;
 
                                     let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
-                                        match self.handler.search(req).await {
+                                        match self.handler.search(req, &self.server_opts).await {
                                             Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
                                             Err(err) => Err(LookupError::ResolveError(err)),
                                         };

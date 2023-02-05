@@ -54,6 +54,11 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
         req: &DnsRequest,
         next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
     ) -> Result<DnsResponse, DnsError> {
+        // skip cache
+        if ctx.server_opts.no_cache {
+            return next.run(ctx, req).await;
+        }
+
         let query = req.query();
 
         let cached_val = self.cache.get(query.original(), Instant::now()).await;

@@ -8,7 +8,10 @@ use trust_dns_resolver::error::ResolveError;
 
 use crate::dns_server::Request as OriginRequest;
 use crate::log::info;
-use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig};
+use crate::{
+    dns_client::DnsClient,
+    dns_conf::{ServerOpts, SmartDnsConfig},
+};
 
 pub use trust_dns_proto::{
     op,
@@ -28,6 +31,7 @@ pub struct DnsContext {
     pub fastest_speed: Duration,
     pub lookup_source: LookupSource,
     pub no_cache: bool,
+    pub server_opts: ServerOpts,
 }
 
 #[derive(Clone)]
