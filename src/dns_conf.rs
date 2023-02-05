@@ -154,7 +154,7 @@ pub struct SmartDnsConfig {
     /// example:
     ///   force-qtype-SOA 65 28
     /// ```
-    pub force_qtype_soa: Option<RecordType>,
+    pub force_qtype_soa: HashSet<RecordType>,
 
     /// Enable IPV4, IPV6 dual stack IP optimization selection strategy
     ///
@@ -312,7 +312,7 @@ impl SmartDnsConfig {
 
         if cfg.binds.is_empty() && cfg.binds_tcp.is_empty() {
             cfg.binds.push(BindServer {
-                addr: ("0.0.0.0", 53)
+                addrs: ("0.0.0.0", 53)
                     .to_socket_addrs()
                     .unwrap()
                     .collect::<Vec<_>>(),
@@ -358,37 +358,13 @@ impl SmartDnsConfig {
 #[derive(Debug, Default, Clone)]
 pub struct BindServer {
     /// bind adress
-    pub addr: Vec<SocketAddr>,
-
-    /// set domain request to use the appropriate server group.
-    pub group: Option<String>,
-
-    /// skip address rule.
-    pub no_rule_addr: bool,
-
-    /// skip nameserver rule.
-    pub no_rule_nameserver: bool,
-
-    /// skip ipset rule.
-    pub no_rule_ipset: bool,
-
-    /// do not check speed.
-    pub no_speed_check: bool,
-
-    /// skip cache.
-    pub no_cache: bool,
-
-    /// Skip address SOA(#) rules.
-    pub no_rule_soa: bool,
-
-    /// Disable dualstack ip selection.
-    pub no_dualstack_selection: bool,
-
-    /// force AAAA query return SOA.
-    pub force_aaaa_soa: bool,
+    pub addrs: Vec<SocketAddr>,
 
     /// ssl config
     pub ssl_config: Option<SslConfig>,
+
+    /// the options
+    pub opts: ServerOpts,
 }
 
 impl FromStr for BindServer {
@@ -460,32 +436,26 @@ impl FromStr for BindServer {
         };
 
         Ok(Self {
-            addr: sock_addrs,
-            group,
-            no_rule_addr,
-            no_rule_nameserver,
-            no_rule_ipset,
-            no_speed_check,
-            no_cache,
-            no_rule_soa,
-            no_dualstack_selection,
-            force_aaaa_soa,
+            addrs: sock_addrs,
             ssl_config,
+            opts: ServerOpts {
+                group,
+                no_rule_addr,
+                no_rule_nameserver,
+                no_rule_ipset,
+                no_speed_check,
+                no_cache,
+                no_rule_soa,
+                no_dualstack_selection,
+                force_aaaa_soa,
+            },
         })
     }
 }
 
 impl BindServer {
-    pub fn has_extra_opts(&self) -> bool {
-        self.group.is_some()
-            || self.no_rule_addr
-            || self.no_rule_nameserver
-            || self.no_rule_ipset
-            || self.no_speed_check
-            || self.no_cache
-            || self.no_rule_soa
-            || self.no_dualstack_selection
-            || self.force_aaaa_soa
+    pub fn is_default_opts(&self) -> bool {
+        self.opts.is_default()
     }
 }
 
@@ -494,6 +464,43 @@ pub struct SslConfig {
     pub server_name: String,
     pub certificate: PathBuf,
     pub certificate_key: PathBuf,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct ServerOpts {
+    /// set domain request to use the appropriate server group.
+    pub group: Option<String>,
+
+    /// skip address rule.
+    pub no_rule_addr: bool,
+
+    /// skip nameserver rule.
+    pub no_rule_nameserver: bool,
+
+    /// skip ipset rule.
+    pub no_rule_ipset: bool,
+
+    /// do not check speed.
+    pub no_speed_check: bool,
+
+    /// skip cache.
+    pub no_cache: bool,
+
+    /// Skip address SOA(#) rules.
+    pub no_rule_soa: bool,
+
+    /// Disable dualstack ip selection.
+    pub no_dualstack_selection: bool,
+
+    /// force AAAA query return SOA.
+    pub force_aaaa_soa: bool,
+}
+
+impl ServerOpts {
+    #[inline]
+    pub fn is_default(&self) -> bool {
+        self.eq(&Default::default())
+    }
 }
 
 /// remote udp dns server list
@@ -851,9 +858,12 @@ mod parse {
                         },
                         "speed-check-mode" => self.config_speed_check_mode(options),
                         "force-AAAA-SOA" => self.force_aaaa_soa = Some(parse_bool(options)),
-                        "force-qtype-SOA" => {
-                            self.force_qtype_soa = u16::from_str(options).ok().map(RecordType::from)
-                        }
+                        "force-qtype-SOA" => match u16::from_str(options).map(RecordType::from) {
+                            Ok(r) => {
+                                self.force_qtype_soa.insert(r);
+                            }
+                            _ => (),
+                        },
                         "dualstack-ip-selection-threshold" => {
                             self.dualstack_ip_selection_threshold = options.parse().ok()
                         }
@@ -1180,7 +1190,7 @@ mod parse {
             let ssl_cfg = bind.ssl_config.as_ref().unwrap();
 
             assert_eq!(
-                bind.addr.get(0),
+                bind.addrs.get(0),
                 "0.0.0.0:4453".parse::<SocketAddr>().ok().as_ref()
             );
 

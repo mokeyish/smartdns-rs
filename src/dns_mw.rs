@@ -9,7 +9,7 @@ use trust_dns_resolver::error::ResolveErrorKind;
 use crate::{
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
     dns_client::DnsClient,
-    dns_conf::SmartDnsConfig,
+    dns_conf::{ServerOpts, SmartDnsConfig},
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
@@ -20,13 +20,18 @@ pub struct DnsMiddlewareHandler {
 }
 
 impl DnsMiddlewareHandler {
-    pub async fn search(&self, req: &DnsRequest) -> Result<DnsResponse, DnsError> {
+    pub async fn search(
+        &self,
+        req: &DnsRequest,
+        server_opts: &ServerOpts,
+    ) -> Result<DnsResponse, DnsError> {
         let mut ctx = DnsContext {
             cfg: self.cfg.clone(),
             client: self.client.clone(),
             fastest_speed: Default::default(),
             lookup_source: Default::default(),
             no_cache: false,
+            server_opts: server_opts.clone(),
         };
         self.host.execute(&mut ctx, req).await
     }

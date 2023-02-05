@@ -37,11 +37,11 @@ use dns_mw_cache::DnsCacheMiddleware;
 use dns_mw_ns::NameServerMiddleware;
 use dns_mw_spdt::DnsSpeedTestMiddleware;
 use dns_mw_zone::DnsZoneMiddleware;
-use dns_server::{MiddlewareBasedRequestHandler, ServerFuture};
 use infra::middleware;
 
 use crate::{
-    dns_client::DnsClient, dns_conf::SmartDnsConfig, matcher::DomainNameServerGroupMatcher,
+    dns_client::DnsClient, dns_conf::SmartDnsConfig, dns_server::ServerRegistry,
+    matcher::DomainNameServerGroupMatcher,
 };
 use crate::{
     infra::process_guard::ProcessGuardError,
@@ -184,9 +184,6 @@ fn run_server(conf: Option<PathBuf>) {
         .build()
         .expect("failed to initialize Tokio Runtime");
 
-    let udp_socket_addrs = cfg.binds.clone().into_iter().map(|s| s.addr).flatten();
-    let tcp_socket_addrs = cfg.binds_tcp.clone().into_iter().map(|s| s.addr).flatten();
-
     // build handle pipeline.
     let middleware = {
         let _guard = runtime.enter();
@@ -210,9 +207,7 @@ fn run_server(conf: Option<PathBuf>) {
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
 
-        if cfg.address_rules.len() > 0 {
-            middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
-        }
+        middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {
@@ -227,55 +222,63 @@ fn run_server(conf: Option<PathBuf>) {
 
         middleware_builder = middleware_builder.with(NameServerMiddleware::new(&cfg));
 
-        MiddlewareBasedRequestHandler::new(
-            middleware_builder.build(cfg.clone(), dns_client.clone()),
-        )
+        Arc::new(middleware_builder.build(cfg.clone(), dns_client.clone()))
     };
 
-    let mut server = ServerFuture::new(middleware);
+    let tcp_idle_time = middleware.cfg.tcp_idle_time();
+    let mut server = ServerRegistry::new(middleware);
 
     // load udp the listeners
-    for udp_socket in udp_socket_addrs {
-        debug!("binding UDP to {:?}", udp_socket);
-        let udp_socket = runtime
-            .block_on(UdpSocket::bind(udp_socket))
-            .unwrap_or_else(|_| panic!("could not bind to udp: {}", udp_socket));
+    for bind_server in cfg.binds.iter() {
+        for udp_socket in bind_server.addrs.iter() {
+            debug!("binding UDP to {:?}", udp_socket);
+            let udp_socket = runtime
+                .block_on(UdpSocket::bind(udp_socket))
+                .unwrap_or_else(|_| panic!("could not bind to udp: {}", udp_socket));
 
-        info!(
-            "listening for UDP on {:?}",
-            udp_socket
-                .local_addr()
-                .expect("could not lookup local address")
-        );
+            info!(
+                "listening for UDP on {:?}",
+                udp_socket
+                    .local_addr()
+                    .expect("could not lookup local address")
+            );
 
-        let _guard = runtime.enter();
-        server.register_socket(udp_socket);
+            let _guard = runtime.enter();
+
+            server
+                .with_opts(bind_server.opts.clone())
+                .register_socket(udp_socket);
+        }
     }
 
     // and TCP as necessary
-    for tcp_listener in tcp_socket_addrs {
-        debug!("binding TCP to {:?}", tcp_listener);
-        let tcp_listener = runtime
-            .block_on(TcpListener::bind(tcp_listener))
-            .unwrap_or_else(|_| panic!("could not bind to tcp: {}", tcp_listener));
+    for bind_server in cfg.binds_tcp.iter() {
+        for tcp_listener in bind_server.addrs.iter() {
+            debug!("binding TCP to {:?}", tcp_listener);
+            let tcp_listener = runtime
+                .block_on(TcpListener::bind(tcp_listener))
+                .unwrap_or_else(|_| panic!("could not bind to tcp: {}", tcp_listener));
 
-        info!(
-            "listening for TCP on {:?}",
-            tcp_listener
-                .local_addr()
-                .expect("could not lookup local address")
-        );
+            info!(
+                "listening for TCP on {:?}",
+                tcp_listener
+                    .local_addr()
+                    .expect("could not lookup local address")
+            );
 
-        let _guard = runtime.enter();
-        server.register_listener(tcp_listener, Duration::from_secs(cfg.tcp_idle_time()));
+            let _guard = runtime.enter();
+            server
+                .with_opts(bind_server.opts.clone())
+                .register_listener(tcp_listener, Duration::from_secs(tcp_idle_time));
+        }
     }
 
     #[cfg(feature = "dns-over-tls")]
-    serve_tls(&cfg, &mut server, &cfg.binds_tls, &runtime);
+    serve_tls(&mut server, &cfg.binds_tls, &runtime, tcp_idle_time);
     #[cfg(feature = "dns-over-https")]
-    serve_https(&cfg, &mut server, &cfg.binds_https, &runtime);
+    serve_https(&mut server, &cfg.binds_https, &runtime, tcp_idle_time);
     #[cfg(feature = "dns-over-quic")]
-    serve_quic(&cfg, &mut server, &cfg.binds_quic, &runtime);
+    serve_quic(&mut server, &cfg.binds_quic, &runtime, tcp_idle_time);
 
     // config complete, starting!
 
@@ -296,10 +299,10 @@ fn run_server(conf: Option<PathBuf>) {
 
 #[cfg(feature = "dns-over-tls")]
 fn serve_tls(
-    cfg: &SmartDnsConfig,
-    server: &mut ServerFuture<MiddlewareBasedRequestHandler>,
+    server: &mut ServerRegistry,
     binds: &[BindServer],
     runtime: &runtime::Runtime,
+    tcp_idle_time: u64,
 ) {
     use futures::TryFutureExt;
     use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
@@ -320,7 +323,7 @@ fn serve_tls(
         let certificate_key = read_key(ssl_config.certificate_key.as_path())
             .expect("error loading tls certificate_key file");
 
-        for addr in &bind.addr {
+        for addr in &bind.addrs {
             debug!("binding TLS to {:?}", addr);
             let tls_listener = runtime.block_on(
                 TcpListener::bind(addr)
@@ -336,9 +339,10 @@ fn serve_tls(
 
             let _guard = runtime.enter();
             server
+                .with_opts(bind.opts.clone())
                 .register_tls_listener(
                     tls_listener,
-                    Duration::from_secs(cfg.tcp_idle_time()),
+                    Duration::from_secs(tcp_idle_time),
                     (certificate.clone(), certificate_key.clone()),
                 )
                 .expect("could not register TLS listener");
@@ -348,10 +352,10 @@ fn serve_tls(
 
 #[cfg(feature = "dns-over-https")]
 fn serve_https(
-    cfg: &SmartDnsConfig,
-    server: &mut ServerFuture<MiddlewareBasedRequestHandler>,
+    server: &mut ServerRegistry,
     binds: &[BindServer],
     runtime: &runtime::Runtime,
+    tcp_idle_time: u64,
 ) {
     use futures::TryFutureExt;
     use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
@@ -374,7 +378,7 @@ fn serve_https(
         let certificate_key = read_key(ssl_config.certificate_key.as_path())
             .expect("error loading tls certificate_key file");
 
-        for addr in &bind.addr {
+        for addr in &bind.addrs {
             debug!("binding HTTPS to {:?}", addr);
             let https_listener = runtime.block_on(
                 TcpListener::bind(addr)
@@ -390,9 +394,10 @@ fn serve_https(
 
             let _guard = runtime.enter();
             server
+                .with_opts(bind.opts.clone())
                 .register_https_listener(
                     https_listener,
-                    Duration::from_secs(cfg.tcp_idle_time()),
+                    Duration::from_secs(tcp_idle_time),
                     (certificate.clone(), certificate_key.clone()),
                     server_name.to_string(),
                 )
@@ -403,10 +408,10 @@ fn serve_https(
 
 #[cfg(feature = "dns-over-quic")]
 fn serve_quic(
-    cfg: &SmartDnsConfig,
-    server: &mut ServerFuture<MiddlewareBasedRequestHandler>,
+    server: &mut ServerRegistry,
     binds: &[BindServer],
     runtime: &runtime::Runtime,
+    tcp_idle_time: u64,
 ) {
     use futures::TryFutureExt;
     use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
@@ -429,7 +434,7 @@ fn serve_quic(
         let certificate_key = read_key(ssl_config.certificate_key.as_path())
             .expect("error loading tls certificate_key file");
 
-        for addr in &bind.addr {
+        for addr in &bind.addrs {
             debug!("binding QUIC to {:?}", addr);
             let quic_listener = runtime.block_on(
                 UdpSocket::bind(addr).unwrap_or_else(|_| panic!("could not bind to tls: {}", addr)),
@@ -444,9 +449,10 @@ fn serve_quic(
 
             let _guard = runtime.enter();
             server
+                .with_opts(bind.opts.clone())
                 .register_quic_listener(
                     quic_listener,
-                    Duration::from_secs(cfg.tcp_idle_time()),
+                    Duration::from_secs(tcp_idle_time),
                     (certificate.clone(), certificate_key.clone()),
                     server_name.to_string(),
                 )
