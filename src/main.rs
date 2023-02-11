@@ -16,11 +16,13 @@ mod dns_mw;
 mod dns_mw_addr;
 mod dns_mw_audit;
 mod dns_mw_cache;
+mod dns_mw_dnsmasq;
 mod dns_mw_ns;
 mod dns_mw_spdt;
 mod dns_mw_zone;
 mod dns_server;
 mod dns_url;
+mod dnsmasq;
 mod fast_ping;
 mod infra;
 mod log;
@@ -34,6 +36,7 @@ use dns_mw::DnsMiddlewareBuilder;
 use dns_mw_addr::AddressMiddleware;
 use dns_mw_audit::DnsAuditMiddleware;
 use dns_mw_cache::DnsCacheMiddleware;
+use dns_mw_dnsmasq::DnsmasqMiddleware;
 use dns_mw_ns::NameServerMiddleware;
 use dns_mw_spdt::DnsSpeedTestMiddleware;
 use dns_mw_zone::DnsZoneMiddleware;
@@ -210,6 +213,18 @@ fn run_server(conf: Option<PathBuf>) {
         middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
 
         middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
+
+        if cfg
+            .dnsmasq_lease_file
+            .as_ref()
+            .map(|x| x.is_file())
+            .unwrap_or_default()
+        {
+            middleware_builder = middleware_builder.with(DnsmasqMiddleware::new(
+                cfg.dnsmasq_lease_file.as_ref().unwrap(),
+                cfg.domain.clone(),
+            ));
+        }
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {
