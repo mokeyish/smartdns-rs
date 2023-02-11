@@ -1,21 +1,24 @@
-use std::sync::Arc;
+use std::{borrow::Borrow, sync::Arc};
 
-use trust_dns_client::{
+use trust_dns_proto::{
     op::ResponseCode,
     rr::{RData, Record},
 };
+
 use trust_dns_resolver::error::ResolveErrorKind;
 
 use crate::{
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
     dns_client::DnsClient,
-    dns_conf::{ServerOpts, SmartDnsConfig},
+    dns_conf::{QueryOpts, SmartDnsConfig},
+    matcher::DomainRuleMatcher,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
 pub struct DnsMiddlewareHandler {
-    pub cfg: Arc<SmartDnsConfig>,
+    cfg: Arc<SmartDnsConfig>,
     client: Arc<DnsClient>,
+    domain_rules: DomainRuleMatcher,
     host: MiddlewareHost<DnsContext, DnsRequest, DnsResponse, DnsError>,
 }
 
@@ -23,15 +26,21 @@ impl DnsMiddlewareHandler {
     pub async fn search(
         &self,
         req: &DnsRequest,
-        server_opts: &ServerOpts,
+        server_opts: &QueryOpts,
     ) -> Result<DnsResponse, DnsError> {
+        let domain_rule = self
+            .domain_rules
+            .find(req.query().name().borrow())
+            .map(|n| n.to_owned());
+
         let mut ctx = DnsContext {
             cfg: self.cfg.clone(),
             client: self.client.clone(),
             fastest_speed: Default::default(),
             lookup_source: Default::default(),
             no_cache: false,
-            server_opts: server_opts.clone(),
+            query_opts: server_opts.clone(),
+            domain_rule,
         };
         self.host.execute(&mut ctx, req).await
     }
@@ -56,10 +65,12 @@ impl DnsMiddlewareBuilder {
         self
     }
 
-    pub fn build(self, cfg: SmartDnsConfig, client: Arc<DnsClient>) -> DnsMiddlewareHandler {
+    pub fn build(self, cfg: Arc<SmartDnsConfig>, client: Arc<DnsClient>) -> DnsMiddlewareHandler {
+        let domain_rules = DomainRuleMatcher::create(&cfg);
         DnsMiddlewareHandler {
             host: self.builder.build(),
-            cfg: Arc::new(cfg),
+            cfg,
+            domain_rules,
             client,
         }
     }

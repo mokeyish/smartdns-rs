@@ -22,15 +22,21 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use trust_dns_client::rr::{LowerName, RData};
-use trust_dns_resolver::config::{
-    NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig, ResolverOpts,
-    TlsClientConfig,
+
+use trust_dns_proto::rr::{
+    domain::{IntoName, TryParseIp},
+    record_data::RData,
 };
-use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
-use trust_dns_resolver::lookup_ip::LookupIp;
-use trust_dns_resolver::TokioAsyncResolver;
-use trust_dns_resolver::{IntoName, TokioHandle, TryParseIp};
+use trust_dns_resolver::{
+    config::{
+        NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig, ResolverOpts,
+        TlsClientConfig,
+    },
+    error::{ResolveError, ResolveErrorKind},
+    lookup_ip::LookupIp,
+    TokioAsyncResolver, TokioHandle,
+};
+
 use url::Host;
 
 const LOOKUP_TIMEOUT: u64 = 3;
@@ -213,12 +219,12 @@ impl DnsClient {
         }
     }
 
-    pub fn find_server_group(&self, domain: &LowerName) -> Option<&[DnsServer]> {
+    pub fn find_server_group(&self, domain: &Name) -> Option<&[DnsServer]> {
         let name = self.find_server_group_name(domain);
         self.servers.get(name).map(|ns| ns.as_slice())
     }
 
-    pub fn find_server_group_name(&self, domain: &LowerName) -> &str {
+    pub fn find_server_group_name(&self, domain: &Name) -> &str {
         self.matcher
             .find(domain)
             .map(|s| s.as_str())
@@ -322,8 +328,7 @@ impl DnsClient {
             Err(err) => return Err(err.into()),
         };
 
-        let group_name =
-            group_name.unwrap_or_else(|| self.find_server_group_name(&name.to_owned().into()));
+        let group_name = group_name.unwrap_or_else(|| self.find_server_group_name(&name));
         debug!(
             "query name: {} type: {} via [group:{}]",
             name, record_type, group_name
@@ -340,7 +345,7 @@ impl DnsClient {
     }
 
     async fn resolver_nameserver_domain(&self, name: Name) -> Vec<IpAddr> {
-        let group_name = self.matcher.find(&LowerName::from(name.clone()));
+        let group_name = self.matcher.find(&name);
 
         let config = match group_name {
             Some(group_name) => {

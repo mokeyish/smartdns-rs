@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    dns_conf::ServerOpts,
+    dns_conf::QueryOpts,
     log::{debug, error, info, warn},
 };
 use trust_dns_client::op::{Edns, Header, MessageType, OpCode, ResponseCode};
@@ -28,7 +28,7 @@ use crate::dns::DnsRequest;
 use crate::dns_mw::DnsMiddlewareHandler;
 
 pub struct ServerRegistry {
-    servers: HashMap<ServerOpts, ServerFuture<ServerHandler>>,
+    servers: HashMap<QueryOpts, ServerFuture<ServerHandler>>,
     handler: Arc<DnsMiddlewareHandler>,
 }
 
@@ -40,12 +40,12 @@ impl ServerRegistry {
         }
     }
 
-    pub fn with_opts(&mut self, server_opts: ServerOpts) -> &mut ServerFuture<ServerHandler> {
-        match self.servers.entry(server_opts.clone()) {
+    pub fn with_opts(&mut self, opts: QueryOpts) -> &mut ServerFuture<ServerHandler> {
+        match self.servers.entry(opts.clone()) {
             Entry::Occupied(v) => v.into_mut(),
             Entry::Vacant(v) => v.insert(ServerFuture::new(ServerHandler {
                 handler: self.handler.clone(),
-                server_opts: server_opts.clone(),
+                server_opts: opts.clone(),
             })),
         }
     }
@@ -53,11 +53,11 @@ impl ServerRegistry {
 
 pub struct ServerHandler {
     handler: Arc<DnsMiddlewareHandler>,
-    server_opts: ServerOpts,
+    server_opts: QueryOpts,
 }
 
 impl ServerHandler {
-    pub fn new(handler: Arc<DnsMiddlewareHandler>, server_opts: ServerOpts) -> Self {
+    pub fn new(handler: Arc<DnsMiddlewareHandler>, server_opts: QueryOpts) -> Self {
         Self {
             handler,
             server_opts,

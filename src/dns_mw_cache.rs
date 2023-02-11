@@ -55,7 +55,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
         next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
     ) -> Result<DnsResponse, DnsError> {
         // skip cache
-        if ctx.server_opts.no_cache {
+        if ctx.query_opts.no_cache() {
             return next.run(ctx, req).await;
         }
 

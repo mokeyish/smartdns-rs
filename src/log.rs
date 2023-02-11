@@ -25,8 +25,9 @@ pub fn init_global_default<P: AsRef<Path>>(
     level: tracing::Level,
     size: u64,
     num: u64,
+    mode: Option<u32>,
 ) -> DefaultGuard {
-    let file = MappedFile::open(path.as_ref(), size, Some(num as usize));
+    let file = MappedFile::open(path.as_ref(), size, Some(num as usize), mode);
 
     let writable = file
         .0
@@ -53,7 +54,7 @@ pub fn init_global_default<P: AsRef<Path>>(
         }
 
         let file_writer =
-            MappedFile::open(path.as_ref(), size, Some(num as usize)).with_max_level(level);
+            MappedFile::open(path.as_ref(), size, Some(num as usize), mode).with_max_level(level);
 
         make_dispatch(level.max(console_level), file_writer.and(console_writer))
     } else {

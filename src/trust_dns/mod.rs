@@ -4,6 +4,10 @@ use crate::infra::ping::{ping, PingAddr};
 use crate::log::warn;
 use trust_dns_resolver::config::NameServerConfigGroup;
 
+pub mod proto {
+    pub use trust_dns_proto::*;
+}
+
 #[async_trait::async_trait]
 pub trait NameServerConfigGroupExt: Send + Sync {
     async fn filter_available(&self) -> Self;

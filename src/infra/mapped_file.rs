@@ -15,11 +15,12 @@ pub struct MappedFile {
     path: PathBuf,
     file: Option<File>,
     len: u64,
+    mode: Option<u32>,
     peamble_bytes: Option<Box<[u8]>>,
 }
 
 impl MappedFile {
-    pub fn open<P: AsRef<Path>>(path: P, size: u64, num: Option<usize>) -> Self {
+    pub fn open<P: AsRef<Path>>(path: P, size: u64, num: Option<usize>, mode: Option<u32>) -> Self {
         let path = path.as_ref().to_path_buf();
         Self {
             path,
@@ -27,6 +28,7 @@ impl MappedFile {
             num,
             file: None,
             len: 0,
+            mode,
             peamble_bytes: None,
         }
     }
@@ -135,7 +137,15 @@ impl MappedFile {
             None => {
                 match {
                     let mut opt = File::options();
+
+                    #[cfg(unix)]
+                    if let Some(mode) = self.mode {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        opt.mode(mode);
+                    }
+
                     opt.create(true).write(true);
+
                     if self.path.exists() {
                         if self.is_full() {
                             opt.truncate(true);
@@ -223,8 +233,8 @@ pub struct MutexMappedFile(pub Mutex<MappedFile>);
 
 impl MutexMappedFile {
     #[inline]
-    pub fn open<P: AsRef<Path>>(path: P, size: u64, num: Option<usize>) -> Self {
-        Self(Mutex::new(MappedFile::open(path, size, num)))
+    pub fn open<P: AsRef<Path>>(path: P, size: u64, num: Option<usize>, mode: Option<u32>) -> Self {
+        Self(Mutex::new(MappedFile::open(path, size, num, mode)))
     }
 }
 
@@ -257,7 +267,7 @@ mod tests {
     pub fn test_write_file() -> io::Result<()> {
         let file_path = format!("./logs/abc-{:#x}.txt", Local::now().timestamp());
 
-        let mut file = MappedFile::open(file_path, 2, Some(3));
+        let mut file = MappedFile::open(file_path, 2, Some(3), Default::default());
         file.write_all(b"aa")?;
         assert_eq!(file.mapped_files().unwrap().len(), 1);
         file.write_all(b"bb")?;

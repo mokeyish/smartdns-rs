@@ -149,7 +149,7 @@ impl Cli {
 fn run_server(conf: Option<PathBuf>) {
     hello_starting();
 
-    let cfg = SmartDnsConfig::load(conf);
+    let cfg = Arc::new(SmartDnsConfig::load(conf));
 
     let _guard = if cfg.log_enabled() {
         Some(log::init_global_default(
@@ -157,6 +157,7 @@ fn run_server(conf: Option<PathBuf>) {
             cfg.log_level(),
             cfg.log_size(),
             cfg.log_num(),
+            cfg.audit_file_mode().into(),
         ))
     } else {
         None
@@ -202,6 +203,7 @@ fn run_server(conf: Option<PathBuf>) {
                 cfg.audit_file.as_ref().unwrap(),
                 cfg.audit_size(),
                 cfg.audit_num(),
+                cfg.audit_file_mode().into(),
             ));
         }
 
@@ -225,7 +227,7 @@ fn run_server(conf: Option<PathBuf>) {
         Arc::new(middleware_builder.build(cfg.clone(), dns_client.clone()))
     };
 
-    let tcp_idle_time = middleware.cfg.tcp_idle_time();
+    let tcp_idle_time = cfg.tcp_idle_time();
     let mut server = ServerRegistry::new(middleware);
 
     // load udp the listeners

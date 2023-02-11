@@ -1,10 +1,7 @@
+use std::borrow::Borrow;
+
+use crate::{dns::*, dns_conf::SmartDnsConfig, middleware::*};
 use ipnet::IpNet;
-
-use crate::dns_conf::SmartDnsConfig;
-
-use crate::dns::*;
-
-use crate::middleware::*;
 
 #[derive(Debug)]
 pub struct NameServerMiddleware;
@@ -24,12 +21,15 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         req: &DnsRequest,
         _next: crate::middleware::Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
     ) -> Result<DnsResponse, DnsError> {
-        let name = req.query().name();
+        let name: &Name = req.query().name().borrow();
         let rtype = req.query().query_type();
 
         // skip nameserver rule
-        if ctx.server_opts.no_rule_nameserver {
-            return ctx.client.lookup(name, rtype, Some("default")).await;
+        if ctx.query_opts.no_rule_nameserver() {
+            return ctx
+                .client
+                .lookup(name.clone(), rtype, Some("default"))
+                .await;
         }
 
         if let Some(lookup) = ctx
@@ -41,15 +41,24 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             return Ok(lookup);
         }
 
-        let group_name = ctx
-            .server_opts
-            .group
-            .as_ref()
-            .map(|g| g.as_str()) // use the appropriate server group.
-            .unwrap_or_else(|| ctx.client.find_server_group_name(name));
+        let group_name = {
+            // highest priority
+            if let Some(n) = ctx.query_opts.group() {
+                n
+            } else if let Some(Some(n)) = ctx.domain_rule.as_ref().map(|o| o.nameserver.as_ref()) {
+                n.as_str()
+            } else {
+                ctx.client.find_server_group_name(name)
+            }
+        };
 
         ctx.lookup_source = LookupSource::Server(group_name.to_string());
-        match ctx.client.lookup(name, rtype, Some(group_name)).await {
+
+        match ctx
+            .client
+            .lookup(name.clone(), rtype, Some(group_name))
+            .await
+        {
             Ok(lookup) => {
                 if req.query().query_type().is_ip_addr()
                     && (!ctx.cfg.whitelist_ip.is_empty() || !ctx.cfg.whitelist_ip.is_empty())

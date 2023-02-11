@@ -1,13 +1,14 @@
-use crate::dns_conf::{DomainAddress, DomainOrDomainSet, SmartDnsConfig};
+use crate::dns_conf::{DomainAddress, DomainId, DomainRule, SmartDnsConfig};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use trust_dns_client::rr::LowerName;
+use std::sync::Arc;
+use trust_dns_proto::rr::Name;
 
 #[derive(Debug, Default)]
-pub struct DomainMatcher<T: Debug>(HashMap<LowerName, T>);
+pub struct DomainMatcher<T: Debug>(HashMap<Name, T>);
 
 impl<T: Debug> DomainMatcher<T> {
-    pub fn find(&self, domain: &LowerName) -> Option<&T> {
+    pub fn find(&self, domain: &Name) -> Option<&T> {
         let mut domain = domain.to_owned();
 
         loop {
@@ -31,18 +32,18 @@ impl<T: Debug> DomainMatcher<T> {
 
 pub type DomainAddressMatcher = DomainMatcher<DomainAddress>;
 
-impl DomainMatcher<DomainAddress> {
+impl DomainAddressMatcher {
     pub fn create(cfg: &SmartDnsConfig) -> DomainMatcher<DomainAddress> {
         let mut keys = vec![];
         let mut values = vec![];
 
         for rule in cfg.address_rules.iter() {
             match &rule.domain {
-                DomainOrDomainSet::Domain(domain) => {
+                DomainId::Domain(domain) => {
                     keys.push(domain.to_owned());
                     values.push(rule.address);
                 }
-                DomainOrDomainSet::DomainSet(set_name) => {
+                DomainId::DomainSet(set_name) => {
                     if let Some(set) = cfg.domain_sets.get(set_name) {
                         for domain in set.iter() {
                             keys.push(domain.to_owned());
@@ -57,24 +58,54 @@ impl DomainMatcher<DomainAddress> {
     }
 }
 
+/// find the name of nameserver group by domain name.
 pub type DomainNameServerGroupMatcher = DomainMatcher<String>;
 
-impl DomainMatcher<String> {
-    pub fn create(cfg: &SmartDnsConfig) -> DomainMatcher<String> {
+impl DomainNameServerGroupMatcher {
+    pub fn create(cfg: &SmartDnsConfig) -> Self {
         let mut keys = vec![];
         let mut values = vec![];
 
         for rule in cfg.forward_rules.iter() {
             match &rule.domain {
-                DomainOrDomainSet::Domain(domain) => {
+                DomainId::Domain(domain) => {
                     keys.push(domain.to_owned());
                     values.push(rule.server_group.to_owned());
                 }
-                DomainOrDomainSet::DomainSet(set_name) => {
+                DomainId::DomainSet(set_name) => {
                     if let Some(set) = cfg.domain_sets.get(set_name) {
                         for domain in set.iter() {
                             keys.push(domain.to_owned());
                             values.push(rule.server_group.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        DomainMatcher(create_map(keys, values))
+    }
+}
+
+/// find domain rule by domain name.
+pub type DomainRuleMatcher = DomainMatcher<Arc<DomainRule>>;
+
+impl DomainRuleMatcher {
+    pub fn create(cfg: &SmartDnsConfig) -> Self {
+        let mut keys = vec![];
+        let mut values = vec![];
+
+        for rule in cfg.domain_rules.iter() {
+            let rule = Arc::new(rule.clone());
+            match &rule.domain {
+                DomainId::Domain(domain) => {
+                    keys.push(domain.to_owned());
+                    values.push(rule.clone());
+                }
+                DomainId::DomainSet(set_name) => {
+                    if let Some(set) = cfg.domain_sets.get(set_name) {
+                        for domain in set.iter() {
+                            keys.push(domain.to_owned());
+                            values.push(rule.clone());
                         }
                     }
                 }
