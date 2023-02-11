@@ -4,10 +4,22 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use trust_dns_proto::rr::Name;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DomainMatcher<T: Debug>(HashMap<Name, T>);
 
+impl<T: Debug> Default for DomainMatcher<T> {
+    #[inline]
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
 impl<T: Debug> DomainMatcher<T> {
+    #[inline]
+    pub fn from_map(keys: Vec<Name>, values: Vec<T>) -> Self {
+        Self(create_map(keys, values))
+    }
+
     pub fn find(&self, domain: &Name) -> Option<&T> {
         let mut domain = domain.to_owned();
 
@@ -15,6 +27,12 @@ impl<T: Debug> DomainMatcher<T> {
             if let Some(v) = self.0.get(&domain) {
                 return Some(v);
             }
+
+            if !domain.is_fqdn() {
+                domain.set_fqdn(true);
+                continue;
+            }
+
             if domain.is_root() {
                 break;
             }
@@ -25,9 +43,23 @@ impl<T: Debug> DomainMatcher<T> {
         None
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+fn create_map<K: std::hash::Hash + std::cmp::Eq, V>(keys: Vec<K>, values: Vec<V>) -> HashMap<K, V> {
+    let mut map = HashMap::new();
+    for (k, v) in keys.into_iter().zip(values) {
+        map.insert(k, v);
+    }
+    map
 }
 
 pub type DomainAddressMatcher = DomainMatcher<DomainAddress>;
@@ -113,12 +145,4 @@ impl DomainRuleMatcher {
         }
         DomainMatcher(create_map(keys, values))
     }
-}
-
-fn create_map<K: std::hash::Hash + std::cmp::Eq, V>(keys: Vec<K>, values: Vec<V>) -> HashMap<K, V> {
-    let mut map = HashMap::new();
-    for (k, v) in keys.into_iter().zip(values) {
-        map.insert(k, v);
-    }
-    map
 }
