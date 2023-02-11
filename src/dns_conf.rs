@@ -8,11 +8,11 @@ use std::str::FromStr;
 
 use cfg_if::cfg_if;
 use ipnet::IpNet;
-use trust_dns_client::rr::{domain, LowerName};
-use trust_dns_resolver::Name;
+use trust_dns_proto::rr::Name;
 
 use crate::dns::RecordType;
 use crate::dns_url::DnsUrl;
+use crate::infra::file_mode::FileMode;
 use crate::log::{debug, error, info, warn};
 
 const DEFAULT_SERVER: &'static str = "https://cloudflare-dns.com/dns-query";
@@ -184,6 +184,9 @@ pub struct SmartDnsConfig {
     /// maximum reply ttl for resource record
     pub rr_ttl_reply_max: Option<u64>,
 
+    /// ttl for local address and host (default: rr-ttl-min)
+    pub local_ttl: Option<u64>,
+
     /// Maximum number of IPs returned to the client|8|number of IPs, 1~16
     pub max_reply_ip_num: Option<u8>,
 
@@ -202,6 +205,8 @@ pub struct SmartDnsConfig {
     pub log_size: Option<u64>,
     /// number of logs, 0 means disable log
     pub log_num: Option<u64>,
+    ///  log file mode
+    pub log_file_mode: Option<FileMode>,
 
     /// dns audit
     ///
@@ -221,6 +226,8 @@ pub struct SmartDnsConfig {
     pub audit_size: Option<u64>,
     /// number of audit files.
     pub audit_num: Option<usize>,
+    /// audit file mode
+    pub audit_file_mode: Option<FileMode>,
 
     /// Support reading dnsmasq dhcp file to resolve local hostname
     pub dnsmasq_lease_file: Option<PathBuf>,
@@ -242,7 +249,7 @@ pub struct SmartDnsConfig {
     ///   nameserver /www.example.com/office, Set the domain name to use the appropriate server group.
     ///   nameserver /www.example.com/-, ignore this domain
     /// ```
-    pub forward_rules: Vec<ForwardRuleItem>,
+    pub forward_rules: Vec<ForwardRule>,
 
     /// specific address to domain
     ///
@@ -254,10 +261,13 @@ pub struct SmartDnsConfig {
     ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
     ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
     /// ```
-    pub address_rules: Vec<AddressRuleItem>,
+    pub address_rules: Vec<AddressRule>,
+
+    /// set domain rules
+    pub domain_rules: Vec<DomainRule>,
 
     pub resolv_file: Option<String>,
-    pub domain_sets: HashMap<String, HashSet<LowerName>>,
+    pub domain_sets: HashMap<String, HashSet<Name>>,
 }
 
 impl SmartDnsConfig {
@@ -364,7 +374,7 @@ pub struct BindServer {
     pub ssl_config: Option<SslConfig>,
 
     /// the options
-    pub opts: ServerOpts,
+    pub opts: QueryOpts,
 }
 
 impl FromStr for BindServer {
@@ -375,14 +385,15 @@ impl FromStr for BindServer {
 
         let mut addr = None;
         let mut group = None;
-        let mut no_rule_addr = false;
-        let mut no_rule_nameserver = false;
-        let mut no_rule_ipset = false;
-        let mut no_speed_check = false;
-        let mut no_cache = false;
-        let mut no_rule_soa = false;
-        let mut no_dualstack_selection = false;
-        let mut force_aaaa_soa = false;
+        let mut no_rule_addr = None;
+        let mut no_rule_nameserver = None;
+        let mut no_rule_ipset = None;
+        let mut no_speed_check = None;
+        let mut no_cache = None;
+        let mut no_rule_soa = None;
+        let mut no_dualstack_selection = None;
+        let mut force_aaaa_soa = None;
+        let mut no_serve_expired = None;
 
         // ssl parameters
         let mut server_name = None;
@@ -393,14 +404,15 @@ impl FromStr for BindServer {
             if part.starts_with('-') {
                 match part {
                     "-group" => group = parts.next().map(|p| p.to_string()),
-                    "-no-rule-addr" => no_rule_addr = true,
-                    "-no-rule-nameserver" => no_rule_nameserver = true,
-                    "-no-rule-ipset" => no_rule_ipset = true,
-                    "-no-speed-check" => no_speed_check = true,
-                    "-no-cache" => no_cache = true,
-                    "-no-rule-soa" => no_rule_soa = true,
-                    "-no-dualstack-selection" => no_dualstack_selection = true,
-                    "-force-aaaa-soa" => force_aaaa_soa = true,
+                    "-no-rule-addr" => no_rule_addr = Some(true),
+                    "-no-rule-nameserver" => no_rule_nameserver = Some(true),
+                    "-no-rule-ipset" => no_rule_ipset = Some(true),
+                    "-no-speed-check" => no_speed_check = Some(true),
+                    "-no-cache" => no_cache = Some(true),
+                    "-no-rule-soa" => no_rule_soa = Some(true),
+                    "-no-serve-expired" => no_serve_expired = Some(true),
+                    "-no-dualstack-selection" => no_dualstack_selection = Some(true),
+                    "-force-aaaa-soa" => force_aaaa_soa = Some(true),
                     "-server-name" => server_name = parts.next().map(|p| p.to_string()),
                     "-ssl-certificate" => {
                         ssl_certificate = parts.next().map(|p| Path::new(p).to_path_buf())
@@ -438,7 +450,7 @@ impl FromStr for BindServer {
         Ok(Self {
             addrs: sock_addrs,
             ssl_config,
-            opts: ServerOpts {
+            opts: QueryOpts {
                 group,
                 no_rule_addr,
                 no_rule_nameserver,
@@ -448,6 +460,7 @@ impl FromStr for BindServer {
                 no_rule_soa,
                 no_dualstack_selection,
                 force_aaaa_soa,
+                no_serve_expired,
             },
         })
     }
@@ -467,39 +480,158 @@ pub struct SslConfig {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub struct ServerOpts {
+pub struct QueryOpts {
     /// set domain request to use the appropriate server group.
-    pub group: Option<String>,
+    group: Option<String>,
 
     /// skip address rule.
-    pub no_rule_addr: bool,
+    no_rule_addr: Option<bool>,
 
     /// skip nameserver rule.
-    pub no_rule_nameserver: bool,
+    no_rule_nameserver: Option<bool>,
 
     /// skip ipset rule.
-    pub no_rule_ipset: bool,
+    no_rule_ipset: Option<bool>,
 
     /// do not check speed.
-    pub no_speed_check: bool,
+    no_speed_check: Option<bool>,
 
     /// skip cache.
-    pub no_cache: bool,
+    no_cache: Option<bool>,
 
     /// Skip address SOA(#) rules.
-    pub no_rule_soa: bool,
+    no_rule_soa: Option<bool>,
 
     /// Disable dualstack ip selection.
-    pub no_dualstack_selection: bool,
+    no_dualstack_selection: Option<bool>,
 
     /// force AAAA query return SOA.
-    pub force_aaaa_soa: bool,
+    force_aaaa_soa: Option<bool>,
+
+    /// do not serve expired
+    no_serve_expired: Option<bool>,
 }
 
-impl ServerOpts {
+impl QueryOpts {
     #[inline]
     pub fn is_default(&self) -> bool {
         self.eq(&Default::default())
+    }
+
+    /// set domain request to use the appropriate server group.
+    #[inline]
+    pub fn group(&self) -> Option<&str> {
+        self.group.as_ref().map(|g| g.as_str())
+    }
+
+    /// skip address rule.
+    #[inline]
+    pub fn no_rule_addr(&self) -> bool {
+        self.no_rule_addr.unwrap_or_default()
+    }
+
+    /// skip nameserver rule.
+    #[inline]
+    pub fn no_rule_nameserver(&self) -> bool {
+        self.no_rule_nameserver.unwrap_or_default()
+    }
+
+    /// skip ipset rule.
+    #[inline]
+    pub fn no_rule_ipset(&self) -> bool {
+        self.no_rule_ipset.unwrap_or_default()
+    }
+
+    ///  do not check speed.
+    #[inline]
+    pub fn no_speed_check(&self) -> bool {
+        self.no_speed_check.unwrap_or_default()
+    }
+
+    /// skip cache.
+    #[inline]
+    pub fn no_cache(&self) -> bool {
+        self.no_cache.unwrap_or_default()
+    }
+
+    /// Skip address SOA(#) rules.
+    #[inline]
+    pub fn no_rule_soa(&self) -> bool {
+        self.no_rule_soa.unwrap_or_default()
+    }
+
+    /// Disable dualstack ip selection.
+    #[inline]
+    pub fn no_dualstack_selection(&self) -> bool {
+        self.no_dualstack_selection.unwrap_or_default()
+    }
+
+    /// force AAAA query return SOA.
+    #[inline]
+    pub fn force_aaaa_soa(&self) -> bool {
+        self.force_aaaa_soa.unwrap_or_default()
+    }
+
+    /// do not serve expired.
+    #[inline]
+    pub fn no_serve_expired(&self) -> bool {
+        self.no_serve_expired.unwrap_or_default()
+    }
+
+    pub fn apply(&mut self, other: Self) {
+        let Self {
+            group,
+            no_rule_addr,
+            no_rule_nameserver,
+            no_rule_ipset,
+            no_speed_check,
+            no_cache,
+            no_rule_soa,
+            no_dualstack_selection,
+            force_aaaa_soa,
+            no_serve_expired,
+        } = other;
+
+        if self.group.is_none() {
+            self.group = group;
+        }
+        if self.no_rule_addr.is_none() {
+            self.no_rule_addr = no_rule_addr;
+        }
+        if self.no_rule_nameserver.is_none() {
+            self.no_rule_nameserver = no_rule_nameserver;
+        }
+        if self.no_rule_ipset.is_none() {
+            self.no_rule_ipset = no_rule_ipset;
+        }
+
+        if self.no_speed_check.is_none() {
+            self.no_speed_check = no_speed_check;
+        }
+        if self.no_cache.is_none() {
+            self.no_cache = no_cache;
+        }
+        if self.no_rule_soa.is_none() {
+            self.no_rule_soa = no_rule_soa;
+        }
+
+        if self.no_dualstack_selection.is_none() {
+            self.no_dualstack_selection = no_dualstack_selection;
+        }
+
+        if self.force_aaaa_soa.is_none() {
+            self.force_aaaa_soa = force_aaaa_soa;
+        }
+
+        if self.no_serve_expired.is_none() {
+            self.no_serve_expired = no_serve_expired;
+        }
+    }
+}
+
+impl std::ops::AddAssign for QueryOpts {
+    fn add_assign(&mut self, rhs: Self) {
+        self.apply(rhs)
     }
 }
 
@@ -631,7 +763,7 @@ impl From<DnsUrl> for DnsServer {
 
 #[derive(Debug, Clone)]
 pub struct DomainAddressRule {
-    pub domain: LowerName,
+    pub domain: Name,
     pub address: DomainAddress,
 }
 
@@ -675,24 +807,94 @@ impl FromStr for DomainAddress {
 }
 
 #[derive(Debug, Clone)]
-pub struct AddressRuleItem {
-    pub domain: DomainOrDomainSet,
+pub struct AddressRule {
+    pub domain: DomainId,
     pub address: DomainAddress,
 }
 
+/// alias: nameserver rules
 #[derive(Debug, Clone)]
-pub struct ForwardRuleItem {
-    pub domain: DomainOrDomainSet,
+pub struct ForwardRule {
+    pub domain: DomainId,
     pub server_group: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct DomainRule {
+    pub domain: DomainId,
+    pub speed_check_mode: Option<SpeedCheckMode>,
+    pub address: Option<IpAddr>,
+    pub nameserver: Option<String>,
+    // ipset:
+    // nftset
+    pub dualstack_ip_selection: Option<bool>,
+}
+
+impl FromStr for DomainRule {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts = parse::split_options(s, '/').collect::<Vec<&str>>();
+        if parts.is_empty() {
+            return Err(());
+        }
+
+        if let Ok(domain) = DomainId::from_str(parts[0]) {
+            let mut speed_check_mode = None;
+            let mut address = None;
+
+            let mut nameserver = None;
+
+            let mut dualstack_ip_selection = None;
+
+            let mut parts = parse::split_options(parts[1], ' ');
+
+            while let Some(part) = parts.next() {
+                match part {
+                    "-c" | "-speed-check-mode" => {
+                        speed_check_mode = parts
+                            .next()
+                            .map(SpeedCheckMode::from_str)
+                            .map(|r| r.ok())
+                            .unwrap_or_default()
+                    }
+                    "-a" | "-address" => {
+                        address = parts
+                            .next()
+                            .map(IpAddr::from_str)
+                            .map(|r| r.ok())
+                            .unwrap_or_default()
+                    }
+                    "-n" | "-nameserver" => nameserver = parts.next().map(|s| s.to_string()),
+                    "-d" | "-dualstack-ip-selection" => {
+                        dualstack_ip_selection = parts.next().map(parse::parse_bool)
+                    }
+                    "-p" | "-ipset" => warn!("ignore ipset: {:?}", parts.next()),
+                    "-t" | "-nftset" => warn!("ignore nftset: {:?}", parts.next()),
+                    opt => warn!("unknown option: {}", opt),
+                }
+            }
+
+            Ok(Self {
+                domain,
+                speed_check_mode,
+                address,
+                nameserver,
+                dualstack_ip_selection,
+            })
+        } else {
+            return Err(());
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DomainOrDomainSet {
-    Domain(LowerName),
+pub enum DomainId {
+    Domain(Name),
     DomainSet(String),
 }
 
-impl FromStr for DomainOrDomainSet {
+impl FromStr for DomainId {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -700,10 +902,10 @@ impl FromStr for DomainOrDomainSet {
             let idx = s.find(':').unwrap();
             let set_name = &s[(idx + 1)..];
 
-            Ok(DomainOrDomainSet::DomainSet(set_name.to_string()))
-        } else if let Ok(mut domain) = domain::Name::from_str(s) {
+            Ok(DomainId::DomainSet(set_name.to_string()))
+        } else if let Ok(mut domain) = Name::from_str(s) {
             domain.set_fqdn(true);
-            Ok(DomainOrDomainSet::Domain(domain.into()))
+            Ok(DomainId::Domain(domain.to_lowercase()))
         } else {
             Err(())
         }
@@ -881,6 +1083,7 @@ mod parse {
                         "rr-ttl-min" => self.rr_ttl_min = options.parse().ok(),
                         "rr-ttl-max" => self.rr_ttl_max = options.parse().ok(),
                         "rr-ttl-reply-max" => self.rr_ttl_reply_max = options.parse().ok(),
+                        "local-ttl" => self.local_ttl = options.parse().ok(),
                         "max-reply-ip-num" => self.max_reply_ip_num = options.parse().ok(),
                         "response-mode" => self.response_mode = options.parse().ok(),
                         "log-level" => self.log_level = Some(options.to_string()),
@@ -891,6 +1094,7 @@ mod parse {
                                 .ok()
                         }
                         "log-num" => self.log_num = options.parse().ok(),
+                        "log-file-mode" => self.log_file_mode = options.parse().ok(),
                         "audit-enable" => self.audit_enable = parse_bool(options),
                         "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
                         "audit-size" => {
@@ -899,6 +1103,7 @@ mod parse {
                                 .ok()
                         }
                         "audit-num" => self.audit_num = options.parse().ok(),
+                        "audit-file-mode" => self.audit_file_mode = options.parse().ok(),
                         "dnsmasq-lease-file" => {
                             self.dnsmasq_lease_file = Some(Path::new(options).to_owned())
                         }
@@ -909,6 +1114,8 @@ mod parse {
                         }
                         "nameserver" => self.config_nameserver(options),
                         "address" => self.config_address(options),
+                        "domain-rules" => self.config_domain_rule(options),
+                        "domain-rule" => self.config_domain_rule(options),
                         "resolv-file" => self.resolv_file = Some(options.to_string()),
                         "domain-set" => self
                             .config_domain_set(options)
@@ -968,10 +1175,10 @@ mod parse {
                 let server_group = parts[1].to_string();
                 let part0 = parts[0];
 
-                let domain = DomainOrDomainSet::from_str(part0);
+                let domain = DomainId::from_str(part0);
 
                 if let Ok(domain) = domain {
-                    self.forward_rules.push(ForwardRuleItem {
+                    self.forward_rules.push(ForwardRule {
                         domain,
                         server_group,
                     })
@@ -990,15 +1197,21 @@ mod parse {
                 return;
             }
 
-            if let Ok(domain) = DomainOrDomainSet::from_str(parts[0]) {
+            if let Ok(domain) = DomainId::from_str(parts[0]) {
                 let domain_address = parts.iter().nth(1).map(|p| *p).unwrap_or("#");
 
                 if let Ok(addr) = DomainAddress::from_str(domain_address) {
-                    self.address_rules.push(AddressRuleItem {
+                    self.address_rules.push(AddressRule {
                         domain,
                         address: addr,
                     });
                 }
+            }
+        }
+
+        fn config_domain_rule(&mut self, options: &str) {
+            if let Ok(rule) = DomainRule::from_str(options) {
+                self.domain_rules.push(rule)
             }
         }
 
@@ -1041,7 +1254,7 @@ mod parse {
                 let reader = BufReader::new(file);
                 for line in reader.lines() {
                     if let Some(line) = preline(line?.as_str()) {
-                        if let Ok(mut d) = domain::Name::from_str(line) {
+                        if let Ok(mut d) = Name::from_str(line) {
                             d.set_fqdn(true);
                             domain_set.insert(d.into());
                         }
@@ -1132,7 +1345,7 @@ mod parse {
         }
     }
 
-    fn parse_bool(s: &str) -> bool {
+    pub fn parse_bool(s: &str) -> bool {
         match s {
             "y" | "yes" | "t" | "true" | "1" => true,
             _ => false,
@@ -1251,7 +1464,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.domain,
-                DomainOrDomainSet::from_str("test.example.com").unwrap()
+                DomainId::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.address, DomainAddress::SOA);
@@ -1267,7 +1480,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.domain,
-                DomainOrDomainSet::from_str("test.example.com").unwrap()
+                DomainId::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.address, DomainAddress::SOAv4);
@@ -1283,7 +1496,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.domain,
-                DomainOrDomainSet::from_str("test.example.com").unwrap()
+                DomainId::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.address, DomainAddress::SOAv6);
@@ -1299,7 +1512,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.domain,
-                DomainOrDomainSet::from_str("test.example.com").unwrap()
+                DomainId::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.address, DomainAddress::IGN);
@@ -1315,7 +1528,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.domain,
-                DomainOrDomainSet::from_str("test.example.com").unwrap()
+                DomainId::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.address, DomainAddress::IGNv4);
@@ -1331,7 +1544,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.domain,
-                DomainOrDomainSet::from_str("test.example.com").unwrap()
+                DomainId::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.address, DomainAddress::IGNv6);
@@ -1347,10 +1560,56 @@ mod parse {
 
             assert_eq!(
                 nameserver_rule.domain,
-                DomainOrDomainSet::from_str("doh.pub").unwrap().into()
+                DomainId::from_str("doh.pub").unwrap().into()
             );
 
             assert_eq!(nameserver_rule.server_group, "bootstrap");
+        }
+
+        #[test]
+        fn test_config_domain_rule() {
+            let mut cfg = SmartDnsConfig::new();
+
+            cfg.config_item("domain-rule /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
+
+            let domain_rule = cfg.domain_rules.first().unwrap();
+
+            assert_eq!(
+                domain_rule.domain,
+                DomainId::Domain(Name::from_str("doh.pub").unwrap().into())
+            );
+            assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
+            assert_eq!(domain_rule.speed_check_mode, Some(SpeedCheckMode::Ping));
+            assert_eq!(domain_rule.nameserver, Some("test".to_string()));
+            assert_eq!(domain_rule.dualstack_ip_selection, Some(true));
+        }
+
+        #[test]
+        fn test_config_domain_rule_2() {
+            let mut cfg = SmartDnsConfig::new();
+
+            cfg.config_item("domain-rules /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
+
+            let domain_rule = cfg.domain_rules.first().unwrap();
+
+            assert_eq!(
+                domain_rule.domain,
+                DomainId::Domain(Name::from_str("doh.pub").unwrap().into())
+            );
+            assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
+            assert_eq!(domain_rule.speed_check_mode, Some(SpeedCheckMode::Ping));
+            assert_eq!(domain_rule.nameserver, Some("test".to_string()));
+            assert_eq!(domain_rule.dualstack_ip_selection, Some(true));
+        }
+
+        #[test]
+        fn test_parse_config_log_file_mode() {
+            let mut cfg = SmartDnsConfig::new();
+
+            cfg.config_item("log-file-mode 644");
+            assert_eq!(cfg.log_file_mode, Some(0o644u32.into()));
+            cfg.config_item("log-file-mode 0o755");
+            assert_eq!(cfg.log_file_mode, Some(0o755u32.into()));
         }
 
         #[test]
@@ -1390,7 +1649,7 @@ mod parse {
             assert_eq!(cfg.server_name, "SmartDNS123".parse().ok());
             assert_eq!(
                 cfg.forward_rules.first().unwrap().domain,
-                DomainOrDomainSet::from_str("doh.pub").unwrap().into()
+                DomainId::from_str("doh.pub").unwrap().into()
             );
             assert_eq!(cfg.forward_rules.first().unwrap().server_group, "bootstrap");
         }

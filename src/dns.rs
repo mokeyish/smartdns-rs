@@ -3,24 +3,22 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::{str::FromStr, sync::Arc, time::Duration};
 
-use trust_dns_proto::rr::rdata::SOA;
-use trust_dns_resolver::error::ResolveError;
-
+use crate::dns_conf::DomainRule;
 use crate::dns_server::Request as OriginRequest;
 use crate::log::info;
 use crate::{
     dns_client::DnsClient,
-    dns_conf::{ServerOpts, SmartDnsConfig},
+    dns_conf::{QueryOpts, SmartDnsConfig},
 };
 
 pub use trust_dns_proto::{
     op,
-    rr::{self, Name, RData, Record, RecordType},
+    rr::{self, rdata::SOA, Name, RData, Record, RecordType},
 };
 
 pub use trust_dns_resolver::{
     config::{NameServerConfig, NameServerConfigGroup},
-    error::ResolveErrorKind,
+    error::{ResolveError, ResolveErrorKind},
     lookup::Lookup,
 };
 
@@ -31,7 +29,8 @@ pub struct DnsContext {
     pub fastest_speed: Duration,
     pub lookup_source: LookupSource,
     pub no_cache: bool,
-    pub server_opts: ServerOpts,
+    pub query_opts: QueryOpts,
+    pub domain_rule: Option<Arc<DomainRule>>,
 }
 
 #[derive(Clone)]
@@ -109,16 +108,36 @@ impl SmartDnsConfig {
         .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
     }
 
+    #[inline]
     pub fn tcp_idle_time(&self) -> u64 {
-        self.tcp_idle_time.unwrap_or(30)
+        self.tcp_idle_time.unwrap_or(120)
     }
 
+    #[inline]
+    pub fn rr_ttl_min(&self) -> u64 {
+        self.rr_ttl_min.unwrap_or(60)
+    }
+
+    #[inline]
     pub fn rr_ttl(&self) -> u64 {
         self.rr_ttl.unwrap_or(300)
     }
 
+    #[inline]
+    pub fn local_ttl(&self) -> u64 {
+        self.local_ttl.unwrap_or_else(|| self.rr_ttl_min())
+    }
+
     pub fn cache_size(&self) -> usize {
         self.cache_size.unwrap_or(512)
+    }
+
+    pub fn cache_persist(&self) -> bool {
+        self.cache_persist.unwrap_or(false)
+    }
+
+    pub fn audit_num(&self) -> usize {
+        self.audit_num.unwrap_or(2)
     }
 
     pub fn audit_size(&self) -> u64 {
@@ -126,8 +145,8 @@ impl SmartDnsConfig {
         self.audit_size.unwrap_or(n_kb_bytes(128) as u64)
     }
 
-    pub fn audit_num(&self) -> usize {
-        self.audit_num.unwrap_or(2)
+    pub fn audit_file_mode(&self) -> u32 {
+        self.audit_file_mode.map(|m| *m).unwrap_or(0o640)
     }
 
     pub fn log_enabled(&self) -> bool {
@@ -176,6 +195,9 @@ impl SmartDnsConfig {
     pub fn log_size(&self) -> u64 {
         use byte_unit::n_kb_bytes;
         self.audit_size.unwrap_or(n_kb_bytes(128) as u64)
+    }
+    pub fn log_file_mode(&self) -> u32 {
+        self.log_file_mode.map(|m| *m).unwrap_or(0o640)
     }
 }
 

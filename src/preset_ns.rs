@@ -14,7 +14,7 @@ pub const GOOGLE: &'static str = "dns.google";
 
 /// IP address for the Quad9 DNS service
 /// Please see: https://www.quad9.net/
-use trust_dns_resolver::config::QUAD9_IPS;
+pub use trust_dns_resolver::config::QUAD9_IPS;
 pub const QUAD9: &'static str = "dns.quad9.net";
 
 /// IP address for the Ali DNS service

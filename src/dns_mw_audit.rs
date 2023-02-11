@@ -57,13 +57,18 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddl
 }
 
 impl DnsAuditMiddleware {
-    pub fn new<P: AsRef<Path>>(path: P, audit_size: u64, audit_num: usize) -> Self {
+    pub fn new<P: AsRef<Path>>(
+        path: P,
+        audit_size: u64,
+        audit_num: usize,
+        mode: Option<u32>,
+    ) -> Self {
         let audit_file = path.as_ref().to_owned();
 
         let (audit_tx, mut audit_rx) = mpsc::channel::<DnsAuditRecord>(100);
 
         tokio::spawn(async move {
-            let mut audit_file = MappedFile::open(audit_file, audit_size, Some(audit_num));
+            let mut audit_file = MappedFile::open(audit_file, audit_size, Some(audit_num), mode);
 
             const BUF_SIZE: usize = 10;
             let mut buf: SmallVec<[DnsAuditRecord; BUF_SIZE]> = SmallVec::new();
@@ -313,7 +318,10 @@ mod tests {
         let file = format!("./logs/test-{}-audit.log", Local::now().timestamp_millis());
         let file = Path::new(file.as_str());
 
-        record_audit_to_file(&mut MappedFile::open(file, 102400, None), &[audit]);
+        record_audit_to_file(
+            &mut MappedFile::open(file, 102400, None, Default::default()),
+            &[audit],
+        );
 
         assert!(file.exists());
 
@@ -365,7 +373,10 @@ mod tests {
         let file = format!("./logs/test-{}-audit.csv", Local::now().timestamp_millis());
         let file = Path::new(file.as_str());
 
-        record_audit_to_file(&mut MappedFile::open(file, 102400, None), &[audit1]);
+        record_audit_to_file(
+            &mut MappedFile::open(file, 102400, None, Default::default()),
+            &[audit1],
+        );
 
         assert!(file.exists());
 
@@ -378,7 +389,10 @@ mod tests {
 
         assert_eq!(s, "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n");
 
-        record_audit_to_file(&mut MappedFile::open(file, 102400, None), &[audit2]);
+        record_audit_to_file(
+            &mut MappedFile::open(file, 102400, None, Default::default()),
+            &[audit2],
+        );
 
         let mut s = String::new();
 
