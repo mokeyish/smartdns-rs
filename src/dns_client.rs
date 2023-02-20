@@ -11,7 +11,6 @@ use crate::log::{debug, warn};
 use crate::matcher::DomainNameServerGroupMatcher;
 use crate::preset_ns;
 use crate::third_ext::FutureTimeoutExt;
-use crate::trust_dns::NameServerConfigGroupExt;
 
 use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
 use std::collections::HashMap;
@@ -425,10 +424,10 @@ impl DnsClient {
         };
 
         let nameservers = self.create_nameserver_group(group_name).await;
-        let nameservers = match nameservers {
-            Some(v) => Some(v.filter_available().await),
-            None => None,
-        };
+        // let nameservers = match nameservers {
+        //     Some(v) => Some(v.filter_available().await),
+        //     None => None,
+        // };
 
         if let Some(Ok(resolver)) = nameservers.map(|ss| create_resolver(ss)) {
             let resolver = Arc::new(resolver);
