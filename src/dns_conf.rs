@@ -1356,7 +1356,20 @@ mod parse {
         let addr = addr.trim();
         let mut sock_addrs = vec![];
 
-        if addr.starts_with("*:") || addr.starts_with(":") {
+        if let Some(Ok(port)) = addr.to_lowercase().strip_prefix("localhost:").map(u16::from_str) {
+            cfg_if! {
+                if #[cfg(target_os = "windows")] {
+                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port));
+                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+                }else if #[cfg(target_os = "linux")]  {
+                    // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
+                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port));
+                } else {
+                    // ipv4 default ?
+                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+                }
+            };
+        } else if addr.starts_with("*:") || addr.starts_with(":") {
             let port_str = addr.trim_start_matches("*:").trim_start_matches(':');
             let port = u16::from_str(port_str)
             .expect("The expected format for listening to both IPv4 and IPv6 addresses is :<port>,  *:<port>");
@@ -1673,8 +1686,13 @@ mod parse {
 
         #[test]
         fn test_addr_parse() {
+            assert_eq!(
+                parse_sock_addrs("[::1]:123"),
+                Ok(vec!["[::1]:123".parse::<SocketAddr>().unwrap()])
+            );
             assert!(parse_sock_addrs("[::]:123").is_ok());
             assert!(parse_sock_addrs("0.0.0.0:123").is_ok());
+            assert!(parse_sock_addrs("localhost:123").is_ok());
             assert!(parse_sock_addrs(":123").is_ok());
             assert!(parse_sock_addrs("*:123").is_ok());
         }
