@@ -1959,7 +1959,7 @@ mod parse {
             let sock_addrs = parse_sock_addrs(":123").unwrap();
 
             cfg_if! {
-                if #[cfg(target_os = "windows")] {
+                if #[cfg(any(target_os = "windows", target_os = "macos"))] {
 
                     assert_eq!(sock_addrs.len(), 2);
 
@@ -1972,7 +1972,7 @@ mod parse {
                     assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
                     assert_eq!(sock_addrs.get(1).unwrap().port(), 123);
 
-                }else if #[cfg(any(target_os = "linux", target_os = "macos"))]  {
+                }else if #[cfg(any(target_os = "linux"))]  {
                     // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
 
                     assert_eq!(sock_addrs.len(), 1);
