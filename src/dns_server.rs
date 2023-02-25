@@ -8,7 +8,8 @@ use std::{
 };
 
 use crate::{
-    dns_conf::QueryOpts,
+    dns_conf::ServerOpts,
+    dns_error::LookupError,
     log::{debug, error, info, warn},
 };
 use trust_dns_client::op::{Edns, Header, MessageType, OpCode, ResponseCode};
@@ -17,7 +18,7 @@ pub use trust_dns_server::server::Request;
 pub use trust_dns_server::ServerFuture;
 use trust_dns_server::{
     authority::{
-        AuthLookup, EmptyLookup, LookupError, LookupObject, LookupOptions, MessageResponse,
+        AuthLookup, EmptyLookup, LookupObject, LookupOptions, MessageResponse,
         MessageResponseBuilder, ZoneType,
     },
     server::{RequestHandler, ResponseHandler, ResponseInfo},
@@ -28,7 +29,7 @@ use crate::dns::DnsRequest;
 use crate::dns_mw::DnsMiddlewareHandler;
 
 pub struct ServerRegistry {
-    servers: HashMap<QueryOpts, ServerFuture<ServerHandler>>,
+    servers: HashMap<ServerOpts, ServerFuture<ServerHandler>>,
     handler: Arc<DnsMiddlewareHandler>,
 }
 
@@ -40,12 +41,12 @@ impl ServerRegistry {
         }
     }
 
-    pub fn with_opts(&mut self, opts: QueryOpts) -> &mut ServerFuture<ServerHandler> {
+    pub fn with_opts(&mut self, opts: ServerOpts) -> &mut ServerFuture<ServerHandler> {
         match self.servers.entry(opts.clone()) {
             Entry::Occupied(v) => v.into_mut(),
             Entry::Vacant(v) => v.insert(ServerFuture::new(ServerHandler {
                 handler: self.handler.clone(),
-                server_opts: opts.clone(),
+                server_opts: opts,
             })),
         }
     }
@@ -53,11 +54,11 @@ impl ServerRegistry {
 
 pub struct ServerHandler {
     handler: Arc<DnsMiddlewareHandler>,
-    server_opts: QueryOpts,
+    server_opts: ServerOpts,
 }
 
 impl ServerHandler {
-    pub fn new(handler: Arc<DnsMiddlewareHandler>, server_opts: QueryOpts) -> Self {
+    pub fn new(handler: Arc<DnsMiddlewareHandler>, server_opts: ServerOpts) -> Self {
         Self {
             handler,
             server_opts,
@@ -169,12 +170,12 @@ impl RequestHandler for ServerHandler {
                                 // let future = self.dns_server.search(request_info, lookup_options);
 
                                 let future = async {
-                                    let req: &DnsRequest = request;
+                                    let req: &DnsRequest = &request.into();
 
                                     let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
                                         match self.handler.search(req, &self.server_opts).await {
                                             Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
-                                            Err(err) => Err(LookupError::ResolveError(err)),
+                                            Err(err) => Err(err),
                                         };
 
                                     lookup_result
@@ -292,9 +293,9 @@ async fn send_forwarded_response(
 
     LookupSections {
         answers,
-        ns: Box::new(AuthLookup::default()) as Box<dyn LookupObject>,
-        soa: Box::new(AuthLookup::default()) as Box<dyn LookupObject>,
-        additionals: Box::new(AuthLookup::default()) as Box<dyn LookupObject>,
+        ns: Box::<AuthLookup>::default(),
+        soa: Box::<AuthLookup>::default(),
+        additionals: Box::<AuthLookup>::default(),
     }
 }
 

@@ -7,12 +7,11 @@ use chrono::prelude::*;
 use smallvec::SmallVec;
 use tokio::sync::mpsc::{self, Sender};
 
-use trust_dns_proto::op::Query;
-
 use crate::dns::*;
 use crate::infra::mapped_file::MappedFile;
 use crate::log::warn;
 use crate::middleware::*;
+use crate::trust_dns::proto::op::Query;
 
 pub struct DnsAuditMiddleware {
     audit_sender: Sender<DnsAuditRecord>,
@@ -34,16 +33,16 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddl
 
         let duration = start.elapsed();
 
-        let audit = DnsAuditRecord::new(
-            req.id(),
-            now,
-            req.src().to_string(),
-            req.query().original().to_owned(),
-            res.clone(),
-            duration,
-            ctx.fastest_speed,
-            ctx.lookup_source.clone(),
-        );
+        let audit = DnsAuditRecord {
+            id: req.id(),
+            date: now,
+            client: req.src().to_string(),
+            query: req.query().original().to_owned(),
+            result: res.clone(),
+            elapsed: duration,
+            speed: ctx.fastest_speed,
+            lookup_source: ctx.source.clone(),
+        };
 
         // debug!("{}", audit.to_string_without_date());
 
@@ -98,32 +97,10 @@ pub struct DnsAuditRecord {
     speed: Duration,
     elapsed: Duration,
     date: DateTime<Local>,
-    lookup_source: LookupSource,
+    lookup_source: LookupFrom,
 }
 
 impl DnsAuditRecord {
-    fn new(
-        id: u16,
-        now: DateTime<Local>,
-        source_host: String,
-        query: Query,
-        result: Result<DnsResponse, DnsError>,
-        elapsed: Duration,
-        speed: Duration,
-        lookup_source: LookupSource,
-    ) -> Self {
-        Self {
-            id,
-            date: now,
-            client: source_host,
-            query,
-            result,
-            elapsed,
-            speed,
-            lookup_source,
-        }
-    }
-
     fn fmt_result(&self) -> String {
         self.result
             .as_ref()
@@ -187,7 +164,7 @@ fn record_audit_to_file(audit_file: &mut MappedFile, audit_records: &[DnsAuditRe
         if audit_file.peamble().is_none() {
             let mut writer = csv::Writer::from_writer(vec![]);
             writer
-                .write_record(&[
+                .write_record([
                     "id",
                     "timestamp",
                     "client",
@@ -208,7 +185,7 @@ fn record_audit_to_file(audit_file: &mut MappedFile, audit_records: &[DnsAuditRe
 
         for audit in audit_records {
             writer
-                .write_record(&[
+                .write_record([
                     audit.id.to_string().as_str(),
                     audit.date.timestamp().to_string().as_str(),
                     audit.client.as_str(),
@@ -255,16 +232,16 @@ mod tests {
             RData::A("93.184.216.34".parse().unwrap()),
         ));
 
-        let audit = DnsAuditRecord::new(
-            11,
-            now,
-            "127.0.0.1".to_string(),
-            query,
-            result,
-            Duration::from_millis(10),
-            Duration::from_millis(11),
-            LookupSource::Server("default".to_string()),
-        );
+        let audit = DnsAuditRecord {
+            id: 11,
+            date: now,
+            client: "127.0.0.1".to_string(),
+            query: query,
+            result: result,
+            elapsed: Duration::from_millis(10),
+            speed: Duration::from_millis(11),
+            lookup_source: LookupFrom::Server("default".to_string()),
+        };
 
         assert_eq!(audit.to_string(), format!("[{}] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A", now.format("%Y-%m-%d %H:%M:%S,%3f")));
     }
@@ -279,16 +256,16 @@ mod tests {
             RData::A("93.184.216.34".parse().unwrap()),
         ));
 
-        let audit = DnsAuditRecord::new(
-            11,
-            now,
-            "127.0.0.1".to_string(),
-            query,
-            result,
-            Duration::from_millis(10),
-            Duration::from_millis(11),
-            LookupSource::Server("default".to_string()),
-        );
+        let audit = DnsAuditRecord {
+            id: 11,
+            date: now,
+            client: "127.0.0.1".to_string(),
+            query: query,
+            result: result,
+            elapsed: Duration::from_millis(10),
+            speed: Duration::from_millis(11),
+            lookup_source: LookupFrom::Server("default".to_string()),
+        };
 
         assert_eq!(audit.to_string_without_date(), "127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A");
     }
@@ -304,16 +281,16 @@ mod tests {
 
         let now = "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap();
 
-        let audit = DnsAuditRecord::new(
-            11,
-            now,
-            "127.0.0.1".to_string(),
-            query,
-            result,
-            Duration::from_millis(10),
-            Duration::from_millis(11),
-            LookupSource::Server("default".to_string()),
-        );
+        let audit = DnsAuditRecord {
+            id: 11,
+            date: now,
+            client: "127.0.0.1".to_string(),
+            query: query,
+            result: result,
+            elapsed: Duration::from_millis(10),
+            speed: Duration::from_millis(11),
+            lookup_source: LookupFrom::Server("default".to_string()),
+        };
 
         let file = format!("./logs/test-{}-audit.log", Local::now().timestamp_millis());
         let file = Path::new(file.as_str());
@@ -348,27 +325,27 @@ mod tests {
             RData::A("93.184.216.34".parse().unwrap()),
         ));
 
-        let audit1 = DnsAuditRecord::new(
-            11,
-            "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
-            "127.0.0.1".to_string(),
-            query.clone(),
-            result.clone(),
-            Duration::from_millis(10),
-            Duration::from_millis(11),
-            LookupSource::Server("default1".to_string()),
-        );
+        let audit1 = DnsAuditRecord {
+            id: 11,
+            date: "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
+            client: "127.0.0.1".to_string(),
+            query: query.clone(),
+            result: result.clone(),
+            elapsed: Duration::from_millis(10),
+            speed: Duration::from_millis(11),
+            lookup_source: LookupFrom::Server("default1".to_string()),
+        };
 
-        let audit2 = DnsAuditRecord::new(
-            12,
-            "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
-            "127.0.0.1".to_string(),
+        let audit2 = DnsAuditRecord {
+            id: 12,
+            date: "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap(),
+            client: "127.0.0.1".to_string(),
             query,
             result,
-            Duration::from_millis(10),
-            Duration::from_millis(11),
-            LookupSource::Server("default2".to_string()),
-        );
+            elapsed: Duration::from_millis(10),
+            speed: Duration::from_millis(11),
+            lookup_source: LookupFrom::Server("default2".to_string()),
+        };
 
         let file = format!("./logs/test-{}-audit.csv", Local::now().timestamp_millis());
         let file = Path::new(file.as_str());

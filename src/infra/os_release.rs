@@ -56,7 +56,7 @@ impl FromStr for OsRelease {
         let mut id_like = None;
 
         for line in s.lines() {
-            let eq_idx = match line.find("=") {
+            let eq_idx = match line.find('=') {
                 Some(idx) => idx,
                 None => continue,
             };

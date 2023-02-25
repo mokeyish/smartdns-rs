@@ -1,36 +1,134 @@
+use futures::FutureExt;
 use std::{
     fmt::Display,
     io,
-    net::{AddrParseError, IpAddr, SocketAddr},
+    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::FromStr,
     time::Duration,
 };
 use thiserror::Error;
 
-pub async fn ping(dests: &[PingAddr], times: u16, timeout: Option<Duration>) -> Vec<PingOutput> {
-    let timeout = timeout.unwrap_or(Duration::from_secs(5));
-
+pub async fn ping(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutput, PingError>> {
     let mut outs = Vec::new();
 
-    for (seq, dest) in dests.iter().enumerate() {
-        if let Ok(ping_outputs) = match dest {
-            PingAddr::Icmp(addr) => icmp_ping::ping(*addr, times, timeout).await,
-            PingAddr::Tcp(addr) => tcp_ping::ping(*addr, times, timeout).await,
-        } {
-            if let Some(mut output) = ping_outputs.as_slice().get_avg(seq as u16) {
-                output.seq = seq as u16;
-                outs.push(output);
-            }
-        }
+    for (_seq, dest) in dests.iter().enumerate() {
+        outs.push(match dest {
+            PingAddr::Icmp(addr) => icmp_ping::ping(*addr, opts).await,
+            PingAddr::Tcp(addr) => tcp_ping::ping(*addr, opts).await,
+        })
     }
-
     outs
 }
 
-#[derive(Debug, Clone)]
+pub async fn ping_fastest(
+    dests: Vec<PingAddr>,
+    opts: PingOptions,
+) -> Result<PingOutput, PingError> {
+    use futures_util::future::select_ok;
+
+    let ping_tasks = dests.iter().map(|dst| match dst {
+        PingAddr::Icmp(addr) => icmp_ping::ping(*addr, opts).boxed(),
+        PingAddr::Tcp(addr) => tcp_ping::ping(*addr, opts).boxed(),
+    });
+
+    let res = select_ok(ping_tasks).await;
+
+    match res {
+        Ok((out, _rest)) => Ok(out),
+        Err(err) => Err(err),
+    }
+}
+
+// pub trait PingClient {
+
+//     fn ping(dest: PingAddr, opts: PingOptions) -> Result<PingOutput, PingError>;
+
+//     fn ping_batch(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutput, PingError>>;
+
+//     fn ping_fastest(dests: &[PingAddr], opts: PingOptions) -> Result<PingOutput, PingError>;
+// }
+
+#[derive(Debug, Clone, Copy)]
+pub struct PingOptions {
+    times: u16,
+    timeout: Duration,
+    all_success: bool,
+    duration_agg: DurationAgg,
+}
+
+impl PingOptions {
+    pub fn with_times(mut self, times: u16) -> Self {
+        self.times = times;
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+    pub fn with_timeout_secs(mut self, timeout: u64) -> Self {
+        self.timeout = Duration::from_secs(timeout);
+        self
+    }
+
+    pub fn with_all_success(mut self, enable: bool) -> Self {
+        self.all_success = enable;
+        self
+    }
+
+    pub fn with_duration_agg(mut self, agg: DurationAgg) -> Self {
+        self.duration_agg = agg;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DurationAgg {
+    Min,
+    Mean,
+    Max,
+}
+
+impl Default for PingOptions {
+    fn default() -> Self {
+        Self {
+            times: 1,
+            timeout: Duration::from_secs(5),
+            all_success: false,
+            duration_agg: DurationAgg::Mean,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PingAddr {
     Icmp(IpAddr),
     Tcp(SocketAddr),
+}
+
+impl PingAddr {
+    pub fn ip(self) -> IpAddr {
+        match self {
+            PingAddr::Icmp(ip) => ip,
+            PingAddr::Tcp(addr) => addr.ip(),
+        }
+    }
+}
+
+impl PartialEq<IpAddr> for PingAddr {
+    fn eq(&self, other: &IpAddr) -> bool {
+        self.ip() == *other
+    }
+}
+impl PartialEq<Ipv4Addr> for PingAddr {
+    fn eq(&self, other: &Ipv4Addr) -> bool {
+        self.eq(&IpAddr::V4(*other))
+    }
+}
+impl PartialEq<Ipv6Addr> for PingAddr {
+    fn eq(&self, other: &Ipv6Addr) -> bool {
+        self.eq(&IpAddr::V6(*other))
+    }
 }
 
 impl Display for PingAddr {
@@ -45,7 +143,7 @@ impl Display for PingAddr {
 #[derive(Debug)]
 pub struct PingOutput {
     seq: u16,
-    duration: Result<Duration, PingError>,
+    duration: Duration,
     destination: PingAddr,
 }
 
@@ -56,54 +154,13 @@ impl PingOutput {
     }
 
     #[inline]
-    pub fn duration(&self) -> &Result<Duration, PingError> {
-        &self.duration
+    pub fn duration(&self) -> Duration {
+        self.duration
     }
 
     #[inline]
-    pub fn is_timeout(&self) -> bool {
-        matches!(self.duration, Err(PingError::Timeout))
-    }
-
-    #[inline]
-    pub fn has_err(&self) -> bool {
-        self.duration.is_err()
-    }
-}
-
-pub trait PingOutputIter {
-    fn get_avg(&self, seq: u16) -> Option<PingOutput>;
-}
-
-impl PingOutputIter for &[PingOutput] {
-    fn get_avg(&self, seq: u16) -> Option<PingOutput> {
-        if self.is_empty() {
-            return None;
-        }
-
-        let destination = self.iter().next().unwrap().destination.clone();
-
-        let mut total = Duration::default();
-
-        for output in self.iter() {
-            if output.has_err() {
-                let duration = output.duration.clone();
-                return Some(PingOutput {
-                    seq,
-                    duration,
-                    destination,
-                });
-            }
-            total += *output.duration.as_ref().unwrap();
-        }
-
-        let duration = Ok(total / (self.len() as u32));
-
-        Some(PingOutput {
-            seq,
-            duration,
-            destination,
-        })
+    pub fn destination(&self) -> PingAddr {
+        self.destination
     }
 }
 
@@ -121,11 +178,11 @@ impl TryFrom<&str> for PingAddr {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         let s = s.trim();
-        if s.starts_with("tcp://") {
-            let sock_addr = SocketAddr::from_str(&s[6..])?;
+        if let Some(sock_addr) = s.strip_prefix("tcp://") {
+            let sock_addr = SocketAddr::from_str(sock_addr)?;
             Ok(Self::Tcp(sock_addr))
         } else {
-            let s = if s.starts_with("icmp://") { &s[7..] } else { s };
+            let s = s.strip_prefix("icmp://").unwrap_or(s);
             let ip_addr = IpAddr::from_str(s)?;
             Ok(Self::Icmp(ip_addr))
         }
@@ -144,6 +201,8 @@ pub enum PingError {
     IoError(io::Error),
     #[error("surge error")]
     SurgeError,
+    #[error("No address")]
+    NoAddress,
 }
 
 impl Clone for PingError {
@@ -154,7 +213,32 @@ impl Clone for PingError {
             Self::Timeout => Self::Timeout,
             Self::IoError(err) => Self::IoError(err.kind().into()),
             Self::SurgeError => Self::SurgeError,
+            Self::NoAddress => Self::SurgeError,
         }
+    }
+}
+
+fn do_agg(durations: Vec<Duration>, agg: DurationAgg) -> Option<Duration> {
+    use DurationAgg::*;
+
+    match agg {
+        Min => durations.into_iter().min(),
+        Mean => {
+            let count = durations.len();
+
+            if count > 0 {
+                let mut total = Duration::default();
+
+                for duration in durations {
+                    total += duration;
+                }
+
+                Some(total / (count as u32))
+            } else {
+                None
+            }
+        }
+        Max => durations.into_iter().max(),
     }
 }
 
@@ -164,20 +248,13 @@ mod icmp_ping {
 
     use std::{net::IpAddr, time::Duration};
 
-    use super::{PingError, PingOutput};
-    pub async fn ping(
-        ipaddr: IpAddr,
-        times: u16,
-        _timeout: Duration,
-    ) -> Result<Vec<PingOutput>, PingError> {
-        Ok((0..times)
-            .into_iter()
-            .map(|seq| PingOutput {
-                seq,
-                duration: Ok(Duration::from_millis(1)),
-                destination: super::PingAddr::Icmp(ipaddr),
-            })
-            .collect())
+    use super::{PingError, PingOptions, PingOutput};
+    pub async fn ping(ipaddr: IpAddr, _opts: PingOptions) -> Result<PingOutput, PingError> {
+        Ok(PingOutput {
+            seq: 0,
+            duration: Duration::from_millis(1),
+            destination: super::PingAddr::Icmp(ipaddr),
+        })
     }
 }
 
@@ -188,14 +265,17 @@ mod icmp_ping {
     use rand::random;
     use surge_ping::{Client, Config, IcmpPacket, PingIdentifier, PingSequence, Pinger, ICMP};
 
-    use super::{PingError, PingOutput};
+    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
 
-    pub async fn ping(
-        ipaddr: IpAddr,
-        times: u16,
-        timeout: Duration,
-    ) -> Result<Vec<PingOutput>, PingError> {
-        let mut outs = Vec::new();
+    pub async fn ping(ipaddr: IpAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
+        let PingOptions {
+            times,
+            timeout,
+            all_success,
+            duration_agg,
+        } = opts;
+
+        let mut durations = Vec::new();
 
         let client = match ipaddr {
             IpAddr::V4(_) => Client::new(&Config::default()),
@@ -204,20 +284,36 @@ mod icmp_ping {
 
         let mut pinger = client.pinger(ipaddr, PingIdentifier(random())).await;
         pinger.timeout(timeout);
+        let mut last_err = None;
 
         for seq in 0..times {
             let duration = ping_icmp(seq, &mut pinger).await;
-            outs.push(PingOutput {
-                seq,
-                duration,
-                destination: super::PingAddr::Icmp(ipaddr),
-            });
-
-            if outs.last().unwrap().has_err() {
-                break;
+            match duration {
+                Ok(dur) => durations.push(dur),
+                Err(err) => {
+                    if all_success {
+                        return Err(err);
+                    } else {
+                        last_err = Some(err);
+                        continue;
+                    }
+                }
             }
         }
-        Ok(outs)
+
+        let duration = do_agg(durations, duration_agg);
+
+        match duration {
+            Some(v) => Ok(PingOutput {
+                seq: 0,
+                duration: v,
+                destination: PingAddr::Icmp(ipaddr),
+            }),
+            None => match last_err {
+                Some(err) => Err(err),
+                None => Err(PingError::NoAddress),
+            },
+        }
     }
 
     async fn ping_icmp(seq: u16, pinger: &mut Pinger) -> Result<Duration, PingError> {
@@ -252,32 +348,53 @@ mod tcp_ping {
 
     use crate::third_ext::FutureTimeoutExt;
 
-    use super::{PingError, PingOutput};
+    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
 
     #[inline]
-    pub async fn ping(
-        sock_addr: SocketAddr,
-        times: u16,
-        timeout: Duration,
-    ) -> Result<Vec<PingOutput>, PingError> {
-        let mut outs = Vec::new();
+    pub async fn ping(sock_addr: SocketAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
+        let PingOptions {
+            times,
+            timeout,
+            all_success,
+            duration_agg,
+        } = opts;
 
-        for seq in 0..times {
+        let mut durations = Vec::new();
+
+        let mut last_err = None;
+
+        for _seq in 0..times {
             let duration = ping_tcp(sock_addr)
                 .timeout(timeout)
                 .await
                 .unwrap_or_else(|_| Err(PingError::Timeout));
-            outs.push(PingOutput {
-                seq,
-                duration,
-                destination: super::PingAddr::Tcp(sock_addr),
-            });
-            if outs.last().unwrap().has_err() {
-                break;
+
+            match duration {
+                Ok(dur) => durations.push(dur),
+                Err(err) => {
+                    if all_success {
+                        return Err(err);
+                    } else {
+                        last_err = Some(err);
+                        continue;
+                    }
+                }
             }
         }
 
-        Ok(outs)
+        let duration = do_agg(durations, duration_agg);
+
+        match duration {
+            Some(v) => Ok(PingOutput {
+                seq: 0,
+                duration: v,
+                destination: PingAddr::Tcp(sock_addr),
+            }),
+            None => match last_err {
+                Some(err) => Err(err),
+                None => Err(PingError::NoAddress),
+            },
+        }
     }
 
     #[inline]
@@ -315,6 +432,18 @@ mod tcp_ping {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ping_addr_equation() {
+        assert_eq!(
+            PingAddr::from_str("127.0.0.1").unwrap(),
+            "127.0.0.1".parse::<IpAddr>().unwrap()
+        );
+        assert_eq!(
+            PingAddr::from_str("tcp://223.5.5.5:80").unwrap(),
+            "223.5.5.5".parse::<Ipv4Addr>().unwrap()
+        );
+    }
 
     #[test]
     fn test_parse_ping_target() {
@@ -359,16 +488,42 @@ mod tests {
                     "tcp://223.5.5.5:443".parse().unwrap(),
                     "tcp://223.5.5.5:4446".parse().unwrap(),
                 ],
-                10,
-                Some(Duration::from_secs(3)),
+                PingOptions::default()
+                    .with_times(10)
+                    .with_timeout(Duration::from_secs(3))
+                    .with_all_success(true),
             )
             .await;
 
-            assert!(results.last().unwrap().is_timeout());
+            assert!(matches!(results.last().unwrap(), Err(PingError::Timeout)));
 
             for item in results {
                 println!("Ping {:?}", item);
             }
         })
+    }
+
+    #[test]
+    fn test_ping_fatest() {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let out = ping_fastest(
+                    [
+                        "127.0.0.1".parse().unwrap(),
+                        "icmp://8.8.8.8".parse().unwrap(),
+                        "icmp://223.6.6.6".parse().unwrap(),
+                        "tcp://223.5.5.5:443".parse().unwrap(),
+                        "tcp://223.5.5.5:4446".parse().unwrap(),
+                    ]
+                    .into(),
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+                assert_eq!(out.destination, "127.0.0.1".parse::<PingAddr>().unwrap());
+            });
     }
 }

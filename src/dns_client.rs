@@ -1,562 +1,572 @@
-use crate::dns::op::Query;
-
-use crate::dns::rr::RecordType;
-use crate::dns::DnsError;
-use crate::dns::Lookup;
-use crate::dns::Name;
-use crate::dns::Record;
-use crate::dns_conf::DnsServer;
-use crate::dns_url::DnsUrl;
-use crate::log::{debug, warn};
-use crate::matcher::DomainNameServerGroupMatcher;
-use crate::preset_ns;
-use crate::third_ext::FutureTimeoutExt;
-
-use rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::net::ToSocketAddrs;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Mutex;
-
-use trust_dns_proto::rr::{
-    domain::{IntoName, TryParseIp},
-    record_data::RData,
+use std::{
+    collections::{HashMap, HashSet},
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    slice::Iter,
+    sync::Arc,
+    time::{Duration, Instant},
 };
-use trust_dns_resolver::{
-    config::{
-        NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig, ResolverOpts,
-        TlsClientConfig,
+
+use rustls::ClientConfig;
+
+use trust_dns_proto::{
+    error::ProtoResult,
+    op::{Edns, Message, MessageType, OpCode, Query},
+    rr::{
+        domain::{IntoName, Name},
+        Record, RecordType,
     },
-    error::{ResolveError, ResolveErrorKind},
-    lookup_ip::LookupIp,
-    TokioAsyncResolver, TokioHandle,
+    xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
+    DnsHandle,
 };
 
-use url::Host;
+use crate::dns_error::LookupError;
+use trust_dns_resolver::{
+    config::{NameServerConfig, Protocol, ResolverOpts, TlsClientConfig},
+    lookup::Lookup,
+    lookup_ip::LookupIp,
+    name_server::{GenericConnection, GenericConnectionProvider, TokioRuntime},
+    TokioHandle, TryParseIp,
+};
 
-const LOOKUP_TIMEOUT: u64 = 3;
+use crate::{
+    dns_conf::NameServerInfo,
+    dns_url::DnsUrl,
+    log::{debug, warn},
+};
 
-/// The name of default nameserver group.
-pub const DEFAULT_NAME_SERVER_GROUP_NAME: &'static str = "default";
+/// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
+///   Setting this to a value of 1 day, in seconds
+pub const MAX_TTL: u32 = 86400_u32;
 
-fn create_resolver<T: IntoResolverConfig>(config: T) -> Result<TokioAsyncResolver, String> {
-    let config = config.into();
-
-    let mut options = {
-        let mut opts = ResolverOpts::default();
-        opts.cache_size = 0;
-        opts
-    };
-
-    // See RFC 1034, Section 4.3.2:
-    // "If the data at the node is a CNAME, and QTYPE doesn't match
-    // CNAME, copy the CNAME RR into the answer section of the response,
-    // change QNAME to the canonical name in the CNAME RR, and go
-    // back to step 1."
-    //
-    // Essentially, it's saying that servers (including forwarders)
-    // should emit any found CNAMEs in a response ("copy the CNAME
-    // RR into the answer section"). This is the behavior that
-    // preserve_intemediates enables when set to true, and disables
-    // when set to false. So we set it to true.
-    if !options.preserve_intermediates {
-        warn!(
-            "preserve_intermediates set to false, which is invalid \
-            for a forwarder; switching to true"
-        );
-        options.preserve_intermediates = true;
-    }
-
-    let resolver = TokioAsyncResolver::new(config, options, TokioHandle)
-        .map_err(|e| format!("error constructing new Resolver: {}", e))?;
-
-    Ok(resolver)
-}
-
-pub trait IntoResolverConfig: Sized {
-    fn into(self) -> ResolverConfig;
-}
-
-impl IntoResolverConfig for ResolverConfig {
-    fn into(self) -> ResolverConfig {
-        self
-    }
-}
-
-impl IntoResolverConfig for NameServerConfigGroup {
-    fn into(self) -> ResolverConfig {
-        ResolverConfig::from_parts(None, vec![], self)
-    }
-}
-
+#[derive(Default)]
 pub struct DnsClientBuilder {
-    matcher: Option<DomainNameServerGroupMatcher>,
-    servers: HashMap<String, Vec<DnsServer>>,
-    ca_path: Option<PathBuf>,
+    resolver_opts: ResolverOpts,
+    server_infos: Vec<NameServerInfo>,
     ca_file: Option<PathBuf>,
+    ca_path: Option<PathBuf>,
 }
 
 impl DnsClientBuilder {
-    pub fn add_server<S: Into<DnsServer>>(mut self, server: S) -> Self {
-        use std::collections::hash_map::Entry::*;
-        let server = server.into();
-
-        let group_name = server
-            .group
-            .as_ref()
-            .map(|s| s.to_string())
-            .unwrap_or(DEFAULT_NAME_SERVER_GROUP_NAME.to_string());
-
-        match self.servers.entry(group_name) {
-            Occupied(mut o) => {
-                o.get_mut().push(server);
-            }
-            Vacant(v) => {
-                v.insert(vec![server]);
-            }
-        };
-
-        self
-    }
-
-    pub fn add_servers<S: Into<DnsServer>>(self, servers: Vec<S>) -> Self {
+    pub fn add_servers<S: Into<NameServerInfo>>(self, servers: Vec<S>) -> Self {
         servers.into_iter().fold(self, |b, s| b.add_server(s))
     }
 
-    pub fn build(self) -> DnsClient {
-        DnsClient::new(
-            self.matcher.unwrap_or_default(),
-            self.servers,
-            self.ca_path,
-            self.ca_file,
+    pub fn add_server<S: Into<NameServerInfo>>(mut self, server: S) -> Self {
+        self.server_infos.push(server.into());
+        self
+    }
+
+    pub fn set_ca_file(mut self, file: PathBuf) -> Self {
+        self.ca_file = Some(file);
+        self
+    }
+
+    pub fn set_ca_path(mut self, file: PathBuf) -> Self {
+        self.ca_path = Some(file);
+        self
+    }
+
+    pub async fn build(self) -> DnsClient {
+        let DnsClientBuilder {
+            resolver_opts,
+            server_infos,
+            ca_file,
+            ca_path,
+        } = self;
+
+        let tls_client_config = Self::create_tls_client_config_pair(ca_path, ca_file);
+
+        let name_server_info_groups =
+            server_infos
+                .into_iter()
+                .fold(HashMap::new(), |mut map, info| {
+                    let name = info
+                        .group
+                        .as_deref()
+                        .map(NameServerGroupName::from)
+                        .unwrap_or(NameServerGroupName::Default);
+                    if name != NameServerGroupName::Default
+                        && !info.exclude_default_group
+                        && map
+                            .entry(NameServerGroupName::Default)
+                            .or_insert_with(HashSet::new)
+                            .insert(info.clone())
+                    {
+                        debug!("append {} to default group.", info.url.to_string());
+                    }
+
+                    map.entry(name).or_insert_with(HashSet::new).insert(info);
+                    map
+                });
+
+        let bootstrap = Arc::new(Self::create_bootstrap(resolver_opts));
+
+        let bootstrap = async {
+            let bootstrap_info = name_server_info_groups.get(&NameServerGroupName::Bootstrap);
+
+            let bootstrap = bootstrap.clone();
+            match bootstrap_info {
+                Some(server_infos) => {
+                    let bootstrap = bootstrap.clone();
+                    Arc::new(
+                        Self::create_name_server_group(
+                            NameServerGroupName::Bootstrap,
+                            server_infos,
+                            tls_client_config.clone(),
+                            bootstrap,
+                        )
+                        .await,
+                    )
+                }
+                None => bootstrap,
+            }
+        }
+        .await;
+
+        let mut servers = HashMap::with_capacity(name_server_info_groups.len());
+        servers.insert(NameServerGroupName::Bootstrap, bootstrap.clone());
+
+        for (group_name, group) in name_server_info_groups {
+            if group_name == NameServerGroupName::Bootstrap {
+                continue;
+            }
+            let bootstrap = bootstrap.clone();
+
+            debug!(
+                "create name server group: {}, servers {}",
+                group_name.as_str(),
+                group.len()
+            );
+
+            servers.insert(
+                group_name.clone(),
+                Arc::new(
+                    Self::create_name_server_group(
+                        group_name,
+                        &group,
+                        tls_client_config.clone(),
+                        bootstrap,
+                    )
+                    .await,
+                ),
+            );
+        }
+
+        DnsClient {
+            resolver_opts,
+            servers,
+            tls_client_config,
+        }
+    }
+
+    async fn create_name_server_group(
+        name: NameServerGroupName,
+        infos: &HashSet<NameServerInfo>,
+        tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
+        resolver: Arc<impl GenericResolver + Sync>,
+    ) -> NameServerGroup {
+        let mut servers = vec![];
+
+        for info in infos {
+            let mut url = info.url.clone();
+            if url.domain().is_none() {
+                use crate::preset_ns::find_dns_tls_name;
+                for addr in url.addrs() {
+                    if let Some(name) = find_dns_tls_name(&addr.ip()) {
+                        url.set_host_name(name);
+                        break;
+                    }
+                }
+            }
+            let mut verified_url = match TryInto::<VerifiedDnsUrl>::try_into(url) {
+                Ok(url) => url,
+                Err(mut url) => {
+                    if let Some(host) = url.domain() {
+                        let ips = match resolver.lookup_ip(host).await {
+                            Ok(lookup_ip) => lookup_ip.into_iter().collect::<Vec<_>>(),
+                            Err(_) => vec![],
+                        };
+                        url.set_ip_addrs(ips);
+                    }
+                    match TryInto::<VerifiedDnsUrl>::try_into(url) {
+                        Ok(url) => url,
+                        _ => continue,
+                    }
+                }
+            };
+
+            // tls sni
+            if let Some(n) = info.host_name.as_deref() {
+                if n != "-" {
+                    verified_url.set_host_name(n)
+                } else {
+                    verified_url.set_sni_verify(false)
+                }
+            }
+
+            let nameserver_opts = NameServerOpts::new(
+                info.blacklist_ip,
+                info.whitelist_ip,
+                info.check_edns,
+                *resolver.options(),
+            );
+
+            let name_server_configs =
+                NameServer::create_config_from_url(&verified_url, tls_client_config.clone());
+
+            for name_server_config in name_server_configs {
+                servers.push(NameServer::new(name_server_config, nameserver_opts.clone()))
+            }
+        }
+
+        NameServerGroup {
+            name,
+            resolver_opts: resolver.options().to_owned(),
+            servers,
+        }
+    }
+
+    fn create_bootstrap(resolver_opts: ResolverOpts) -> NameServerGroup {
+        let sys_cfgs = {
+            #[cfg(unix)]
+            {
+                use trust_dns_resolver::system_conf::read_system_conf;
+                // todo:// read running resolv.conf
+                // let path = &[
+                //     "/var/run/resolv.conf"   // macos
+                // ];
+
+                read_system_conf()
+            }
+            #[cfg(windows)]
+            {
+                use trust_dns_resolver::system_conf::read_system_conf;
+                read_system_conf()
+            }
+        }
+        .map(|(r, _)| r.name_servers().to_vec())
+        .unwrap_or_default();
+
+        use crate::preset_ns::{self, ALIDNS};
+        use trust_dns_resolver::config::NameServerConfigGroup;
+
+        let mut cfgs = NameServerConfigGroup::from_ips_https(
+            preset_ns::find_dns_ips(ALIDNS).unwrap(),
+            443,
+            ALIDNS.to_string(),
+            true,
         )
+        .to_vec();
+
+        cfgs.extend(sys_cfgs);
+
+        let nameserver_opts = NameServerOpts {
+            resolver_opts,
+            ..Default::default()
+        };
+
+        let servers = cfgs
+            .into_iter()
+            .map(|cfg| NameServer::new(cfg, nameserver_opts.clone()))
+            .collect::<Vec<_>>();
+
+        NameServerGroup {
+            name: NameServerGroupName::Bootstrap,
+            resolver_opts,
+            servers,
+        }
+    }
+
+    fn create_tls_client_config_pair(
+        ca_path: Option<PathBuf>,
+        ca_file: Option<PathBuf>,
+    ) -> (Arc<ClientConfig>, Arc<ClientConfig>) {
+        let config = Self::create_tls_client_config(
+            [ca_path, ca_file]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+
+        let mut config_sni_disable = config.clone();
+        config_sni_disable.enable_sni = false;
+
+        (Arc::new(config), Arc::new(config_sni_disable))
+    }
+
+    fn create_tls_client_config(paths: &[PathBuf]) -> ClientConfig {
+        use rustls::{OwnedTrustAnchor, RootCertStore};
+
+        const ALPN_H2: &[u8] = b"h2";
+
+        let mut root_store = RootCertStore::empty();
+        root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        }));
+
+        let certs = {
+            let certs1 = rustls_native_certs::load_native_certs().unwrap_or_else(|err| {
+                warn!("load native certs failed.{}", err);
+                Default::default()
+            });
+
+            let certs2 = paths
+                .iter()
+                .filter_map(|path| {
+                    match rustls_native_certs::load_certs_from_path(path.as_path()) {
+                        Ok(certs) => Some(certs),
+                        Err(err) => {
+                            warn!("load certs from path failed.{}", err);
+                            None
+                        }
+                    }
+                })
+                .flatten();
+
+            certs1.into_iter().chain(certs2)
+        };
+
+        for cert in certs {
+            root_store
+                .add(&rustls::Certificate(cert.0))
+                .unwrap_or_else(|err| {
+                    warn!("load certs from path failed.{}", err);
+                })
+        }
+
+        let mut client_config = ClientConfig::builder()
+            .with_safe_default_cipher_suites()
+            .with_safe_default_kx_groups()
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        client_config.alpn_protocols.push(ALPN_H2.to_vec());
+
+        client_config
     }
 }
 
-#[derive(Debug)]
 pub struct DnsClient {
-    bootstrap_resolver: TokioAsyncResolver,
-    matcher: DomainNameServerGroupMatcher,
-    servers: HashMap<String, Vec<DnsServer>>,
-    resolvers: Mutex<HashMap<String, Arc<TokioAsyncResolver>>>,
-    nameserver_ips: Mutex<HashMap<Name, Option<Vec<IpAddr>>>>,
+    resolver_opts: ResolverOpts,
+    servers: HashMap<NameServerGroupName, Arc<NameServerGroup>>,
     tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
 }
 
 impl DnsClient {
     pub fn builder() -> DnsClientBuilder {
-        DnsClientBuilder {
-            matcher: Default::default(),
-            servers: Default::default(),
-            ca_path: Default::default(),
-            ca_file: Default::default(),
-        }
+        DnsClientBuilder::default()
     }
 
-    pub fn new(
-        matcher: DomainNameServerGroupMatcher,
-        servers: HashMap<String, Vec<DnsServer>>,
-        ca_path: Option<PathBuf>,
-        ca_file: Option<PathBuf>,
-    ) -> Self {
-        use crate::preset_ns::{ALIDNS, CLOUDFLARE, GOOGLE, QUAD9};
-
-        let bootstrap_servers = NameServerConfigGroup::from_ips_https(
-            preset_ns::find_dns_ips(ALIDNS).unwrap(),
-            443,
-            ALIDNS.to_string(),
-            true,
-        );
-
-        let nameserver_ips = {
-            let mut map: HashMap<Name, Option<Vec<IpAddr>>> = Default::default();
-
-            for (name, ips) in [ALIDNS, CLOUDFLARE, GOOGLE, QUAD9].map(|name| {
-                let mut domain_name = Name::from_str(name).unwrap();
-                domain_name.set_fqdn(true);
-                (domain_name, preset_ns::find_dns_ips(name).unwrap())
-            }) {
-                map.insert(name, Some(ips.to_vec()));
-            }
-
-            for server in servers.values().flatten() {
-                if let Host::Domain(domain) = server.url.host() {
-                    if let Ok(name) = Name::from_str(domain.to_lowercase().as_str()) {
-                        map.insert(name, None);
-                    } else {
-                        warn!("parse {} as domain name failed", domain);
-                    }
-                }
-            }
-
-            map
-        };
-
-        let bootstrap_resolver: TokioAsyncResolver =
-            create_resolver(bootstrap_servers).expect("Create bootstrap resolver failed.");
-
-        let tls_client_config = {
-            let config = create_tls_client_config(ca_path, ca_file);
-
-            let mut config_sni_disable = config.clone();
-            config_sni_disable.enable_sni = false;
-
-            (Arc::new(config), Arc::new(config_sni_disable))
-        };
-
-        Self {
-            bootstrap_resolver,
-            matcher,
-            servers,
-            resolvers: Default::default(),
-            nameserver_ips: Mutex::new(nameserver_ips),
-            tls_client_config,
-        }
+    pub fn bootstrap(&self) -> Arc<NameServerGroup> {
+        self.servers
+            .get(&NameServerGroupName::Bootstrap)
+            .expect("Bootstrap nameserver not found.")
+            .clone()
     }
 
-    pub fn find_server_group(&self, domain: &Name) -> Option<&[DnsServer]> {
-        let name = self.find_server_group_name(domain);
-        self.servers.get(name).map(|ns| ns.as_slice())
+    pub fn default(&self) -> Arc<NameServerGroup> {
+        self.servers
+            .get(&Default::default())
+            .cloned()
+            .unwrap_or_else(|| self.bootstrap())
     }
 
-    pub fn find_server_group_name(&self, domain: &Name) -> &str {
-        self.matcher
-            .find(domain)
-            .map(|s| s.as_str())
-            .unwrap_or(DEFAULT_NAME_SERVER_GROUP_NAME)
-    }
-
-    pub async fn lookup_nameserver_ip(
-        &self,
-        name: Name,
-        record_type: RecordType,
-    ) -> Option<Lookup> {
-        match self.nameserver_ips.lock().await.get(&name) {
-            Some(ips) => {
-                let ips = match ips {
-                    Some(ips) => ips.clone(),
-                    None => self.resolver_nameserver_domain(name.clone()).await,
-                };
-
-                let records = ips
-                    .iter()
-                    .filter(|ip| {
-                        if record_type == RecordType::A {
-                            ip.is_ipv4()
-                        } else if record_type == RecordType::AAAA {
-                            ip.is_ipv6()
-                        } else {
-                            false
-                        }
-                    })
-                    .map(|ip| match ip {
-                        IpAddr::V4(ip) => RData::A(*ip),
-                        IpAddr::V6(ip) => RData::AAAA(*ip),
-                    })
-                    .map(|r| Record::from_rdata(name.clone(), 0, r))
-                    .collect();
-
-                Some(Lookup::new_with_max_ttl(
-                    Query::query(name, record_type),
-                    records,
-                ))
-            }
-            None => None,
-        }
-    }
-
-    /// Performs a dual-stack DNS lookup for the IP for the given hostname.
-    ///
-    /// See the configuration and options parameters for controlling the way in which A(Ipv4) and AAAA(Ipv6) lookups will be performed. For the least expensive query a fully-qualified-domain-name, FQDN, which ends in a final `.`, e.g. `www.example.com.`, will only issue one query. Anything else will always incur the cost of querying the `ResolverConfig::domain` and `ResolverConfig::search`.
-    ///
-    /// # Arguments
-    /// * `host` - string hostname, if this is an invalid hostname, an error will be returned.
-    pub async fn lookup_ip<N: IntoName + TryParseIp + Clone>(
-        &self,
-        host: N,
-    ) -> Result<LookupIp, ResolveError> {
-        if let Ok(name) = host.clone().into_name() {
-            let group_name = self
-                .matcher
-                .find(&name.to_owned().into())
-                .map(|s| s.as_str())
-                .unwrap_or("default");
-
-            self.get_or_create_resolver(group_name)
-                .await
-                .unwrap()
-                .lookup_ip(host)
-                .timeout(Duration::from_secs(LOOKUP_TIMEOUT))
-                .await
-                .unwrap_or(Err(ResolveErrorKind::Timeout.into()))
-        } else {
-            self.get_or_create_resolver(DEFAULT_NAME_SERVER_GROUP_NAME)
-                .await
-                .unwrap()
-                .lookup_ip(host)
-                .timeout(Duration::from_secs(LOOKUP_TIMEOUT))
-                .await
-                .unwrap_or(Err(ResolveErrorKind::Timeout.into()))
-        }
-    }
-
-    /// Lookup any RecordType
-    ///
-    /// *WARNING* this interface may change in the future, see if one of the specializations would be better.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - name of the record to lookup, if name is not a valid domain name, an error will be returned
-    /// * `record_type` - type of record to lookup, all RecordData responses will be filtered to this type
-    ///
-    /// # Returns
-    ///
-    //  A future for the returned Lookup RData
-    pub async fn lookup<N: IntoName>(
+    pub fn get_server_group<N: Into<NameServerGroupName>>(
         &self,
         name: N,
-        record_type: RecordType,
-        group_name: Option<&str>,
-    ) -> Result<Lookup, DnsError> {
-        let name = match name.into_name() {
-            Ok(name) => name,
-            Err(err) => return Err(err.into()),
-        };
+    ) -> Option<Arc<NameServerGroup>> {
+        let name = name.into();
+        self.servers.get(&name).cloned()
+    }
+}
 
-        let group_name = group_name.unwrap_or_else(|| self.find_server_group_name(&name));
-        debug!(
-            "query name: {} type: {} via [group:{}]",
-            name, record_type, group_name
-        );
-        if let Some(resolver) = self.get_or_create_resolver(group_name).await {
-            resolver
-                .lookup(name, record_type)
-                .timeout(Duration::from_secs(LOOKUP_TIMEOUT))
-                .await
-                .unwrap_or(Err(ResolveErrorKind::Timeout.into()))
-        } else {
-            Err(ResolveErrorKind::Message("").into())
+#[async_trait::async_trait]
+impl GenericResolver for DnsClient {
+    fn options(&self) -> &ResolverOpts {
+        &self.resolver_opts
+    }
+
+    #[inline]
+    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+        let ns = self.default();
+        GenericResolver::lookup(ns.as_ref(), name, record_type).await
+    }
+}
+
+#[derive(Debug, Clone, Eq)]
+pub enum NameServerGroupName {
+    Bootstrap,
+    Default,
+    Name(String),
+}
+
+impl NameServerGroupName {
+    pub fn new(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "bootstrap" => NameServerGroupName::Bootstrap,
+            "default" => NameServerGroupName::Default,
+            _ => NameServerGroupName::Name(name.to_string()),
         }
     }
 
-    async fn resolver_nameserver_domain(&self, name: Name) -> Vec<IpAddr> {
-        let group_name = self.matcher.find(&name);
-
-        let config = match group_name {
-            Some(group_name) => {
-                use futures::future;
-
-                let config = self
-                    .servers
-                    .get(group_name)
-                    .or_else(|| self.servers.get("bootstrap"))
-                    .or_else(|| self.servers.get(DEFAULT_NAME_SERVER_GROUP_NAME))
-                    .expect("default nameserver group not found!!!");
-
-                let config = future::join_all(
-                    config
-                        .iter()
-                        .map(|c| self.create_nameserver_config_group(&c.url, None)),
-                )
-                .await
-                .into_iter()
-                .flat_map(|x| x.into_iter())
-                .reduce(|mut p, c| {
-                    p.merge(c);
-                    p
-                });
-
-                config
-            }
-            None => None,
-        };
-
-        let namestr = name.to_string();
-
-        let mut addrs = match config {
-            Some(c) => {
-                if let Ok(resolver) = create_resolver(c) {
-                    resolver
-                        .lookup_ip(name)
-                        .await
-                        .map(|r| r.into_iter().collect::<Vec<_>>())
-                        .unwrap_or_default()
-                } else {
-                    Default::default()
-                }
-            }
-            None => self
-                .bootstrap_resolver
-                .lookup_ip(name)
-                .await
-                .map(|r| r.into_iter().collect::<Vec<_>>())
-                .unwrap_or_default(),
-        };
-
-        if addrs.is_empty() {
-            if let Some(ips) = preset_ns::find_dns_ips(namestr.as_str()) {
-                addrs.extend_from_slice(ips);
-            }
-        }
-
-        addrs
-    }
-
-    async fn get_or_create_resolver(&self, group_name: &str) -> Option<Arc<TokioAsyncResolver>> {
-        let resolver = async {
-            let resolvers = self.resolvers.lock().await;
-            resolvers.get(group_name).map(|r| Arc::clone(r))
-        }
-        .await;
-
-        if resolver.is_some() {
-            return resolver;
-        }
-
-        let group_name = if self.servers.contains_key(group_name) {
-            group_name
-        } else {
-            "default"
-        };
-
-        let nameservers = self.create_nameserver_group(group_name).await;
-        // let nameservers = match nameservers {
-        //     Some(v) => Some(v.filter_available().await),
-        //     None => None,
-        // };
-
-        if let Some(Ok(resolver)) = nameservers.map(|ss| create_resolver(ss)) {
-            let resolver = Arc::new(resolver);
-            let mut resolvers = self.resolvers.lock().await;
-
-            resolvers.insert(group_name.to_string(), Arc::clone(&resolver));
-
-            Some(resolver)
-        } else {
-            None
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Bootstrap => "bootstrap",
+            Self::Default => "default",
+            Self::Name(n) => n.as_str(),
         }
     }
 
-    async fn create_nameserver_group(&self, group_name: &str) -> Option<NameServerConfigGroup> {
-        let mut name_server_cfg_group = NameServerConfigGroup::new();
+    #[inline]
+    pub fn is_default(&self) -> bool {
+        self.as_str() == "default"
+    }
+}
 
-        let ss = self
+impl From<&str> for NameServerGroupName {
+    #[inline]
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl Deref for NameServerGroupName {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            NameServerGroupName::Bootstrap => "Bootstrap",
+            NameServerGroupName::Default => "Default",
+            NameServerGroupName::Name(s) => s.as_str(),
+        }
+    }
+}
+
+impl std::hash::Hash for NameServerGroupName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            NameServerGroupName::Bootstrap => "bootstrap".hash(state),
+            NameServerGroupName::Default => "default".hash(state),
+            NameServerGroupName::Name(n) => n.to_lowercase().as_str().hash(state),
+        }
+    }
+}
+
+impl PartialEq for NameServerGroupName {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Name(l0), Self::Name(r0)) => l0.eq_ignore_ascii_case(r0),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl Default for NameServerGroupName {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+#[derive(Default)]
+pub struct NameServerGroup {
+    name: NameServerGroupName,
+    resolver_opts: ResolverOpts,
+    servers: Vec<NameServer>,
+}
+
+impl NameServerGroup {
+    #[inline]
+    pub fn name(&self) -> &NameServerGroupName {
+        &self.name
+    }
+
+    #[inline]
+    pub fn iter(&self) -> Iter<NameServer> {
+        self.servers.iter()
+    }
+}
+
+#[async_trait::async_trait]
+impl GenericResolver for NameServerGroup {
+    fn options(&self) -> &ResolverOpts {
+        &self.resolver_opts
+    }
+
+    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+        use futures_util::future::select_all;
+        let mut tasks = self
             .servers
-            .get(group_name)
-            .expect("default nameserver group not found!!!");
-
-        for s in ss {
-            if let Some(domain) = s.url.get_domain() {
-                match Name::from_str(domain) {
-                    Ok(domain_name) => {
-                        //
-                        let addrs = self.resolver_nameserver_domain(domain_name.clone()).await;
-
-                        self.nameserver_ips
-                            .lock()
-                            .await
-                            .entry(domain_name)
-                            .and_modify(|v| *v = Some(addrs.clone()))
-                            .or_insert(Some(addrs.clone()));
-
-                        if let Some(s) = self
-                            .create_nameserver_config_group(&s.url, Some(addrs))
-                            .await
-                        {
-                            if !s.is_empty() {
-                                name_server_cfg_group.merge(s);
-                                continue;
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        warn!("{:?}", err);
-                    }
-                };
-            }
-
-            if let Some(s) = self.create_nameserver_config_group(&s.url, None).await {
-                if !s.is_empty() {
-                    name_server_cfg_group.merge(s);
-                }
-            }
-        }
-
-        let name_server_cfg_group = if let Some(Some(cfg)) = name_server_cfg_group
             .iter()
-            .map(|n| n.tls_config.clone())
-            .next()
-        {
-            name_server_cfg_group.with_client_config(cfg.0)
-        } else {
-            name_server_cfg_group
-        };
+            .map(|ns| GenericResolver::lookup(ns, name.clone(), record_type))
+            .collect::<Vec<_>>();
 
-        Some(name_server_cfg_group)
+        loop {
+            let (res, _idx, rest) = select_all(tasks).await;
+
+            if matches!(res.as_ref(), Ok(lookup) if !lookup.records().is_empty()) {
+                return res;
+            }
+
+            if rest.is_empty() {
+                return res;
+            }
+            tasks = rest;
+        }
+    }
+}
+
+pub struct NameServer {
+    opts: NameServerOpts,
+    inner: trust_dns_resolver::name_server::NameServer<
+        GenericConnection,
+        GenericConnectionProvider<TokioRuntime>,
+    >,
+}
+
+impl NameServer {
+    fn new(config: NameServerConfig, opts: NameServerOpts) -> Self {
+        use trust_dns_resolver::name_server::NameServer as N;
+
+        let inner = N::new_with_provider(
+            config,
+            opts.resolver_opts,
+            GenericConnectionProvider::<TokioRuntime>::new(TokioHandle),
+        );
+
+        Self { opts, inner }
     }
 
-    async fn create_nameserver_config_group(
-        &self,
-        url: &DnsUrl,
-        addrs: Option<Vec<IpAddr>>,
-    ) -> Option<NameServerConfigGroup> {
-        let mut host = None;
+    #[inline]
+    pub fn options(&self) -> &NameServerOpts {
+        &self.opts
+    }
 
-        if url.proto().is_encrypted() {
-            match url.host() {
-                Host::Ipv4(ip) => {
-                    host =
-                        preset_ns::find_dns_tls_name(&ip.to_owned().into()).map(|s| s.to_string());
-                }
-                Host::Ipv6(ip) => {
-                    host =
-                        preset_ns::find_dns_tls_name(&ip.to_owned().into()).map(|s| s.to_string());
-                }
-                Host::Domain(domain) => host = Some(domain.to_string()),
-            }
+    fn create_config_from_url(
+        url: &VerifiedDnsUrl,
+        (tls_client_config_sni_on, tls_client_config_sni_off): (
+            Arc<ClientConfig>,
+            Arc<ClientConfig>,
+        ),
+    ) -> Vec<NameServerConfig> {
+        let host = url.domain();
 
-            if host.is_none() {
-                warn!(
-                    "Currently, encrypted dns {} with pure ip not supported!!!",
-                    url.to_string()
-                );
-                return None;
-            }
-        }
+        let tls_dns_name = host
+            .map(|h| h.to_string())
+            .unwrap_or_else(|| url.host().to_string());
 
-        let sock_addrs = (if let Some(addrs) = addrs {
-            addrs
-        } else {
-            match url.host() {
-                Host::Domain(host) => match preset_ns::find_dns_ips(host) {
-                    Some(ips) => ips.to_vec(),
-                    None => self
-                        .bootstrap_resolver
-                        .lookup_ip(host)
-                        .await
-                        .map(|lo| lo.into_iter().collect::<Vec<IpAddr>>())
-                        .unwrap_or_default(),
-                },
-                Host::Ipv4(ipv4) => vec![(*ipv4).into()],
-                Host::Ipv6(ipv6) => vec![(*ipv6).into()],
-            }
-        })
-        .into_iter()
-        .map(|ip_addr| (ip_addr, url.port()).to_socket_addrs().ok())
-        .flatten()
-        .flatten()
-        .collect::<Vec<_>>();
+        use trust_dns_resolver::config::Protocol::*;
+        let sock_addrs = url.addrs().iter().cloned();
 
-        debug!("nameserver {} => addrs: {:?}", url.to_string(), sock_addrs);
-
-        let sock_addrs = sock_addrs.into_iter();
-
-        let mut config: NameServerConfigGroup = match url.proto() {
-            Protocol::Udp => sock_addrs
+        let cfgs = match url.proto() {
+            Udp => sock_addrs
                 .map(|addr| NameServerConfig {
                     socket_addr: addr,
                     protocol: Protocol::Udp,
@@ -566,7 +576,7 @@ impl DnsClient {
                     bind_addr: None,
                 })
                 .collect::<Vec<_>>(),
-            Protocol::Tcp => sock_addrs
+            Tcp => sock_addrs
                 .map(|addr| NameServerConfig {
                     socket_addr: addr,
                     protocol: Protocol::Tcp,
@@ -576,17 +586,17 @@ impl DnsClient {
                     bind_addr: None,
                 })
                 .collect::<Vec<_>>(),
-            Protocol::Https => sock_addrs
+            Https => sock_addrs
                 .map(|addr| NameServerConfig {
                     socket_addr: addr,
                     protocol: Protocol::Https,
-                    tls_dns_name: host.to_owned(),
+                    tls_dns_name: Some(tls_dns_name.clone()),
                     trust_nx_responses: true,
                     bind_addr: None,
                     tls_config: Some(TlsClientConfig(if url.enable_sni() {
-                        self.tls_client_config.0.clone()
+                        tls_client_config_sni_on.clone()
                     } else {
-                        self.tls_client_config.1.clone()
+                        tls_client_config_sni_off.clone()
                     })),
                 })
                 .collect::<Vec<_>>(),
@@ -594,100 +604,331 @@ impl DnsClient {
                 .map(|addr| NameServerConfig {
                     socket_addr: addr,
                     protocol: Protocol::Tls,
-                    tls_dns_name: host.to_owned(),
+                    tls_dns_name: Some(tls_dns_name.clone()),
                     trust_nx_responses: true,
                     bind_addr: None,
                     tls_config: Some(TlsClientConfig(if url.enable_sni() {
-                        self.tls_client_config.0.clone()
+                        tls_client_config_sni_on.clone()
                     } else {
-                        self.tls_client_config.1.clone()
+                        tls_client_config_sni_off.clone()
                     })),
                 })
                 .collect::<Vec<_>>(),
             _ => todo!(),
-        }
-        .into();
-
-        if let Some(ns) = config.get(0) {
-            if ns.protocol == Protocol::Tls || ns.protocol == Protocol::Https {
-                let client_cfg = ns.tls_config.as_ref().map(|x| x.0.clone());
-
-                if let Some(x) = client_cfg {
-                    config = config.with_client_config(x)
-                }
-            }
-        }
-
-        Some(config)
+        };
+        cfgs
     }
 }
 
-fn create_tls_client_config(ca_path: Option<PathBuf>, ca_file: Option<PathBuf>) -> ClientConfig {
-    const ALPN_H2: &[u8] = b"h2";
-
-    let mut root_store = RootCertStore::empty();
-    root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
-        )
-    }));
-
-    let certs = {
-        let certs1 = rustls_native_certs::load_native_certs().unwrap_or_else(|err| {
-            warn!("load native certs failed.{}", err);
-            Default::default()
-        });
-
-        let certs2 = [ca_path, ca_file]
-            .into_iter()
-            .filter_map(|s| s)
-            .filter_map(
-                |path| match rustls_native_certs::load_certs_from_path(path.as_path()) {
-                    Ok(certs) => Some(certs),
-                    Err(err) => {
-                        warn!("load certs from path failed.{}", err);
-                        None
-                    }
-                },
-            )
-            .flatten();
-
-        certs1.into_iter().chain(certs2)
-    };
-
-    for cert in certs {
-        root_store
-            .add(&rustls::Certificate(cert.0))
-            .unwrap_or_else(|err| {
-                warn!("load certs from path failed.{}", err);
-            })
+#[async_trait::async_trait]
+impl GenericResolver for NameServer {
+    fn options(&self) -> &ResolverOpts {
+        &self.opts
     }
 
-    let mut client_config = ClientConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+        let request_options = {
+            let opts = &self.options();
+            let mut request_opts = DnsRequestOptions::default();
+            request_opts.recursion_desired = opts.recursion_desired;
+            request_opts.use_edns = opts.edns0;
+            request_opts
+        };
 
-    client_config.alpn_protocols.push(ALPN_H2.to_vec());
+        let query = Query::query(name, record_type);
 
-    client_config
+        let req = DnsRequest::new(build_message(query, request_options), request_options);
+
+        let mut ns = self.inner.clone();
+
+        let res = ns.send(req).first_answer().await?;
+
+        let valid_until = Instant::now()
+            + Duration::from_secs(
+                res.answers()
+                    .iter()
+                    .map(|r| r.ttl())
+                    .min()
+                    .unwrap_or(MAX_TTL) as u64,
+            );
+
+        Ok(Lookup::new_with_deadline(
+            res.query().unwrap().clone(),
+            res.answers().into(),
+            valid_until,
+        ))
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct NameServerOpts {
+    /// filter result with blacklist ip
+    pub blacklist_ip: bool,
+
+    /// filter result with whitelist ip,  result in whitelist-ip will be accepted.
+    pub whitelist_ip: bool,
+
+    /// result must exist edns RR, or discard result.
+    pub check_edns: bool,
+
+    resolver_opts: ResolverOpts,
+}
+
+impl NameServerOpts {
+    #[inline]
+    pub fn new(
+        blacklist_ip: bool,
+        whitelist_ip: bool,
+        check_edns: bool,
+        resolver_opts: ResolverOpts,
+    ) -> Self {
+        Self {
+            blacklist_ip,
+            whitelist_ip,
+            check_edns,
+            resolver_opts,
+        }
+    }
+}
+
+impl Deref for NameServerOpts {
+    type Target = ResolverOpts;
+
+    fn deref(&self) -> &Self::Target {
+        &self.resolver_opts
+    }
+}
+
+#[async_trait::async_trait]
+pub trait GenericResolver {
+    fn options(&self) -> &ResolverOpts;
+
+    /// Lookup any RecordType
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - name of the record to lookup, if name is not a valid domain name, an error will be returned
+    /// * `record_type` - type of record to lookup, all RecordData responses will be filtered to this type
+    ///
+    /// # Returns
+    ///
+    ///  A future for the returned Lookup RData
+    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError>;
+}
+
+#[async_trait::async_trait]
+pub trait GenericResolverExt {
+    // /// Generic lookup for any RecordType
+    // ///
+    // /// # Arguments
+    // ///
+    // /// * `name` - name of the record to lookup, if name is not a valid domain name, an error will be returned
+    // /// * `record_type` - type of record to lookup, all RecordData responses will be filtered to this type
+    // ///
+    // /// # Returns
+    // ///
+    // //  A future for the returned Lookup RData
+    // async fn lookup<N: IntoName + Send>(
+    //     &self,
+    //     name: N,
+    //     record_type: RecordType,
+    // ) -> Result<Lookup, ResolveError>;
+
+    /// Performs a dual-stack DNS lookup for the IP for the given hostname.
+    ///
+    /// See the configuration and options parameters for controlling the way in which A(Ipv4) and AAAA(Ipv6) lookups will be performed. For the least expensive query a fully-qualified-domain-name, FQDN, which ends in a final `.`, e.g. `www.example.com.`, will only issue one query. Anything else will always incur the cost of querying the `ResolverConfig::domain` and `ResolverConfig::search`.
+    ///
+    /// # Arguments
+    /// * `host` - string hostname, if this is an invalid hostname, an error will be returned.
+    async fn lookup_ip<N: IntoName + TryParseIp + Send>(
+        &self,
+        host: N,
+    ) -> Result<LookupIp, LookupError>;
+}
+
+#[async_trait::async_trait]
+impl<T> GenericResolverExt for T
+where
+    T: GenericResolver + Sync,
+{
+    // async fn lookup<N: IntoName + Send>(
+    //     &self,
+    //     name: N,
+    //     record_type: RecordType,
+    // ) -> Result<Lookup, ResolveError> {
+    //     let name = match name.into_name() {
+    //         Ok(name) => name,
+    //         Err(err) => return Err(err.into()),
+    //     };
+    //     GenericResolver::lookup(self, name, record_type).await
+    // }
+
+    /// * `host` - string hostname, if this is an invalid hostname, an error will be returned.
+    async fn lookup_ip<N: IntoName + TryParseIp + Send>(
+        &self,
+        host: N,
+    ) -> Result<LookupIp, LookupError> {
+        let mut finally_ip_addr: Option<Record> = None;
+        let maybe_ip = host.try_parse_ip();
+        let maybe_name: ProtoResult<Name> = host.into_name();
+
+        // if host is a ip address, return directly.
+        if let Some(ip_addr) = maybe_ip {
+            let name = maybe_name.clone().unwrap_or_default();
+            let record = Record::from_rdata(name.clone(), MAX_TTL, ip_addr.clone());
+
+            // if ndots are greater than 4, then we can't assume the name is an IpAddr
+            //   this accepts IPv6 as well, b/c IPv6 can take the form: 2001:db8::198.51.100.35
+            //   but `:` is not a valid DNS character, so technically this will fail parsing.
+            //   TODO: should we always do search before returning this?
+            if self.options().ndots > 4 {
+                finally_ip_addr = Some(record);
+            } else {
+                let query = Query::query(name, ip_addr.to_record_type());
+                let lookup = Lookup::new_with_max_ttl(query, Arc::from([record]));
+                return Ok(lookup.into());
+            }
+        }
+
+        let name = match (maybe_name, finally_ip_addr.as_ref()) {
+            (Ok(name), _) => name,
+            (Err(_), Some(ip_addr)) => {
+                // it was a valid IP, return that...
+                let query = Query::query(ip_addr.name().clone(), ip_addr.record_type());
+                let lookup = Lookup::new_with_max_ttl(query, Arc::from([ip_addr.clone()]));
+                return Ok(lookup.into());
+            }
+            (Err(err), None) => {
+                return Err(err.into());
+            }
+        };
+
+        let strategy = self.options().ip_strategy;
+        use trust_dns_resolver::config::LookupIpStrategy::*;
+
+        match strategy {
+            Ipv4Only => self.lookup(name.clone(), RecordType::A).await,
+            Ipv6Only => self.lookup(name.clone(), RecordType::AAAA).await,
+            Ipv4AndIpv6 => {
+                use futures_util::future::{select, Either};
+                match select(
+                    self.lookup(name.clone(), RecordType::A),
+                    self.lookup(name.clone(), RecordType::AAAA),
+                )
+                .await
+                {
+                    Either::Left((res, _)) => res,
+                    Either::Right((res, _)) => res,
+                }
+            }
+            Ipv6thenIpv4 => match self.lookup(name.clone(), RecordType::AAAA).await {
+                Ok(lookup) => Ok(lookup),
+                Err(_err) => self.lookup(name.clone(), RecordType::A).await,
+            },
+            Ipv4thenIpv6 => match self.lookup(name.clone(), RecordType::A).await {
+                Ok(lookup) => Ok(lookup),
+                Err(_err) => self.lookup(name.clone(), RecordType::AAAA).await,
+            },
+        }
+        .map(|lookup| lookup.into())
+    }
+}
+
+pub struct VerifiedDnsUrl(DnsUrl);
+
+impl Deref for VerifiedDnsUrl {
+    type Target = DnsUrl;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for VerifiedDnsUrl {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::convert::TryFrom<DnsUrl> for VerifiedDnsUrl {
+    type Error = DnsUrl;
+
+    fn try_from(value: DnsUrl) -> Result<Self, Self::Error> {
+        if value.addrs().is_empty() {
+            return Err(value);
+        }
+        Ok(Self(value))
+    }
+}
+
+/// > An EDNS buffer size of 1232 bytes will avoid fragmentation on nearly all current networks.
+/// https://dnsflagday.net/2020/
+const MAX_PAYLOAD_LEN: u16 = 1232;
+
+fn build_message(query: Query, options: DnsRequestOptions) -> Message {
+    // build the message
+    let mut message: Message = Message::new();
+    // TODO: This is not the final ID, it's actually set in the poll method of DNS future
+    //  should we just remove this?
+    let id: u16 = rand::random();
+    message
+        .add_query(query)
+        .set_id(id)
+        .set_message_type(MessageType::Query)
+        .set_op_code(OpCode::Query)
+        .set_recursion_desired(options.recursion_desired);
+
+    // Extended dns
+    if options.use_edns {
+        message
+            .extensions_mut()
+            .get_or_insert_with(Edns::new)
+            .set_max_payload(MAX_PAYLOAD_LEN)
+            .set_version(0);
+    }
+    message
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
 
-    use super::*;
+    use super::{DnsClient, GenericResolver, NameServerGroupName, RecordType};
     use crate::{
+        dns_client::GenericResolverExt,
         dns_url::DnsUrl,
         preset_ns::{ALIDNS_IPS, CLOUDFLARE_IPS},
     };
-    use tokio::runtime::Runtime;
+    use std::net::Ipv4Addr;
+    use std::str::FromStr;
+    use tokio::runtime::{self, Runtime};
+
+    #[test]
+    fn test_with_default() {
+        runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let client = DnsClient::builder().build().await;
+                let lookup_ip = client
+                    .lookup("dns.alidns.com".parse().unwrap(), RecordType::A)
+                    .await
+                    .unwrap();
+                assert!(lookup_ip
+                    .into_iter()
+                    .any(|i| i.as_a() == Some(&"223.5.5.5".parse::<Ipv4Addr>().unwrap())));
+            });
+    }
+
+    #[test]
+    fn test_name_server_group_name() {
+        let a = NameServerGroupName::from("bootstrap");
+        let b = NameServerGroupName::from("Bootstrap");
+        assert_eq!(a, b);
+        let a = NameServerGroupName::from("abc");
+        let b = NameServerGroupName::from("Abc");
+        assert_eq!(a, b);
+    }
 
     async fn assert_google(client: &DnsClient) {
         let name = "dns.google";
@@ -730,7 +971,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_servers(dns_urls).build();
+            let client = DnsClient::builder().add_servers(dns_urls).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -740,7 +981,7 @@ mod tests {
     fn test_nameserver_cloudflare_https_resolve() {
         let dns_url = DnsUrl::from_str("https://cloudflare-dns.com/dns-query").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -751,7 +992,7 @@ mod tests {
     fn test_nameserver_cloudflare_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -761,7 +1002,7 @@ mod tests {
     fn test_nameserver_quad9_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dns.quad9.net?enable_sni=false").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -771,7 +1012,7 @@ mod tests {
     fn test_nameserver_quad9_dns_url_https_resolve() {
         let dns_url = DnsUrl::from_str("https://dns.quad9.net/dns-query").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -786,7 +1027,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_servers(dns_urls).build();
+            let client = DnsClient::builder().add_servers(dns_urls).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -797,7 +1038,7 @@ mod tests {
         let dns_url = DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap();
 
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -808,7 +1049,7 @@ mod tests {
         let dns_url = DnsUrl::from_str("tls://dns.alidns.com").unwrap();
 
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -819,7 +1060,7 @@ mod tests {
         let dns_url = DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap();
 
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
 
             assert_google(&client).await;
             assert_alidns(&client).await;
@@ -831,7 +1072,7 @@ mod tests {
         let dns_url = DnsUrl::from_str("https://doh.pub/dns-query").unwrap();
 
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })
@@ -841,7 +1082,7 @@ mod tests {
     fn test_nameserver_dnspod_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dot.pub").unwrap();
         Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build();
+            let client = DnsClient::builder().add_server(dns_url).build().await;
 
             assert_google(&client).await;
             assert_alidns(&client).await;

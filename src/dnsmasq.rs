@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::net::IpAddr;
@@ -6,10 +7,10 @@ use std::str::FromStr;
 
 use std::io::BufRead;
 
+use crate::collections::DomainMap;
 use crate::dns::{Name, RData};
-use crate::matcher::DomainMatcher;
+use crate::trust_dns::proto::rr::RecordType;
 use chrono::{Local, NaiveDateTime};
-use trust_dns_proto::rr::RecordType;
 
 pub struct LanClientStore {
     zone: Option<Name>,
@@ -92,7 +93,7 @@ impl FromStr for ClientInfo {
         let s = s.trim();
 
         // skip comments and empty line.
-        if match s.chars().nth(0) {
+        if match s.chars().next() {
             Some(t) if t == '#' => true,
             None => true,
             _ => false,
@@ -141,13 +142,15 @@ impl FromStr for ClientInfo {
 fn read_lease_file<P: AsRef<Path>>(
     path: P,
     zone: Option<&Name>,
-) -> std::io::Result<DomainMatcher<ClientInfo>> {
+) -> std::io::Result<DomainMap<ClientInfo>> {
     let file = File::open(path.as_ref())?;
 
     let reader = BufReader::new(file);
 
-    let mut keys = vec![];
-    let mut values = vec![];
+    let mut map = HashMap::new();
+
+    // let mut keys = vec![];
+    // let mut values = vec![];
 
     for line in reader.lines() {
         let line = match line {
@@ -158,7 +161,7 @@ fn read_lease_file<P: AsRef<Path>>(
         let line = line.trim_start();
 
         // skip comments and empty line.
-        if match line.chars().nth(0) {
+        if match line.chars().next() {
             Some(t) if t == '#' => true,
             None => true,
             _ => false,
@@ -173,12 +176,11 @@ fn read_lease_file<P: AsRef<Path>>(
                 }
             }
             client_info.host.set_fqdn(true);
-            keys.push(client_info.host.clone());
-            values.push(client_info);
+            map.insert(client_info.host.clone(), client_info);
         }
     }
 
-    Ok(DomainMatcher::from_map(keys, values))
+    Ok(map.into())
 }
 
 #[cfg(test)]

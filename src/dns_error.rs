@@ -1,0 +1,53 @@
+use std::{io, sync::Arc};
+use thiserror::Error;
+use trust_dns_proto::error::ProtoError;
+use trust_dns_proto::op::ResponseCode;
+use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
+
+#[allow(clippy::large_enum_variant)]
+/// A query could not be fulfilled
+#[derive(Debug, Clone, Error)]
+#[non_exhaustive]
+pub enum LookupError {
+    /// A record at the same Name as the query exists, but not of the queried RecordType
+    #[error("The name exists, but not for the record requested")]
+    NameExists,
+    /// There was an error performing the lookup
+    #[error("Error performing lookup: {0}")]
+    ResponseCode(ResponseCode),
+    /// Resolve Error
+    #[error("Forward resolution error: {0}")]
+    ResolveError(#[from] ResolveError),
+    /// Recursive Resolver Error
+    #[cfg(feature = "trust-dns-recursor")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "recursor")))]
+    #[error("Recursive resolution error: {0}")]
+    RecursiveError(#[from] trust_dns_recursor::Error),
+    /// An underlying IO error occurred
+    #[error("io error: {0}")]
+    Io(Arc<io::Error>),
+}
+
+impl LookupError {
+    pub fn is_nx_domain(&self) -> bool {
+        matches!(self, Self::ResponseCode(resc) if resc.eq(&ResponseCode::NXDomain))
+    }
+}
+
+impl From<ResponseCode> for LookupError {
+    fn from(value: ResponseCode) -> Self {
+        Self::ResponseCode(value)
+    }
+}
+
+impl From<ProtoError> for LookupError {
+    fn from(value: ProtoError) -> Self {
+        Self::ResolveError(value.into())
+    }
+}
+
+impl From<ResolveErrorKind> for LookupError {
+    fn from(value: ResolveErrorKind) -> Self {
+        Self::ResolveError(value.into())
+    }
+}

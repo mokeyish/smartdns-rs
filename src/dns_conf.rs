@@ -3,21 +3,25 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::ToSocketAddrs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use cfg_if::cfg_if;
 use ipnet::IpNet;
 use trust_dns_proto::rr::Name;
 
 use crate::dns::RecordType;
+use crate::dns_rule::{DomainRule, ResponseMode};
 use crate::dns_url::DnsUrl;
 use crate::infra::file_mode::FileMode;
+use crate::infra::ipset::IpSet;
 use crate::log::{debug, error, info, warn};
 
-const DEFAULT_SERVER: &'static str = "https://cloudflare-dns.com/dns-query";
+const DEFAULT_SERVER: &str = "https://cloudflare-dns.com/dns-query";
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct SmartDnsConfig {
     /// dns server name, default is host name
     ///
@@ -118,16 +122,16 @@ pub struct SmartDnsConfig {
     pub serve_expired_reply_ttl: Option<usize>,
 
     /// List of hosts that supply bogus NX domain results
-    pub bogus_nxdomain: Vec<IpNet>,
+    pub bogus_nxdomain: Arc<IpSet>,
 
     /// List of IPs that will be filtered when nameserver is configured -blacklist-ip parameter
-    pub blacklist_ip: Vec<IpNet>,
+    pub blacklist_ip: Arc<IpSet>,
 
     /// List of IPs that will be accepted when nameserver is configured -whitelist-ip parameter
-    pub whitelist_ip: Vec<IpNet>,
+    pub whitelist_ip: Arc<IpSet>,
 
     /// List of IPs that will be ignored
-    pub ignore_ip: Vec<IpNet>,
+    pub ignore_ip: Arc<IpSet>,
 
     /// speed check mode
     ///
@@ -138,7 +142,7 @@ pub struct SmartDnsConfig {
     ///   speed-check-mode tcp:443,ping
     ///   speed-check-mode none
     /// ```
-    pub speed_check_mode: Vec<SpeedCheckMode>,
+    pub speed_check_mode: SpeedCheckModeList,
 
     /// force AAAA query return SOA
     ///
@@ -238,7 +242,7 @@ pub struct SmartDnsConfig {
     pub ca_path: Option<PathBuf>,
 
     /// remote dns server list
-    pub servers: HashMap<String, Vec<DnsServer>>,
+    pub servers: HashMap<String, Vec<NameServerInfo>>,
 
     /// specific nameserver to domain
     ///
@@ -261,14 +265,19 @@ pub struct SmartDnsConfig {
     ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
     ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
     /// ```
-    pub address_rules: Vec<AddressRule>,
+    pub address_rules: AddressRules,
 
     /// set domain rules
-    pub domain_rules: Vec<DomainRule>,
+    pub domain_rules: DomainRules,
 
     pub resolv_file: Option<String>,
     pub domain_sets: HashMap<String, HashSet<Name>>,
 }
+
+pub type DomainSets = HashMap<String, HashSet<Name>>;
+pub type ForwardRules = Vec<ForwardRule>;
+pub type AddressRules = Vec<ConfigItem<DomainId, DomainAddress>>;
+pub type DomainRules = Vec<ConfigItem<DomainId, DomainRule>>;
 
 impl SmartDnsConfig {
     pub fn new() -> Self {
@@ -308,7 +317,7 @@ impl SmartDnsConfig {
                 .iter()
                 .map(Path::new)
                 .filter(|p| p.exists())
-                .map(|p| SmartDnsConfig::load_from_file(p))
+                .map(SmartDnsConfig::load_from_file)
                 .next()
                 .expect("No configuation file found.")
         }
@@ -330,16 +339,201 @@ impl SmartDnsConfig {
             })
         }
 
-        let server_count: usize = cfg.servers.iter().map(|(_, o)| o.len()).sum();
+        let server_count: usize = cfg.servers.values().map(|o| o.len()).sum();
 
         if server_count == 0 {
             cfg.servers
                 .get_mut("default")
                 .unwrap()
-                .push(DnsServer::from_str(DEFAULT_SERVER).unwrap());
+                .push(NameServerInfo::from_str(DEFAULT_SERVER).unwrap());
         }
 
+        cfg.bogus_nxdomain = cfg.bogus_nxdomain.compact().into();
+        cfg.blacklist_ip = cfg.blacklist_ip.compact().into();
+        cfg.whitelist_ip = cfg.whitelist_ip.compact().into();
+        cfg.ignore_ip = cfg.ignore_ip.compact().into();
+
         cfg
+    }
+}
+
+impl SmartDnsConfig {
+    pub fn summary(&self) {
+        info!(r#"whoami 👉 {}"#, self.server_name());
+
+        const DEFAULT_GROUP: &str = "default";
+        for (group, servers) in self.servers.iter() {
+            if group == DEFAULT_GROUP {
+                continue;
+            }
+            for server in servers {
+                info!(
+                    "upstream server: {} [group: {}]",
+                    server.url.to_string(),
+                    group
+                );
+            }
+        }
+
+        if let Some(ss) = self.servers.get(DEFAULT_GROUP) {
+            for s in ss {
+                info!(
+                    "upstream server: {} [group: {}]",
+                    s.url.to_string(),
+                    DEFAULT_GROUP
+                );
+            }
+        }
+    }
+
+    pub fn server_name(&self) -> Name {
+        match self.server_name {
+            Some(ref server_name) => Some(server_name.clone()),
+            None => match hostname::get() {
+                Ok(name) => match name.to_str() {
+                    Some(s) => Name::from_str(s).ok(),
+                    None => None,
+                },
+                Err(_) => None,
+            },
+        }
+        .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
+    }
+
+    #[inline]
+    pub fn tcp_idle_time(&self) -> u64 {
+        self.tcp_idle_time.unwrap_or(120)
+    }
+
+    #[inline]
+    pub fn rr_ttl_min(&self) -> u64 {
+        self.rr_ttl_min.unwrap_or(60)
+    }
+
+    #[inline]
+    pub fn rr_ttl_max(&self) -> u64 {
+        self.rr_ttl_max.unwrap_or(600)
+    }
+
+    #[inline]
+    pub fn rr_ttl(&self) -> u64 {
+        self.rr_ttl.unwrap_or(300)
+    }
+
+    #[inline]
+    pub fn local_ttl(&self) -> u64 {
+        self.local_ttl.unwrap_or_else(|| self.rr_ttl_min())
+    }
+
+    #[inline]
+    pub fn cache_size(&self) -> usize {
+        self.cache_size.unwrap_or(512)
+    }
+
+    pub fn cache_persist(&self) -> bool {
+        self.cache_persist.unwrap_or(false)
+    }
+
+    #[inline]
+    pub fn audit_num(&self) -> usize {
+        self.audit_num.unwrap_or(2)
+    }
+
+    #[inline]
+    pub fn audit_size(&self) -> u64 {
+        use byte_unit::n_kb_bytes;
+        self.audit_size.unwrap_or(n_kb_bytes(128) as u64)
+    }
+
+    #[inline]
+    pub fn audit_file_mode(&self) -> u32 {
+        self.audit_file_mode.map(|m| *m).unwrap_or(0o640)
+    }
+
+    #[inline]
+    pub fn log_enabled(&self) -> bool {
+        self.log_num() > 0
+    }
+
+    pub fn log_file(&self) -> PathBuf {
+        match self.log_file.as_ref() {
+            Some(e) => e.to_owned(),
+            None => {
+                cfg_if! {
+                    if #[cfg(target_os="windows")] {
+                        let mut path = std::env::temp_dir();
+                        path.push("smartdns");
+                        path.push("smartdns.log");
+                        path
+                    } else {
+                        PathBuf::from(r"/var/log/smartdns/smartdns.log")
+                    }
+
+                }
+            }
+        }
+    }
+
+    pub fn log_level(&self) -> tracing::Level {
+        use tracing::Level;
+        match self.log_level.as_deref().unwrap_or("error") {
+            "tarce" => Level::TRACE,
+            "debug" => Level::DEBUG,
+            "info" | "notice" => Level::INFO,
+            "warn" => Level::WARN,
+            "error" | "fatal" => Level::ERROR,
+            _ => Level::ERROR,
+        }
+    }
+
+    #[inline]
+    pub fn log_num(&self) -> u64 {
+        self.log_num.unwrap_or(2)
+    }
+    #[inline]
+    pub fn log_size(&self) -> u64 {
+        use byte_unit::n_kb_bytes;
+        self.audit_size.unwrap_or(n_kb_bytes(128) as u64)
+    }
+    #[inline]
+    pub fn log_file_mode(&self) -> u32 {
+        self.log_file_mode.map(|m| *m).unwrap_or(0o640)
+    }
+
+    #[inline]
+    pub fn response_mode(&self) -> ResponseMode {
+        self.response_mode.unwrap_or(ResponseMode::FirstPing)
+    }
+
+    #[inline]
+    pub fn dualstack_ip_selection(&self) -> bool {
+        self.dualstack_ip_selection.unwrap_or(true)
+    }
+}
+
+#[derive(Clone)]
+pub struct ConfigItem<N: Clone, V: Clone> {
+    pub name: N,
+    pub value: V,
+}
+
+impl<N: Clone, V: Clone> ConfigItem<N, V> {
+    fn new(name: N, value: V) -> Self {
+        Self { name, value }
+    }
+}
+
+impl<N: Clone, V: Clone> Deref for ConfigItem<N, V> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<N: Clone, V: Clone> DerefMut for ConfigItem<N, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
     }
 }
 
@@ -374,7 +568,7 @@ pub struct BindServer {
     pub ssl_config: Option<SslConfig>,
 
     /// the options
-    pub opts: QueryOpts,
+    pub opts: ServerOpts,
 }
 
 impl FromStr for BindServer {
@@ -422,19 +616,17 @@ impl FromStr for BindServer {
                     }
                     opt => warn!("unknown option: {}", opt),
                 }
+            } else if addr.is_none() {
+                addr = Some(part);
             } else {
-                if addr.is_none() {
-                    addr = Some(part);
-                } else {
-                    error!("repeat addr ");
-                }
+                error!("repeat addr ");
             }
         }
 
         let sock_addrs = addr
             .map(|addr| parse::parse_sock_addrs(addr).ok())
             .unwrap_or_default()
-            .expect(&[s, "addr expect [::]:53 or 0.0.0.0:53"].concat());
+            .unwrap_or_else(|| panic!("{} addr expect [::]:53 or 0.0.0.0:53", s));
 
         let ssl_config = match (server_name, ssl_certificate, ssl_certificate_key) {
             (Some(server_name), Some(ssl_certificate), Some(ssl_certificate_key)) => {
@@ -450,7 +642,7 @@ impl FromStr for BindServer {
         Ok(Self {
             addrs: sock_addrs,
             ssl_config,
-            opts: QueryOpts {
+            opts: ServerOpts {
                 group,
                 no_rule_addr,
                 no_rule_nameserver,
@@ -480,39 +672,39 @@ pub struct SslConfig {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-pub struct QueryOpts {
+pub struct ServerOpts {
     /// set domain request to use the appropriate server group.
-    group: Option<String>,
+    pub group: Option<String>,
 
     /// skip address rule.
-    no_rule_addr: Option<bool>,
+    pub no_rule_addr: Option<bool>,
 
     /// skip nameserver rule.
-    no_rule_nameserver: Option<bool>,
+    pub no_rule_nameserver: Option<bool>,
 
     /// skip ipset rule.
-    no_rule_ipset: Option<bool>,
+    pub no_rule_ipset: Option<bool>,
 
     /// do not check speed.
-    no_speed_check: Option<bool>,
+    pub no_speed_check: Option<bool>,
 
     /// skip cache.
-    no_cache: Option<bool>,
+    pub no_cache: Option<bool>,
 
     /// Skip address SOA(#) rules.
-    no_rule_soa: Option<bool>,
+    pub no_rule_soa: Option<bool>,
 
     /// Disable dualstack ip selection.
-    no_dualstack_selection: Option<bool>,
+    pub no_dualstack_selection: Option<bool>,
 
     /// force AAAA query return SOA.
-    force_aaaa_soa: Option<bool>,
+    pub force_aaaa_soa: Option<bool>,
 
     /// do not serve expired
-    no_serve_expired: Option<bool>,
+    pub no_serve_expired: Option<bool>,
 }
 
-impl QueryOpts {
+impl ServerOpts {
     #[inline]
     pub fn is_default(&self) -> bool {
         self.eq(&Default::default())
@@ -521,7 +713,7 @@ impl QueryOpts {
     /// set domain request to use the appropriate server group.
     #[inline]
     pub fn group(&self) -> Option<&str> {
-        self.group.as_ref().map(|g| g.as_str())
+        self.group.as_deref()
     }
 
     /// skip address rule.
@@ -629,7 +821,7 @@ impl QueryOpts {
     }
 }
 
-impl std::ops::AddAssign for QueryOpts {
+impl std::ops::AddAssign for ServerOpts {
     fn add_assign(&mut self, rhs: Self) {
         self.apply(rhs)
     }
@@ -675,8 +867,8 @@ impl std::ops::AddAssign for QueryOpts {
 /// default port is 443
 /// server-https https://cloudflare-dns.com/dns-query
 /// ```
-#[derive(Debug, Clone)]
-pub struct DnsServer {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NameServerInfo {
     /// the nameserver url.
     pub url: DnsUrl,
 
@@ -697,9 +889,12 @@ pub struct DnsServer {
 
     /// use proxy to connect to server.
     pub proxy: Option<String>,
+
+    /// TLS SNI
+    pub host_name: Option<String>,
 }
 
-impl FromStr for DnsServer {
+impl FromStr for NameServerInfo {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -711,6 +906,7 @@ impl FromStr for DnsServer {
         let mut whitelist_ip = false;
         let mut check_edns = false;
         let mut proxy = None;
+        let mut host_name = None;
 
         while let Some(part) = parts.next() {
             if part.is_empty() {
@@ -724,6 +920,7 @@ impl FromStr for DnsServer {
                     "-check-edns" => check_edns = true,
                     "-group" => group = Some(parts.next().expect("group name").to_string()),
                     "-proxy" => proxy = Some(parts.next().expect("proxy name").to_string()),
+                    "-host-name" => host_name = Some(parts.next().expect("proxy name").to_string()),
                     _ => warn!("unknown server options {}", part),
                 }
             } else {
@@ -740,6 +937,7 @@ impl FromStr for DnsServer {
                 whitelist_ip,
                 check_edns,
                 proxy,
+                host_name,
             })
         } else {
             Err(())
@@ -747,7 +945,7 @@ impl FromStr for DnsServer {
     }
 }
 
-impl From<DnsUrl> for DnsServer {
+impl From<DnsUrl> for NameServerInfo {
     fn from(url: DnsUrl) -> Self {
         Self {
             url,
@@ -757,17 +955,13 @@ impl From<DnsUrl> for DnsServer {
             whitelist_ip: false,
             check_edns: false,
             proxy: None,
+            host_name: None,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct DomainAddressRule {
-    pub domain: Name,
-    pub address: DomainAddress,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum DomainAddress {
     SOA,
     SOAv4,
@@ -806,31 +1000,15 @@ impl FromStr for DomainAddress {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct AddressRule {
-    pub domain: DomainId,
-    pub address: DomainAddress,
-}
-
 /// alias: nameserver rules
 #[derive(Debug, Clone)]
 pub struct ForwardRule {
     pub domain: DomainId,
-    pub server_group: String,
+    pub nameserver: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct DomainRule {
-    pub domain: DomainId,
-    pub speed_check_mode: Option<SpeedCheckMode>,
-    pub address: Option<IpAddr>,
-    pub nameserver: Option<String>,
-    // ipset:
-    // nftset
-    pub dualstack_ip_selection: Option<bool>,
-}
-
-impl FromStr for DomainRule {
+/// domain-rules /domain/ [-rules...]
+impl FromStr for ConfigItem<DomainId, DomainRule> {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -840,23 +1018,27 @@ impl FromStr for DomainRule {
         }
 
         if let Ok(domain) = DomainId::from_str(parts[0]) {
-            let mut speed_check_mode = None;
+            let mut speed_check_mode = vec![];
             let mut address = None;
 
             let mut nameserver = None;
 
             let mut dualstack_ip_selection = None;
 
-            let mut parts = parse::split_options(parts[1], ' ');
+            let mut parts = parse::split_options(parts[1], ' ').peekable();
 
             while let Some(part) = parts.next() {
                 match part {
                     "-c" | "-speed-check-mode" => {
-                        speed_check_mode = parts
-                            .next()
-                            .map(SpeedCheckMode::from_str)
-                            .map(|r| r.ok())
-                            .unwrap_or_default()
+                        while let Some(s) = parts.peek() {
+                            if s.starts_with('-') {
+                                break;
+                            }
+
+                            if let Some(Ok(mode)) = parts.next().map(SpeedCheckMode::from_str) {
+                                speed_check_mode.push(mode);
+                            }
+                        }
                     }
                     "-a" | "-address" => {
                         address = parts
@@ -876,14 +1058,25 @@ impl FromStr for DomainRule {
             }
 
             Ok(Self {
-                domain,
-                speed_check_mode,
-                address,
-                nameserver,
-                dualstack_ip_selection,
+                name: domain,
+                value: DomainRule {
+                    speed_check_mode: speed_check_mode.into(),
+                    address: address.map(|addr| match addr {
+                        IpAddr::V4(ip) => DomainAddress::IPv4(ip),
+                        IpAddr::V6(ip) => DomainAddress::IPv6(ip),
+                    }),
+                    response_mode: None,
+                    nameserver,
+                    dualstack_ip_selection,
+                    no_cache: None,
+                    no_serve_expired: None,
+                    rr_ttl: None,
+                    rr_ttl_min: None,
+                    rr_ttl_max: None,
+                },
             })
         } else {
-            return Err(());
+            Err(())
         }
     }
 }
@@ -892,6 +1085,13 @@ impl FromStr for DomainRule {
 pub enum DomainId {
     Domain(Name),
     DomainSet(String),
+}
+
+impl From<Name> for DomainId {
+    #[inline]
+    fn from(value: Name) -> Self {
+        Self::Domain(value)
+    }
 }
 
 impl FromStr for DomainId {
@@ -912,10 +1112,56 @@ impl FromStr for DomainId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct SpeedCheckModeList(Vec<SpeedCheckMode>);
+
+impl SpeedCheckModeList {
+    pub fn push(&mut self, mode: SpeedCheckMode) -> Option<SpeedCheckMode> {
+        if self.0.iter().all(|m| m != &mode) {
+            self.0.push(mode);
+            None
+        } else {
+            Some(mode)
+        }
+    }
+}
+
+impl From<Vec<SpeedCheckMode>> for SpeedCheckModeList {
+    fn from(value: Vec<SpeedCheckMode>) -> Self {
+        let mut lst = Self(Vec::with_capacity(value.len()));
+        for mode in value {
+            lst.push(mode);
+        }
+        lst
+    }
+}
+
+impl Deref for SpeedCheckModeList {
+    type Target = Vec<SpeedCheckMode>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SpeedCheckModeList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        todo!()
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum SpeedCheckMode {
+    None,
     Ping,
     Tcp(u16),
+}
+
+impl Default for SpeedCheckMode {
+    #[inline]
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 impl FromStr for SpeedCheckMode {
@@ -924,24 +1170,12 @@ impl FromStr for SpeedCheckMode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s == "ping" {
             Ok(SpeedCheckMode::Ping)
-        } else if s.starts_with("tcp:") {
-            u16::from_str(&s[4..])
-                .map(|port| SpeedCheckMode::Tcp(port))
-                .map_err(|_| ())
+        } else if let Some(port) = s.strip_prefix("tcp:") {
+            u16::from_str(port).map(SpeedCheckMode::Tcp).map_err(|_| ())
         } else {
             Err(())
         }
     }
-}
-
-/// response mode
-///
-/// response-mode [first-ping|fastest-ip|fastest-response]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResponseMode {
-    FirstPing,
-    FastestIp,
-    FastestResponse,
 }
 
 impl FromStr for ResponseMode {
@@ -975,7 +1209,7 @@ mod parse {
             if path.exists() {
                 if self.conf_file.is_none() {
                     info!("loading configuration from: {:?}", path);
-                    self.conf_file = Some(path.to_path_buf());
+                    self.conf_file = Some(path.clone());
                 } else {
                     debug!("loading extra configuration from {:?}", path);
                 }
@@ -1012,26 +1246,31 @@ mod parse {
                         "user" => self.user = Some(options.to_string()),
                         "domain" => self.domain = options.parse().ok(),
                         "conf-file" => self.load_file(options).expect("load_file failed"),
-                        "bind" => match options.parse() {
-                            Ok(v) => self.binds.push(v),
-                            _ => (),
-                        },
-                        "bind-tcp" => match options.parse() {
-                            Ok(v) => self.binds_tcp.push(v),
-                            _ => (),
-                        },
-                        "bind-tls" => match options.parse() {
-                            Ok(v) => self.binds_tls.push(v),
-                            _ => (),
-                        },
-                        "bind-https" => match options.parse() {
-                            Ok(v) => self.binds_https.push(v),
-                            _ => (),
-                        },
-                        "bind-quic" => match options.parse() {
-                            Ok(v) => self.binds_quic.push(v),
-                            _ => (),
-                        },
+                        "bind" => {
+                            if let Ok(v) = options.parse() {
+                                self.binds.push(v)
+                            }
+                        }
+                        "bind-tcp" => {
+                            if let Ok(v) = options.parse() {
+                                self.binds_tcp.push(v)
+                            }
+                        }
+                        "bind-tls" => {
+                            if let Ok(v) = options.parse() {
+                                self.binds_tls.push(v)
+                            }
+                        }
+                        "bind-https" => {
+                            if let Ok(v) = options.parse() {
+                                self.binds_https.push(v)
+                            }
+                        }
+                        "bind-quic" => {
+                            if let Ok(v) = options.parse() {
+                                self.binds_quic.push(v)
+                            }
+                        }
                         "tcp-idle-time" => self.tcp_idle_time = options.parse().ok(),
                         "cache-size" => self.cache_size = options.parse().ok(),
                         "cache-persist" => self.cache_persist = Some(parse_bool(options)),
@@ -1042,30 +1281,33 @@ mod parse {
                         "serve-expired-reply-ttl" => {
                             self.serve_expired_reply_ttl = options.parse().ok()
                         }
-                        "bogus-nxdomain" => match options.parse() {
-                            Ok(v) => self.bogus_nxdomain.push(v),
-                            _ => (),
-                        },
-                        "blacklist-ip" => match options.parse() {
-                            Ok(v) => self.blacklist_ip.push(v),
-                            _ => (),
-                        },
-                        "whitelist-ip" => match options.parse() {
-                            Ok(v) => self.whitelist_ip.push(v),
-                            _ => (),
-                        },
-                        "ignore-ip" => match options.parse() {
-                            Ok(v) => self.ignore_ip.push(v),
-                            _ => (),
-                        },
+                        "bogus-nxdomain" => {
+                            if let Ok(v) = options.parse::<IpNet>() {
+                                self.bogus_nxdomain = (self.bogus_nxdomain.as_ref() + v).into()
+                            }
+                        }
+                        "blacklist-ip" => {
+                            if let Ok(v) = options.parse::<IpNet>() {
+                                self.blacklist_ip = (self.blacklist_ip.as_ref() + v).into()
+                            }
+                        }
+                        "whitelist-ip" => {
+                            if let Ok(v) = options.parse::<IpNet>() {
+                                self.whitelist_ip = (self.whitelist_ip.as_ref() + v).into()
+                            }
+                        }
+                        "ignore-ip" => {
+                            if let Ok(v) = options.parse::<IpNet>() {
+                                self.ignore_ip = (self.ignore_ip.as_ref() + v).into()
+                            }
+                        }
                         "speed-check-mode" => self.config_speed_check_mode(options),
                         "force-AAAA-SOA" => self.force_aaaa_soa = Some(parse_bool(options)),
-                        "force-qtype-SOA" => match u16::from_str(options).map(RecordType::from) {
-                            Ok(r) => {
+                        "force-qtype-SOA" => {
+                            if let Ok(r) = u16::from_str(options).map(RecordType::from) {
                                 self.force_qtype_soa.insert(r);
                             }
-                            _ => (),
-                        },
+                        }
                         "dualstack-ip-selection-threshold" => {
                             self.dualstack_ip_selection_threshold = options.parse().ok()
                         }
@@ -1075,10 +1317,11 @@ mod parse {
                         "dualstack-ip-selection" => {
                             self.dualstack_ip_selection = Some(parse_bool(options))
                         }
-                        "edns-client-subnet" => match options.parse() {
-                            Ok(v) => self.edns_client_subnet.push(v),
-                            _ => (),
-                        },
+                        "edns-client-subnet" => {
+                            if let Ok(v) = options.parse() {
+                                self.edns_client_subnet.push(v)
+                            }
+                        }
                         "rr-ttl" => self.rr_ttl = options.parse().ok(),
                         "rr-ttl-min" => self.rr_ttl_min = options.parse().ok(),
                         "rr-ttl-max" => self.rr_ttl_max = options.parse().ok(),
@@ -1135,12 +1378,9 @@ mod parse {
                 _ => None,
             };
 
-            let server_options = server_options
-                .as_ref()
-                .map(|s| s.as_str())
-                .unwrap_or(options);
+            let server_options = server_options.as_deref().unwrap_or(options);
 
-            if let Ok(server) = DnsServer::from_str(server_options) {
+            if let Ok(server) = NameServerInfo::from_str(server_options) {
                 if !server.exclude_default_group {
                     self.servers
                         .get_mut("default")
@@ -1180,7 +1420,7 @@ mod parse {
                 if let Ok(domain) = domain {
                     self.forward_rules.push(ForwardRule {
                         domain,
-                        server_group,
+                        nameserver: server_group,
                     })
                 } else {
                     println!("parse err");
@@ -1198,19 +1438,19 @@ mod parse {
             }
 
             if let Ok(domain) = DomainId::from_str(parts[0]) {
-                let domain_address = parts.iter().nth(1).map(|p| *p).unwrap_or("#");
+                let domain_address = parts.get(1).copied().unwrap_or("#");
 
                 if let Ok(addr) = DomainAddress::from_str(domain_address) {
-                    self.address_rules.push(AddressRule {
-                        domain,
-                        address: addr,
+                    self.address_rules.push(ConfigItem {
+                        name: domain,
+                        value: addr,
                     });
                 }
             }
         }
 
         fn config_domain_rule(&mut self, options: &str) {
-            if let Ok(rule) = DomainRule::from_str(options) {
+            if let Ok(rule) = options.parse() {
                 self.domain_rules.push(rule)
             }
         }
@@ -1256,7 +1496,7 @@ mod parse {
                     if let Some(line) = preline(line?.as_str()) {
                         if let Ok(mut d) = Name::from_str(line) {
                             d.set_fqdn(true);
-                            domain_set.insert(d.into());
+                            domain_set.insert(d);
                         }
                     }
                 }
@@ -1269,11 +1509,10 @@ mod parse {
 
         #[inline]
         fn config_speed_check_mode(&mut self, options: &str) {
-            let mut parts = split_options(options, ',');
-
-            while let Some(p) = parts.next() {
+            let parts = split_options(options, ',');
+            for p in parts {
                 if let Ok(m) = SpeedCheckMode::from_str(p) {
-                    self.speed_check_mode.push(m)
+                    self.speed_check_mode.push(m);
                 }
             }
         }
@@ -1287,10 +1526,7 @@ mod parse {
                     let mut new_path = parent.join(path.as_path());
 
                     if !new_path.exists()
-                        && match base_conf_file.file_name() {
-                            Some(file_name) if file_name == OsStr::new("smartdns.conf") => true,
-                            _ => false,
-                        }
+                        && matches!(base_conf_file.file_name(), Some(file_name) if file_name == OsStr::new("smartdns.conf"))
                     {
                         // eg: /etc/smartdns.d/custom.conf
                         new_path = parent.join("smartdns.d").join(path.as_path());
@@ -1306,7 +1542,7 @@ mod parse {
         path
     }
 
-    pub fn split_options<'a>(opt: &'a str, pat: char) -> impl Iterator<Item = &'a str> {
+    pub fn split_options(opt: &str, pat: char) -> impl Iterator<Item = &str> {
         opt.split(pat).filter(|p| !p.is_empty())
     }
 
@@ -1314,7 +1550,7 @@ mod parse {
         let mut line = line.trim_start();
 
         // skip comments and empty line.
-        if match line.chars().nth(0) {
+        if match line.chars().next() {
             Some(t) if t == '#' => true,
             None => true,
             _ => false,
@@ -1326,10 +1562,7 @@ mod parse {
         match line.rfind('#') {
             Some(sharp_idx)
                 if sharp_idx > 1
-                    && match line.chars().nth(sharp_idx - 1) {
-                        Some(c) if c.is_whitespace() => true,
-                        _ => false,
-                    } =>
+                    && matches!(line.chars().nth(sharp_idx - 1), Some(c) if c.is_whitespace()) =>
             {
                 line = &line[0..sharp_idx];
             }
@@ -1346,21 +1579,22 @@ mod parse {
     }
 
     pub fn parse_bool(s: &str) -> bool {
-        match s {
-            "y" | "yes" | "t" | "true" | "1" => true,
-            _ => false,
-        }
+        matches!(s, "y" | "yes" | "t" | "true" | "1")
     }
 
     pub fn parse_sock_addrs(addr: &str) -> Result<Vec<SocketAddr>, AddrParseError> {
         let addr = addr.trim();
         let mut sock_addrs = vec![];
 
-        if let Some(Ok(port)) = addr.to_lowercase().strip_prefix("localhost:").map(u16::from_str) {
+        if let Some(Ok(port)) = addr
+            .to_lowercase()
+            .strip_prefix("localhost:")
+            .map(u16::from_str)
+        {
             cfg_if! {
-                if #[cfg(target_os = "windows")] {
-                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port));
+                if #[cfg(any(target_os = "windows", target_os = "macos"))] {
                     sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
+                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port));
                 }else if #[cfg(target_os = "linux")]  {
                     // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
                     sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port));
@@ -1369,15 +1603,15 @@ mod parse {
                     sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
                 }
             };
-        } else if addr.starts_with("*:") || addr.starts_with(":") {
+        } else if addr.starts_with("*:") || addr.starts_with(':') {
             let port_str = addr.trim_start_matches("*:").trim_start_matches(':');
             let port = u16::from_str(port_str)
             .expect("The expected format for listening to both IPv4 and IPv6 addresses is :<port>,  *:<port>");
 
             cfg_if! {
-                if #[cfg(target_os = "windows")] {
-                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
+                if #[cfg(any(target_os = "windows", target_os = "macos"))] {
                     sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
+                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
                 }else if #[cfg(target_os = "linux")]  {
                     // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
                     sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
@@ -1476,11 +1710,11 @@ mod parse {
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
             assert_eq!(
-                domain_addr_rule.domain,
+                domain_addr_rule.name,
                 DomainId::from_str("test.example.com").unwrap()
             );
 
-            assert_eq!(domain_addr_rule.address, DomainAddress::SOA);
+            assert_eq!(domain_addr_rule.value, DomainAddress::SOA);
         }
 
         #[test]
@@ -1492,11 +1726,11 @@ mod parse {
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
             assert_eq!(
-                domain_addr_rule.domain,
+                domain_addr_rule.name,
                 DomainId::from_str("test.example.com").unwrap()
             );
 
-            assert_eq!(domain_addr_rule.address, DomainAddress::SOAv4);
+            assert_eq!(domain_addr_rule.value, DomainAddress::SOAv4);
         }
 
         #[test]
@@ -1508,11 +1742,11 @@ mod parse {
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
             assert_eq!(
-                domain_addr_rule.domain,
+                domain_addr_rule.name,
                 DomainId::from_str("test.example.com").unwrap()
             );
 
-            assert_eq!(domain_addr_rule.address, DomainAddress::SOAv6);
+            assert_eq!(domain_addr_rule.value, DomainAddress::SOAv6);
         }
 
         #[test]
@@ -1524,11 +1758,11 @@ mod parse {
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
             assert_eq!(
-                domain_addr_rule.domain,
+                domain_addr_rule.name,
                 DomainId::from_str("test.example.com").unwrap()
             );
 
-            assert_eq!(domain_addr_rule.address, DomainAddress::IGN);
+            assert_eq!(domain_addr_rule.value, DomainAddress::IGN);
         }
 
         #[test]
@@ -1540,11 +1774,11 @@ mod parse {
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
             assert_eq!(
-                domain_addr_rule.domain,
+                domain_addr_rule.name,
                 DomainId::from_str("test.example.com").unwrap()
             );
 
-            assert_eq!(domain_addr_rule.address, DomainAddress::IGNv4);
+            assert_eq!(domain_addr_rule.value, DomainAddress::IGNv4);
         }
 
         #[test]
@@ -1556,11 +1790,11 @@ mod parse {
             let domain_addr_rule = cfg.address_rules.first().unwrap();
 
             assert_eq!(
-                domain_addr_rule.domain,
+                domain_addr_rule.name,
                 DomainId::from_str("test.example.com").unwrap()
             );
 
-            assert_eq!(domain_addr_rule.address, DomainAddress::IGNv6);
+            assert_eq!(domain_addr_rule.value, DomainAddress::IGNv6);
         }
 
         #[test]
@@ -1576,7 +1810,7 @@ mod parse {
                 DomainId::from_str("doh.pub").unwrap().into()
             );
 
-            assert_eq!(nameserver_rule.server_group, "bootstrap");
+            assert_eq!(nameserver_rule.nameserver, "bootstrap");
         }
 
         #[test]
@@ -1588,11 +1822,14 @@ mod parse {
             let domain_rule = cfg.domain_rules.first().unwrap();
 
             assert_eq!(
-                domain_rule.domain,
+                domain_rule.name,
                 DomainId::Domain(Name::from_str("doh.pub").unwrap().into())
             );
             assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
-            assert_eq!(domain_rule.speed_check_mode, Some(SpeedCheckMode::Ping));
+            assert_eq!(
+                domain_rule.speed_check_mode,
+                vec![SpeedCheckMode::Ping].into()
+            );
             assert_eq!(domain_rule.nameserver, Some("test".to_string()));
             assert_eq!(domain_rule.dualstack_ip_selection, Some(true));
         }
@@ -1606,11 +1843,14 @@ mod parse {
             let domain_rule = cfg.domain_rules.first().unwrap();
 
             assert_eq!(
-                domain_rule.domain,
+                domain_rule.name,
                 DomainId::Domain(Name::from_str("doh.pub").unwrap().into())
             );
             assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
-            assert_eq!(domain_rule.speed_check_mode, Some(SpeedCheckMode::Ping));
+            assert_eq!(
+                domain_rule.speed_check_mode,
+                vec![SpeedCheckMode::Ping].into()
+            );
             assert_eq!(domain_rule.nameserver, Some("test".to_string()));
             assert_eq!(domain_rule.dualstack_ip_selection, Some(true));
         }
@@ -1664,7 +1904,7 @@ mod parse {
                 cfg.forward_rules.first().unwrap().domain,
                 DomainId::from_str("doh.pub").unwrap().into()
             );
-            assert_eq!(cfg.forward_rules.first().unwrap().server_group, "bootstrap");
+            assert_eq!(cfg.forward_rules.first().unwrap().nameserver, "bootstrap");
         }
 
         #[test]

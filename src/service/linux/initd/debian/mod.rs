@@ -1,7 +1,7 @@
 use super::*;
 
-pub const SERVICE_FILE_PATH: &'static str = "/etc/init.d/smartdns-rs";
-pub const SERVICE_FILE: &'static str = include_str!("files/etc/init.d/smartdns-rs");
+pub const SERVICE_FILE_PATH: &str = "/etc/init.d/smartdns-rs";
+pub const SERVICE_FILE: &str = include_str!("files/etc/init.d/smartdns-rs");
 
 #[inline]
 pub fn is_debian() -> bool {

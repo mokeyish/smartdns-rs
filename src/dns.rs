@@ -1,17 +1,13 @@
-use cfg_if::cfg_if;
 use std::fmt::Debug;
-use std::path::PathBuf;
+
 use std::{str::FromStr, sync::Arc, time::Duration};
 
-use crate::dns_conf::DomainRule;
-use crate::dns_server::Request as OriginRequest;
-use crate::log::info;
-use crate::{
-    dns_client::DnsClient,
-    dns_conf::{QueryOpts, SmartDnsConfig},
-};
+use crate::dns_error::LookupError;
+use crate::dns_rule::DomainRuleTreeNode;
 
-pub use trust_dns_proto::{
+use crate::dns_conf::{ServerOpts, SmartDnsConfig};
+
+pub use crate::trust_dns::proto::{
     op,
     rr::{self, rdata::SOA, Name, RData, Record, RecordType},
 };
@@ -22,19 +18,17 @@ pub use trust_dns_resolver::{
     lookup::Lookup,
 };
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct DnsContext {
     pub cfg: Arc<SmartDnsConfig>,
-    pub client: Arc<DnsClient>,
+    pub server_opts: ServerOpts,
+    pub domain_rule: Option<Arc<DomainRuleTreeNode>>,
     pub fastest_speed: Duration,
-    pub lookup_source: LookupSource,
-    pub no_cache: bool,
-    pub query_opts: QueryOpts,
-    pub domain_rule: Option<Arc<DomainRule>>,
+    pub source: LookupFrom,
 }
 
 #[derive(Clone)]
-pub enum LookupSource {
+pub enum LookupFrom {
     None,
     Cache,
     Static,
@@ -42,7 +36,7 @@ pub enum LookupSource {
     Server(String),
 }
 
-impl Debug for LookupSource {
+impl Debug for LookupFrom {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::None => write!(f, "None"),
@@ -54,150 +48,106 @@ impl Debug for LookupSource {
     }
 }
 
-impl Default for LookupSource {
+impl Default for LookupFrom {
     #[inline]
     fn default() -> Self {
         Self::None
     }
 }
 
-pub type DnsRequest = OriginRequest;
+mod request {
+
+    use std::net::SocketAddr;
+
+    use trust_dns_client::op::LowerQuery;
+    use trust_dns_proto::{op::Query, rr::RecordType};
+    use trust_dns_server::server::Protocol;
+
+    use crate::dns_server::Request as OriginRequest;
+
+    #[derive(Clone)]
+    pub struct Request {
+        id: u16,
+        /// Message with the associated query or update data
+        query: LowerQuery,
+        /// Source address of the Client
+        src: SocketAddr,
+        /// Protocol of the request
+        protocol: Protocol,
+    }
+
+    impl From<&OriginRequest> for Request {
+        fn from(req: &OriginRequest) -> Self {
+            Self {
+                id: req.id(),
+                query: req.query().to_owned(),
+                src: req.src(),
+                protocol: req.protocol(),
+            }
+        }
+    }
+
+    impl Request {
+        /// see `Header::id()`
+        pub fn id(&self) -> u16 {
+            self.id
+        }
+
+        /// ```text
+        /// Question        Carries the query name and other query parameters.
+        /// ```
+        #[inline]
+        pub fn query(&self) -> &LowerQuery {
+            &self.query
+        }
+
+        /// The IP address from which the request originated.
+        #[inline]
+        pub fn src(&self) -> SocketAddr {
+            self.src
+        }
+
+        /// The protocol that was used for the request
+        #[inline]
+        pub fn protocol(&self) -> Protocol {
+            self.protocol
+        }
+
+        pub fn set_query_type(&mut self, query_type: RecordType) {
+            let mut query = self.query.original().clone();
+            query.set_query_type(query_type);
+            self.query = LowerQuery::from(query)
+        }
+    }
+
+    impl From<Query> for Request {
+        fn from(query: Query) -> Self {
+            use std::net::{Ipv4Addr, SocketAddrV4};
+
+            Self {
+                id: rand::random(),
+                query: query.into(),
+                src: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)),
+                protocol: Protocol::Udp,
+            }
+        }
+    }
+}
+
+pub type DnsRequest = request::Request;
 pub type DnsResponse = Lookup;
-pub type DnsError = ResolveError;
+pub type DnsError = LookupError;
 
-impl SmartDnsConfig {
-    pub fn summary(&self) {
-        info!(r#"whoami 👉 {}"#, self.server_name());
+#[derive(Debug, Clone, Copy)]
+pub enum LookupResponseStrategy {
+    FirstPing,       // query + ping
+    FastestIp,       // ping
+    FastestResponse, // query
+}
 
-        const DEFAULT_GROUP: &'static str = "default";
-        for (group, servers) in self.servers.iter() {
-            if group == DEFAULT_GROUP {
-                continue;
-            }
-            for server in servers {
-                info!(
-                    "upstream server: {} [group: {}]",
-                    server.url.to_string(),
-                    group
-                );
-            }
-        }
-
-        if let Some(ss) = self.servers.get(DEFAULT_GROUP) {
-            for s in ss {
-                info!(
-                    "upstream server: {} [group: {}]",
-                    s.url.to_string(),
-                    DEFAULT_GROUP
-                );
-            }
-        }
-    }
-
-    pub fn server_name(&self) -> Name {
-        match self.server_name {
-            Some(ref server_name) => Some(server_name.clone()),
-            None => match hostname::get() {
-                Ok(name) => match name.to_str() {
-                    Some(s) => Name::from_str(s).ok(),
-                    None => None,
-                },
-                Err(_) => None,
-            },
-        }
-        .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
-    }
-
-    #[inline]
-    pub fn tcp_idle_time(&self) -> u64 {
-        self.tcp_idle_time.unwrap_or(120)
-    }
-
-    #[inline]
-    pub fn rr_ttl_min(&self) -> u64 {
-        self.rr_ttl_min.unwrap_or(60)
-    }
-
-    #[inline]
-    pub fn rr_ttl(&self) -> u64 {
-        self.rr_ttl.unwrap_or(300)
-    }
-
-    #[inline]
-    pub fn local_ttl(&self) -> u64 {
-        self.local_ttl.unwrap_or_else(|| self.rr_ttl_min())
-    }
-
-    pub fn cache_size(&self) -> usize {
-        self.cache_size.unwrap_or(512)
-    }
-
-    pub fn cache_persist(&self) -> bool {
-        self.cache_persist.unwrap_or(false)
-    }
-
-    pub fn audit_num(&self) -> usize {
-        self.audit_num.unwrap_or(2)
-    }
-
-    pub fn audit_size(&self) -> u64 {
-        use byte_unit::n_kb_bytes;
-        self.audit_size.unwrap_or(n_kb_bytes(128) as u64)
-    }
-
-    pub fn audit_file_mode(&self) -> u32 {
-        self.audit_file_mode.map(|m| *m).unwrap_or(0o640)
-    }
-
-    pub fn log_enabled(&self) -> bool {
-        self.log_num() > 0
-    }
-
-    pub fn log_file(&self) -> PathBuf {
-        match self.log_file.as_ref() {
-            Some(e) => e.to_owned(),
-            None => {
-                cfg_if! {
-                    if #[cfg(target_os="windows")] {
-                        let mut path = std::env::temp_dir();
-                        path.push("smartdns");
-                        path.push("smartdns.log");
-                        path
-                    } else {
-                        PathBuf::from(r"/var/log/smartdns/smartdns.log")
-                    }
-
-                }
-            }
-        }
-    }
-
-    pub fn log_level(&self) -> tracing::Level {
-        use tracing::Level;
-        match self
-            .log_level
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("error")
-        {
-            "tarce" => Level::TRACE,
-            "debug" => Level::DEBUG,
-            "info" | "notice" => Level::INFO,
-            "warn" => Level::WARN,
-            "error" | "fatal" => Level::ERROR,
-            _ => Level::ERROR,
-        }
-    }
-
-    pub fn log_num(&self) -> u64 {
-        self.log_num.unwrap_or(2)
-    }
-    pub fn log_size(&self) -> u64 {
-        use byte_unit::n_kb_bytes;
-        self.audit_size.unwrap_or(n_kb_bytes(128) as u64)
-    }
-    pub fn log_file_mode(&self) -> u32 {
-        self.log_file_mode.map(|m| *m).unwrap_or(0o640)
+impl Default for LookupResponseStrategy {
+    fn default() -> Self {
+        LookupResponseStrategy::FirstPing
     }
 }
 

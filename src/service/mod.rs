@@ -7,7 +7,7 @@ use self::{installer::InstallerBuilder, service_manager::ServiceManager};
 use cfg_if::cfg_if;
 use std::{env, path::Path};
 
-pub const SERVICE_NAME: &'static str = "smartdns-rs";
+pub const SERVICE_NAME: &str = "smartdns-rs";
 
 mod installer;
 mod service_manager;

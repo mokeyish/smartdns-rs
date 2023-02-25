@@ -1,4 +1,5 @@
 pub mod file_mode;
+pub mod ipset;
 pub mod mapped_file;
 pub mod mem_bytes;
 pub mod middleware;

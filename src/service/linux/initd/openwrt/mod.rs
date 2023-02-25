@@ -1,8 +1,8 @@
 use super::*;
 use std::io;
 
-pub const SERVICE_FILE_PATH: &'static str = "/etc/init.d/smartdns-rs";
-pub const SERVICE_FILE: &'static str = include_str!("files/etc/init.d/smartdns-rs");
+pub const SERVICE_FILE_PATH: &str = "/etc/init.d/smartdns-rs";
+pub const SERVICE_FILE: &str = include_str!("files/etc/init.d/smartdns-rs");
 
 const PROCD: &str = "procd";
 pub fn is_openwrt() -> bool {

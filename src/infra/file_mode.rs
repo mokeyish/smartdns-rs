@@ -11,7 +11,7 @@ impl FromStr for FileMode {
         if s.starts_with("0o") {
             s = &s[2..];
         }
-        if s.starts_with("o") {
+        if s.starts_with('o') {
             s = &s[1..];
         }
         let mode = u32::from_str_radix(s, 8)?;
@@ -35,10 +35,9 @@ impl PartialEq<u32> for FileMode {
     }
 }
 
-impl Into<u32> for FileMode {
-    #[inline]
-    fn into(self) -> u32 {
-        self.0
+impl From<FileMode> for u32 {
+    fn from(value: FileMode) -> Self {
+        value.0
     }
 }
 

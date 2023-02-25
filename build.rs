@@ -10,7 +10,7 @@ fn download<P: AsRef<Path> + Copy>(url: &str, file_path: P) -> bool {
         return false;
     }
 
-    let rest = http::get(url).expect(&["URL:", url, " download failed!!!"].concat());
+    let rest = http::get(url).unwrap_or_else(|_| panic!("URL: {} download failed!!!", url));
 
     let bytes = rest.bytes().expect("read bytes from server failed!!!");
 
@@ -20,14 +20,8 @@ fn download<P: AsRef<Path> + Copy>(url: &str, file_path: P) -> bool {
 }
 
 fn write_all_to_file<P: AsRef<Path> + Copy, T: AsRef<[u8]>>(file_path: P, text: T) {
-    let mut file = File::create(file_path).expect(
-        &[
-            "Create file ",
-            file_path.as_ref().to_str().expect("<>"),
-            "failed",
-        ]
-        .concat(),
-    );
+    let mut file = File::create(file_path)
+        .unwrap_or_else(|_| panic!("Create file {:?} failed", file_path.as_ref()));
     file.write_all(text.as_ref()).unwrap();
 }
 
@@ -37,14 +31,7 @@ fn append_text_to_file<P: AsRef<Path> + Copy, T: AsRef<[u8]>>(file_path: P, text
         .append(true)
         .create(true)
         .open(file_path)
-        .expect(
-            &[
-                "Create file ",
-                file_path.as_ref().to_str().expect("<>"),
-                "failed",
-            ]
-            .concat(),
-        );
+        .unwrap_or_else(|_| panic!("Create file {:?} failed", file_path.as_ref()));
     file.write_all(text.as_ref()).unwrap();
 }
 

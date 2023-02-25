@@ -163,7 +163,7 @@ impl ServiceCommand {
                         .ok()
                         .filter(|s| !s.trim().is_empty())
                 })
-                .unwrap_or_else(|| format!("Failed"));
+                .unwrap_or_else(|| "Failed".to_string());
             error!("{}", msg);
             Err(io::Error::new(io::ErrorKind::Other, msg))
         }

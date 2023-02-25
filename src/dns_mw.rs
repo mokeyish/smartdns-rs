@@ -9,39 +9,40 @@ use trust_dns_resolver::error::ResolveErrorKind;
 
 use crate::{
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
-    dns_client::DnsClient,
-    dns_conf::{QueryOpts, SmartDnsConfig},
-    matcher::DomainRuleMatcher,
+    dns_conf::{ServerOpts, SmartDnsConfig},
+    dns_rule::DomainRuleMap,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
+pub type DnsMiddlewareHost = MiddlewareHost<DnsContext, DnsRequest, DnsResponse, DnsError>;
+
 pub struct DnsMiddlewareHandler {
     cfg: Arc<SmartDnsConfig>,
-    client: Arc<DnsClient>,
-    domain_rules: DomainRuleMatcher,
-    host: MiddlewareHost<DnsContext, DnsRequest, DnsResponse, DnsError>,
+    domain_rule_map: DomainRuleMap,
+    host: DnsMiddlewareHost,
 }
 
 impl DnsMiddlewareHandler {
     pub async fn search(
         &self,
         req: &DnsRequest,
-        server_opts: &QueryOpts,
+        server_opts: &ServerOpts,
     ) -> Result<DnsResponse, DnsError> {
+        let _cfg = self.cfg.as_ref();
+
         let domain_rule = self
-            .domain_rules
+            .domain_rule_map
             .find(req.query().name().borrow())
-            .map(|n| n.to_owned());
+            .cloned();
 
         let mut ctx = DnsContext {
             cfg: self.cfg.clone(),
-            client: self.client.clone(),
             fastest_speed: Default::default(),
-            lookup_source: Default::default(),
-            no_cache: false,
-            query_opts: server_opts.clone(),
+            source: Default::default(),
+            server_opts: server_opts.clone(),
             domain_rule,
         };
+
         self.host.execute(&mut ctx, req).await
     }
 }
@@ -65,13 +66,18 @@ impl DnsMiddlewareBuilder {
         self
     }
 
-    pub fn build(self, cfg: Arc<SmartDnsConfig>, client: Arc<DnsClient>) -> DnsMiddlewareHandler {
-        let domain_rules = DomainRuleMatcher::create(&cfg);
+    pub fn build(self, cfg: Arc<SmartDnsConfig>) -> DnsMiddlewareHandler {
+        let domain_rule_map = DomainRuleMap::create(
+            &cfg.domain_rules,
+            &cfg.address_rules,
+            &cfg.forward_rules,
+            &cfg.domain_sets,
+        );
+
         DnsMiddlewareHandler {
             host: self.builder.build(),
             cfg,
-            domain_rules,
-            client,
+            domain_rule_map,
         }
     }
 }
@@ -80,9 +86,7 @@ impl DnsMiddlewareBuilder {
 struct DnsDefaultHandler;
 
 #[async_trait::async_trait]
-impl<'a> MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, DnsError>
-    for DnsDefaultHandler
-{
+impl MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsDefaultHandler {
     async fn handle(
         &self,
         ctx: &mut DnsContext,

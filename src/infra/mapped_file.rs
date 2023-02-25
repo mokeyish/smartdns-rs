@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use chrono::Local;
 
-const DATE_FMT: &'static str = "%Y%m%d-%H%M%S%f";
+const DATE_FMT: &str = "%Y%m%d-%H%M%S%f";
 
 pub struct MappedFile {
     num: Option<usize>,
@@ -159,8 +159,7 @@ impl MappedFile {
                         self.len = file.metadata().unwrap().len();
                         if self.len == 0 && self.peamble_bytes.is_some() {
                             let bytes = self.peamble().unwrap();
-                            file.write(bytes)?;
-                            self.len = bytes.len() as u64;
+                            self.len = file.write(bytes)? as u64;
                         }
                         self.file = Some(file);
                         Ok(self.file.as_mut().unwrap())
@@ -172,21 +171,18 @@ impl MappedFile {
     }
 
     fn backup_files(&mut self) -> io::Result<()> {
-        match (self.path.file_stem(), self.path.parent()) {
-            (Some(base_name), Some(parent)) => {
-                let new_name = {
-                    let mut n = base_name.to_os_string();
-                    n.push("-");
-                    n.push(Local::now().format(DATE_FMT).to_string());
-                    n
-                };
-                let mut new_path = parent.join(new_name);
-                if let Some(ext) = self.path.extension() {
-                    new_path = new_path.with_extension(ext);
-                }
-                fs::copy(self.path.as_path(), new_path)?;
+        if let (Some(base_name), Some(parent)) = (self.path.file_stem(), self.path.parent()) {
+            let new_name = {
+                let mut n = base_name.to_os_string();
+                n.push("-");
+                n.push(Local::now().format(DATE_FMT).to_string());
+                n
+            };
+            let mut new_path = parent.join(new_name);
+            if let Some(ext) = self.path.extension() {
+                new_path = new_path.with_extension(ext);
             }
-            _ => (),
+            fs::copy(self.path.as_path(), new_path)?;
         }
 
         let files = self.mapped_files()?;
