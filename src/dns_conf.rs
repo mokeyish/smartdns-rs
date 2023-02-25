@@ -1963,16 +1963,16 @@ mod parse {
 
                     assert_eq!(sock_addrs.len(), 2);
 
-                    assert!(sock_addrs.get(0).unwrap().is_ipv6());
-                    assert!(sock_addrs.get(1).unwrap().is_ipv4());
+                    assert!(sock_addrs.get(0).unwrap().is_ipv4());
+                    assert!(sock_addrs.get(1).unwrap().is_ipv6());
 
-                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "::");
-                    assert_eq!(sock_addrs.get(1).unwrap().ip().to_string(), "0.0.0.0");
+                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "0.0.0.0");
+                    assert_eq!(sock_addrs.get(1).unwrap().ip().to_string(), "::");
 
                     assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
                     assert_eq!(sock_addrs.get(1).unwrap().port(), 123);
 
-                }else if #[cfg(target_os = "linux")]  {
+                }else if #[cfg(any(target_os = "linux", target_os = "macos"))]  {
                     // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
 
                     assert_eq!(sock_addrs.len(), 1);
