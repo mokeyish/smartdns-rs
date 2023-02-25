@@ -118,6 +118,7 @@ impl<TCtx: Send, TReq: Sync, TRes, TErr> MiddlewareBuilder<TCtx, TReq, TRes, TEr
 
 pub struct MiddlewareHost<TCtx, TReq, TRes, TErr> {
     default: Arc<dyn MiddlewareDefaultHandler<TCtx, TReq, TRes, TErr>>,
+    #[allow(clippy::type_complexity)]
     middleware_stack: Box<[Arc<dyn Middleware<TCtx, TReq, TRes, TErr>>]>,
 }
 
@@ -125,6 +126,22 @@ impl<TCtx: Send, TReq: Sync, TRes, TErr> MiddlewareHost<TCtx, TReq, TRes, TErr> 
     pub async fn execute(&self, ctx: &mut TCtx, req: &TReq) -> Result<TRes, TErr> {
         let next = Next::new(&self.default, &self.middleware_stack);
         next.run(ctx, req).await
+    }
+}
+
+impl<TCtx: Send, TReq: Sync, TRes, TErr> From<&Next<'_, TCtx, TReq, TRes, TErr>>
+    for MiddlewareHost<TCtx, TReq, TRes, TErr>
+{
+    fn from(
+        &Next {
+            default,
+            middlewares,
+        }: &Next<'_, TCtx, TReq, TRes, TErr>,
+    ) -> Self {
+        Self {
+            default: default.to_owned(),
+            middleware_stack: middlewares.to_owned().into_boxed_slice(),
+        }
     }
 }
 

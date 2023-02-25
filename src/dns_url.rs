@@ -1,3 +1,5 @@
+use std::hash::Hash;
+use std::net::SocketAddr;
 use std::string::ToString;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -11,16 +13,22 @@ use url::{Host, Url};
 /// tcp://8.8.8.8:53                            => dns over tcp
 /// tls://8.8.8.8:853                           => DOT: dns over tls
 /// https://1.1.1.1/dns-query                   => DOH: dns over https
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct DnsUrl {
     proto: Protocol,
     host: Host,
     port: Option<u16>,
     path: Option<String>,
+
+    addrs: Vec<SocketAddr>,
     enable_sni: Option<bool>,
 }
 
 impl DnsUrl {
+    pub fn addrs(&self) -> &[SocketAddr] {
+        self.addrs.as_slice()
+    }
+
     pub fn proto(&self) -> &Protocol {
         &self.proto
     }
@@ -47,15 +55,31 @@ impl DnsUrl {
         }
     }
 
-    pub fn get_domain(&self) -> Option<&str> {
+    pub fn domain(&self) -> Option<&str> {
         if let Host::Domain(domain) = &self.host {
             Some(domain.as_str())
         } else {
             None
         }
     }
+
     pub fn enable_sni(&self) -> bool {
         self.enable_sni.unwrap_or(true)
+    }
+
+    pub fn set_ip_addrs(&mut self, addrs: Vec<IpAddr>) {
+        self.addrs = addrs
+            .into_iter()
+            .map(|ip| SocketAddr::new(ip, self.port()))
+            .collect();
+    }
+
+    pub fn set_host_name(&mut self, name: &str) {
+        self.host = Host::Domain(name.to_string())
+    }
+
+    pub fn set_sni_verify(&mut self, verify: bool) {
+        self.enable_sni = Some(verify)
     }
 }
 
@@ -66,12 +90,34 @@ pub enum DnsUrlParseErr {
     HostUnspecified,
 }
 
+impl PartialEq for DnsUrl {
+    fn eq(&self, other: &Self) -> bool {
+        self.proto == other.proto
+            && self.host == other.host
+            && self.port == other.port
+            && self.path == other.path
+            && self.addrs == other.addrs
+            && self.enable_sni == other.enable_sni
+    }
+}
+
+impl Hash for DnsUrl {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        format!("{:?}", self.proto).hash(state);
+        self.host.hash(state);
+        self.port.hash(state);
+        self.path.hash(state);
+        self.addrs.hash(state);
+        self.enable_sni.hash(state);
+    }
+}
+
 impl FromStr for DnsUrl {
     type Err = DnsUrlParseErr;
 
     fn from_str(url: &str) -> Result<Self, Self::Err> {
         let mut url = url.to_lowercase();
-        if url.find("://").is_none() {
+        if !url.contains("://") {
             url.insert_str(0, "udp://")
         }
 
@@ -108,6 +154,18 @@ impl FromStr for DnsUrl {
             })
             .next();
 
+        let addrs = match &host {
+            Host::Domain(_) => vec![],
+            Host::Ipv4(ip) => vec![SocketAddr::new(
+                IpAddr::V4(*ip),
+                port.unwrap_or_else(|| dns_proto_default_port(&proto)),
+            )],
+            Host::Ipv6(ip) => vec![SocketAddr::new(
+                IpAddr::V6(*ip),
+                port.unwrap_or_else(|| dns_proto_default_port(&proto)),
+            )],
+        };
+
         Ok(Self {
             proto,
             host: host.to_owned(),
@@ -117,6 +175,7 @@ impl FromStr for DnsUrl {
             } else {
                 Some(url.path().to_string())
             },
+            addrs,
             enable_sni,
         })
     }
@@ -270,6 +329,17 @@ mod tests {
         assert_eq!(url.port(), 953);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "tls://8.8.8.8:953");
+    }
+
+    #[test]
+    fn test_parse_tls_3() {
+        let mut url = DnsUrl::from_str("tls://8.8.8.8:953").unwrap();
+        url.set_host_name("dns.google");
+        assert_eq!(url.proto, Protocol::Tls);
+        assert_eq!(url.host.to_string(), "dns.google");
+        assert_eq!(url.port(), 953);
+        assert_eq!(url.path(), "");
+        assert_eq!(url.to_string(), "tls://dns.google:953");
     }
 
     #[test]

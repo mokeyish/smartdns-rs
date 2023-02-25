@@ -5,17 +5,17 @@ use std::net::Ipv6Addr;
 /// IP addresses for Cloudflare's 1.1.1.1 DNS service
 /// Please see: https://cloudflare-dns.com/
 pub use trust_dns_resolver::config::CLOUDFLARE_IPS;
-pub const CLOUDFLARE: &'static str = "cloudflare-dns.com";
+pub const CLOUDFLARE: &str = "cloudflare-dns.com";
 
 /// IP addresses for Google Public DNS
 /// Please see: https://dns.google/
 pub use trust_dns_resolver::config::GOOGLE_IPS;
-pub const GOOGLE: &'static str = "dns.google";
+pub const GOOGLE: &str = "dns.google";
 
 /// IP address for the Quad9 DNS service
 /// Please see: https://www.quad9.net/
 pub use trust_dns_resolver::config::QUAD9_IPS;
-pub const QUAD9: &'static str = "dns.quad9.net";
+pub const QUAD9: &str = "dns.quad9.net";
 
 /// IP address for the Ali DNS service
 /// Please see: https://www.alidns.com/
@@ -25,7 +25,7 @@ pub const ALIDNS_IPS: &[IpAddr] = &[
     IpAddr::V6(Ipv6Addr::new(0x2400, 0x3200, 0xbaba, 0, 0, 0, 0, 0x0001)),
     IpAddr::V6(Ipv6Addr::new(0x2400, 0x3200, 0, 0, 0, 0, 0, 0x0001)),
 ];
-pub const ALIDNS: &'static str = "dns.alidns.com";
+pub const ALIDNS: &str = "dns.alidns.com";
 
 /// IP address for the DNSPod Public DNS service
 /// Please see: https://www.dnspod.cn/Products/publicdns

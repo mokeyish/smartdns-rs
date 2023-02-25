@@ -6,13 +6,13 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub struct DnsmasqMiddleware {
-    client_client_store: LanClientStore,
+    client_store: LanClientStore,
 }
 
 impl DnsmasqMiddleware {
     pub fn new<P: AsRef<Path>>(lease_file: P, domain: Option<Name>) -> Self {
         Self {
-            client_client_store: LanClientStore::new(lease_file, domain),
+            client_store: LanClientStore::new(lease_file, domain),
         }
     }
 }
@@ -26,7 +26,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsmasqMiddle
         next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
     ) -> Result<DnsResponse, DnsError> {
         if let Some(rdata) = self
-            .client_client_store
+            .client_store
             .lookup(req.query().name().borrow(), req.query().query_type())
         {
             let local_ttl = ctx.cfg.local_ttl();
@@ -41,7 +41,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsmasqMiddle
                 valid_until,
             );
 
-            ctx.lookup_source = LookupSource::Static;
+            ctx.source = LookupFrom::Static;
             return Ok(lookup);
         }
 

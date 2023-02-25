@@ -5,9 +5,9 @@ use std::{io, path::Path};
 
 use super::*;
 
-const SERVICE_FILE_PATH: &'static str = "/lib/systemd/system/smartdns-rs.service";
-const SERVICE_FILE: &'static str = include_str!("files/lib/systemd/system/smartdns-rs.service");
-const SERVICE_CTL: &'static str = "systemctl";
+const SERVICE_FILE_PATH: &str = "/lib/systemd/system/smartdns-rs.service";
+const SERVICE_FILE: &str = include_str!("files/lib/systemd/system/smartdns-rs.service");
+const SERVICE_CTL: &str = "systemctl";
 const SERVICE_RUN_DIR: &str = "/run/systemd/system";
 
 #[inline]

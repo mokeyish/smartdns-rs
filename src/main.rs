@@ -9,24 +9,26 @@ use tokio::{
 };
 
 mod cli;
+mod collections;
 mod dns;
 mod dns_client;
 mod dns_conf;
+mod dns_error;
 mod dns_mw;
 mod dns_mw_addr;
 mod dns_mw_audit;
+mod dns_mw_bogus;
 mod dns_mw_cache;
 mod dns_mw_dnsmasq;
+mod dns_mw_dualstack;
 mod dns_mw_ns;
-mod dns_mw_spdt;
 mod dns_mw_zone;
+mod dns_rule;
 mod dns_server;
 mod dns_url;
 mod dnsmasq;
-mod fast_ping;
 mod infra;
 mod log;
-mod matcher;
 mod preset_ns;
 mod service;
 mod third_ext;
@@ -35,17 +37,15 @@ mod trust_dns;
 use dns_mw::DnsMiddlewareBuilder;
 use dns_mw_addr::AddressMiddleware;
 use dns_mw_audit::DnsAuditMiddleware;
+use dns_mw_bogus::DnsBogusMiddleware;
 use dns_mw_cache::DnsCacheMiddleware;
 use dns_mw_dnsmasq::DnsmasqMiddleware;
+use dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
 use dns_mw_ns::NameServerMiddleware;
-use dns_mw_spdt::DnsSpeedTestMiddleware;
 use dns_mw_zone::DnsZoneMiddleware;
 use infra::middleware;
 
-use crate::{
-    dns_client::DnsClient, dns_conf::SmartDnsConfig, dns_server::ServerRegistry,
-    matcher::DomainNameServerGroupMatcher,
-};
+use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig, dns_server::ServerRegistry};
 use crate::{
     infra::process_guard::ProcessGuardError,
     log::{debug, error, info, warn},
@@ -63,10 +63,10 @@ fn banner() {
 }
 
 /// The app name
-const NAME: &'static str = "SmartDNS";
+const NAME: &str = "SmartDNS";
 
 /// The default configuration.
-const DEFAULT_CONF: &'static str = include_str!("../etc/smartdns/smartdns.conf");
+const DEFAULT_CONF: &str = include_str!("../etc/smartdns/smartdns.conf");
 
 /// Returns a version as specified in Cargo.toml
 pub fn version() -> &'static str {
@@ -191,12 +191,6 @@ fn run_server(conf: Option<PathBuf>) {
     // build handle pipeline.
     let middleware = {
         let _guard = runtime.enter();
-        let dns_client = Arc::new(DnsClient::new(
-            DomainNameServerGroupMatcher::create(&cfg),
-            cfg.servers.clone(),
-            cfg.ca_path.clone(),
-            cfg.ca_file.clone(),
-        ));
 
         let mut middleware_builder = DnsMiddlewareBuilder::new();
 
@@ -212,7 +206,7 @@ fn run_server(conf: Option<PathBuf>) {
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
 
-        middleware_builder = middleware_builder.with(AddressMiddleware::new(&cfg));
+        middleware_builder = middleware_builder.with(AddressMiddleware);
 
         if cfg
             .dnsmasq_lease_file
@@ -228,18 +222,34 @@ fn run_server(conf: Option<PathBuf>) {
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {
-            middleware_builder =
-                middleware_builder.with(DnsCacheMiddleware::new(&cfg, dns_client.clone()));
+            middleware_builder = middleware_builder.with(DnsCacheMiddleware::new());
         }
 
-        // check if speed_check enabled.
-        if !cfg.speed_check_mode.is_empty() {
-            middleware_builder = middleware_builder.with(DnsSpeedTestMiddleware);
+        middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);
+
+        if !cfg.bogus_nxdomain.is_empty() {
+            middleware_builder = middleware_builder.with(DnsBogusMiddleware);
         }
 
-        middleware_builder = middleware_builder.with(NameServerMiddleware::new(&cfg));
+        middleware_builder = middleware_builder.with(NameServerMiddleware::new({
+            let servers = cfg.servers.clone();
+            let ca_path = cfg.ca_path.clone();
+            let ca_file = cfg.ca_file.clone();
+            runtime.block_on(async move {
+                let mut builder = DnsClient::builder();
+                builder = builder
+                    .add_servers(servers.values().flat_map(|s| s.clone()).collect::<Vec<_>>());
+                if let Some(path) = ca_path {
+                    builder = builder.set_ca_path(path);
+                }
+                if let Some(file) = ca_file {
+                    builder = builder.set_ca_path(file);
+                }
+                builder.build().await
+            })
+        }));
 
-        Arc::new(middleware_builder.build(cfg.clone(), dns_client.clone()))
+        Arc::new(middleware_builder.build(cfg.clone()))
     };
 
     let tcp_idle_time = cfg.tcp_idle_time();

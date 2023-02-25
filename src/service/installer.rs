@@ -56,21 +56,11 @@ impl InstallItem {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct InstallOptions {
     mode: Option<u32>,
     install_strategy: InstallStrategy,
     uninstall_strategy: UninstallStrategy,
-}
-
-impl Default for InstallOptions {
-    fn default() -> Self {
-        Self {
-            mode: Default::default(),
-            install_strategy: Default::default(),
-            uninstall_strategy: Default::default(),
-        }
-    }
 }
 
 impl<'a, 'b> From<(&'a Path, &'b [u8])> for InstallItem {
@@ -164,7 +154,6 @@ impl<'a, 'b> From<(&'a Path, &'b [u8], u32, InstallStrategy, UninstallStrategy)>
                 mode: Some(mode),
                 install_strategy,
                 uninstall_strategy,
-                ..Default::default()
             },
         }
     }

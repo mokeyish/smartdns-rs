@@ -4,9 +4,9 @@ use super::{
     SERVICE_NAME,
 };
 
-pub const BIN_PATH: &'static str = "/usr/sbin/smartdns";
-pub const CONF_DIR: &'static str = "/etc/smartdns";
-pub const CONF_PATH: &'static str = "/etc/smartdns/smartdns.conf";
+pub const BIN_PATH: &str = "/usr/sbin/smartdns";
+pub const CONF_DIR: &str = "/etc/smartdns";
+pub const CONF_PATH: &str = "/etc/smartdns/smartdns.conf";
 
 mod initd;
 mod runit;

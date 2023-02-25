@@ -27,7 +27,7 @@ pub fn create<P: AsRef<Path>>(path: P) -> Result<ProcessGuard, ProcessGuardError
 
     if path.exists() {
         let id_str = fs::read_to_string(path)?;
-        let prev_id = u32::from_str_radix(id_str.as_str(), 10);
+        let prev_id = id_str.as_str().parse::<u32>();
         if let Ok(prev_id) = prev_id {
             if is_process_running(prev_id) {
                 return Err(ProcessGuardError::AlreadyRunning(prev_id));
