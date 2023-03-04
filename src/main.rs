@@ -170,10 +170,10 @@ fn run_server(conf: Option<PathBuf>) {
 
     #[cfg(target_os = "linux")]
     let _user_guard = {
-        if let Some(user) = cfg.user.as_ref() {
-            run_user::with(user.as_str(), None)
+        if let Some(user) = cfg.user() {
+            run_user::with(user, None)
                 .unwrap_or_else(|err| {
-                    panic!("run with user {} failed. {}", user.as_str(), err);
+                    panic!("run with user {} failed. {}", user, err);
                 })
                 .into()
         } else {
@@ -195,9 +195,9 @@ fn run_server(conf: Option<PathBuf>) {
         let mut middleware_builder = DnsMiddlewareBuilder::new();
 
         // check if audit enabled.
-        if cfg.audit_enable && cfg.audit_file.is_some() {
+        if cfg.audit_enable() && cfg.audit_file().is_some() {
             middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(
-                cfg.audit_file.as_ref().unwrap(),
+                cfg.audit_file().unwrap(),
                 cfg.audit_size(),
                 cfg.audit_num(),
                 cfg.audit_file_mode().into(),
@@ -209,14 +209,13 @@ fn run_server(conf: Option<PathBuf>) {
         middleware_builder = middleware_builder.with(AddressMiddleware);
 
         if cfg
-            .dnsmasq_lease_file
-            .as_ref()
+            .dnsmasq_lease_file()
             .map(|x| x.is_file())
             .unwrap_or_default()
         {
             middleware_builder = middleware_builder.with(DnsmasqMiddleware::new(
-                cfg.dnsmasq_lease_file.as_ref().unwrap(),
-                cfg.domain.clone(),
+                cfg.dnsmasq_lease_file().unwrap(),
+                cfg.domain().cloned(),
             ));
         }
 
@@ -227,23 +226,23 @@ fn run_server(conf: Option<PathBuf>) {
 
         middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);
 
-        if !cfg.bogus_nxdomain.is_empty() {
+        if !cfg.bogus_nxdomain().is_empty() {
             middleware_builder = middleware_builder.with(DnsBogusMiddleware);
         }
 
         middleware_builder = middleware_builder.with(NameServerMiddleware::new({
-            let servers = cfg.servers.clone();
-            let ca_path = cfg.ca_path.clone();
-            let ca_file = cfg.ca_file.clone();
+            let servers = cfg.servers().clone();
+            let ca_path = cfg.ca_path();
+            let ca_file = cfg.ca_file();
             runtime.block_on(async move {
                 let mut builder = DnsClient::builder();
                 builder = builder
                     .add_servers(servers.values().flat_map(|s| s.clone()).collect::<Vec<_>>());
                 if let Some(path) = ca_path {
-                    builder = builder.set_ca_path(path);
+                    builder = builder.set_ca_path(path.to_owned());
                 }
                 if let Some(file) = ca_file {
-                    builder = builder.set_ca_path(file);
+                    builder = builder.set_ca_path(file.to_owned());
                 }
                 builder.build().await
             })

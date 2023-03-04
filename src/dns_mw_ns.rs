@@ -91,30 +91,30 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         ctx.source = LookupFrom::Server(name_server_group.name().to_string());
 
         if rtype.is_ip_addr() {
-            let cfg = &ctx.cfg;
+            let cfg = ctx.cfg();
 
             let opts = match ctx.domain_rule.as_ref() {
                 Some(rule) => LookupIpOptions {
                     response_strategy: rule
                         .response_mode
-                        .unwrap_or_else(|| ctx.cfg.response_mode()),
+                        .unwrap_or_else(|| cfg.response_mode()),
                     speed_check_mode: if rule.speed_check_mode.is_empty() {
-                        cfg.speed_check_mode.clone()
+                        cfg.speed_check_mode().clone()
                     } else {
                         rule.speed_check_mode.clone()
                     },
                     no_speed_check: ctx.server_opts.no_speed_check(),
-                    ignore_ip: cfg.ignore_ip.clone(),
-                    blacklist_ip: cfg.blacklist_ip.clone(),
-                    whitelist_ip: cfg.whitelist_ip.clone(),
+                    ignore_ip: cfg.ignore_ip().clone(),
+                    blacklist_ip: cfg.blacklist_ip().clone(),
+                    whitelist_ip: cfg.whitelist_ip().clone(),
                 },
                 None => LookupIpOptions {
                     response_strategy: cfg.response_mode(),
-                    speed_check_mode: cfg.speed_check_mode.clone(),
+                    speed_check_mode: cfg.speed_check_mode().clone(),
                     no_speed_check: ctx.server_opts.no_speed_check(),
-                    ignore_ip: cfg.ignore_ip.clone(),
-                    blacklist_ip: cfg.blacklist_ip.clone(),
-                    whitelist_ip: cfg.whitelist_ip.clone(),
+                    ignore_ip: cfg.ignore_ip().clone(),
+                    blacklist_ip: cfg.blacklist_ip().clone(),
+                    whitelist_ip: cfg.whitelist_ip().clone(),
                 },
             };
 

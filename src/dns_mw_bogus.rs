@@ -16,7 +16,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsBogusMiddl
     ) -> Result<DnsResponse, DnsError> {
         let res = next.run(ctx, req).await;
 
-        let bogus_nxdomain = &ctx.cfg.bogus_nxdomain;
+        let bogus_nxdomain = ctx.cfg().bogus_nxdomain();
 
         if req.query().query_type().is_ip_addr() {
             if let Ok(lookup) = res.as_ref() {
