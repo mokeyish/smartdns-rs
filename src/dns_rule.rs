@@ -10,6 +10,7 @@ use crate::{
     },
 };
 
+#[derive(Default)]
 pub struct DomainRuleMap {
     rules: DomainMap<Arc<DomainRuleTreeNode>>,
 }

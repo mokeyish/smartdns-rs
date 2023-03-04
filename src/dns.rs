@@ -20,12 +20,34 @@ pub use trust_dns_resolver::{
 
 #[derive(Clone)]
 pub struct DnsContext {
-    pub cfg: Arc<SmartDnsConfig>,
+    cfg: Arc<SmartDnsConfig>,
     pub server_opts: ServerOpts,
     pub domain_rule: Option<Arc<DomainRuleTreeNode>>,
     pub fastest_speed: Duration,
     pub source: LookupFrom,
 }
+
+impl DnsContext {
+    pub fn new(
+        name: &Name,
+        cfg: Arc<SmartDnsConfig>,
+        server_opts: ServerOpts,
+    ) -> Self {
+        let domain_rule = cfg.find_domain_rule(name);
+        DnsContext {
+            cfg,
+            server_opts,
+            domain_rule,
+            fastest_speed: Default::default(),
+            source: Default::default(),
+        }
+    }
+
+    pub fn cfg(&self) -> &Arc<SmartDnsConfig> {
+        &self.cfg
+    }
+}
+
 
 #[derive(Clone)]
 pub enum LookupFrom {

@@ -29,7 +29,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsmasqMiddle
             .client_store
             .lookup(req.query().name().borrow(), req.query().query_type())
         {
-            let local_ttl = ctx.cfg.local_ttl();
+            let local_ttl = ctx.cfg().local_ttl();
 
             let query = req.query().original().clone();
             let name = query.name().to_owned();
