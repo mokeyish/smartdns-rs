@@ -3,8 +3,8 @@ pub mod proto {
 }
 
 pub mod resolver {
-    pub use trust_dns_resolver::*;
     use self::lookup::Lookup;
+    pub use trust_dns_resolver::*;
 
     pub trait LookupTtl {
         fn max_ttl(&self) -> Option<u32>;
@@ -37,6 +37,5 @@ pub mod resolver {
 
             Lookup::new_with_deadline(self.query().clone(), records.into(), self.valid_until())
         }
-        
     }
 }

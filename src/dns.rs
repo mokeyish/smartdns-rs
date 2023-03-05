@@ -28,11 +28,7 @@ pub struct DnsContext {
 }
 
 impl DnsContext {
-    pub fn new(
-        name: &Name,
-        cfg: Arc<SmartDnsConfig>,
-        server_opts: ServerOpts,
-    ) -> Self {
+    pub fn new(name: &Name, cfg: Arc<SmartDnsConfig>, server_opts: ServerOpts) -> Self {
         let domain_rule = cfg.find_domain_rule(name);
         DnsContext {
             cfg,
@@ -47,7 +43,6 @@ impl DnsContext {
         &self.cfg
     }
 }
-
 
 #[derive(Clone)]
 pub enum LookupFrom {
