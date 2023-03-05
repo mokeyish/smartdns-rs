@@ -378,7 +378,7 @@ impl SmartDnsConfig {
             }
             for server in servers {
                 info!(
-                    "upstream server: {} [group: {}]",
+                    "upstream server: {} [Group: {}]",
                     server.url.to_string(),
                     group
                 );
@@ -388,7 +388,7 @@ impl SmartDnsConfig {
         if let Some(ss) = self.servers.get(DEFAULT_GROUP) {
             for s in ss {
                 info!(
-                    "upstream server: {} [group: {}]",
+                    "upstream server: {} [Group: {}]",
                     s.url.to_string(),
                     DEFAULT_GROUP
                 );
@@ -549,12 +549,12 @@ impl SmartDnsConfig {
     /// minimum ttl for resource record
     #[inline]
     pub fn rr_ttl_min(&self) -> Option<u64> {
-        self.rr_ttl_min.or_else(||self.rr_ttl())
+        self.rr_ttl_min.or_else(|| self.rr_ttl())
     }
     /// maximum ttl for resource record
     #[inline]
     pub fn rr_ttl_max(&self) -> Option<u64> {
-        self.rr_ttl_max.or_else(||self.rr_ttl())
+        self.rr_ttl_max.or_else(|| self.rr_ttl())
     }
     #[inline]
     pub fn rr_ttl_reply_max(&self) -> Option<u64> {

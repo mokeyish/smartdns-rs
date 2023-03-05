@@ -795,7 +795,7 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
             file.read_to_end(&mut data)?;
             lookup::deserialize(&data)
         }
-        match read_from_cache_file(path.as_ref()) {
+        match read_from_cache_file(path) {
             Ok(lookups) => {
                 let cache = self;
                 for lookup in lookups {
@@ -866,8 +866,6 @@ mod tests {
             cache
                 .insert_records(lookup2.query().clone(), lookup2.record_iter().cloned(), now)
                 .await;
-
-
 
             assert!(cache.get(lookup1.query(), now).await.is_some());
 

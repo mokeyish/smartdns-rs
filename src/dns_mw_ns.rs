@@ -30,14 +30,14 @@ impl NameServerMiddleware {
         Self { client }
     }
 
-    fn get_name_server_group(&self, ctx: &DnsContext) -> Arc<NameServerGroup> {
+    async fn get_name_server_group(&self, ctx: &DnsContext) -> Arc<NameServerGroup> {
         let client = &self.client;
         if let Some(name) = ctx.server_opts.group() {
-            match client.get_server_group(name) {
+            match client.get_server_group(name).await {
                 Some(ns) => ns,
                 None => {
                     warn!("nameserver group {} not found, fallback to default", name);
-                    client.default()
+                    client.default().await
                 }
             }
         } else {
@@ -45,7 +45,7 @@ impl NameServerMiddleware {
 
             while let Some(rule) = node {
                 if let Some(name) = rule.nameserver.as_deref() {
-                    match client.get_server_group(name) {
+                    match client.get_server_group(name).await {
                         Some(ns) => return ns,
                         None => {
                             debug!("nameserver group {} not found, fallback to parent", name);
@@ -55,7 +55,7 @@ impl NameServerMiddleware {
 
                 node = rule.zone();
             }
-            client.default()
+            client.default().await
         }
     }
 }
@@ -79,7 +79,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             return client.lookup(name.clone(), rtype).await;
         }
 
-        let name_server_group = self.get_name_server_group(ctx);
+        let name_server_group = self.get_name_server_group(ctx).await;
 
         debug!(
             "query name: {} type: {} via [group:{}]",
@@ -95,9 +95,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
             let opts = match ctx.domain_rule.as_ref() {
                 Some(rule) => LookupIpOptions {
-                    response_strategy: rule
-                        .response_mode
-                        .unwrap_or_else(|| cfg.response_mode()),
+                    response_strategy: rule.response_mode.unwrap_or_else(|| cfg.response_mode()),
                     speed_check_mode: if rule.speed_check_mode.is_empty() {
                         cfg.speed_check_mode().clone()
                     } else {
@@ -122,7 +120,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                 Ok(lookup_ip) => Ok(lookup_ip.into()),
                 Err(_err) if !name_server_group.name().is_default() => {
                     // fallback to default
-                    lookup_ip(client.default().as_ref(), name.clone(), rtype, &opts)
+                    lookup_ip(client.default().await.as_ref(), name.clone(), rtype, &opts)
                         .await
                         .map(|lookup_ip| lookup_ip.into())
                 }
