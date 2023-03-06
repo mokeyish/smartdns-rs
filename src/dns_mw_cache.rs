@@ -67,7 +67,9 @@ impl DnsCacheMiddleware {
             if cfg.cache_persist() {
                 let cache_file = cfg.cache_file();
                 let cache = new_cache.cache();
-                cache.lock().await.load(cache_file.as_path());
+                if cache_file.exists() {
+                    cache.lock().await.load(cache_file.as_path());
+                }
                 tokio::spawn(async move {
                     tokio::signal::ctrl_c()
                         .await
@@ -779,14 +781,14 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
             .collect::<Vec<_>>();
 
         match cache_to_file(&lookups, path) {
-            Ok(_) => (),
-            Err(err) => error!("{}", err),
+            Ok(_) => info!("save DNS cache to file {:?} successfully.", path),
+            Err(err) => error!("failed to save DNS cache to file {}", err),
         }
     }
 
     fn load<P: AsRef<Path>>(&mut self, path: P) {
         let path = path.as_ref();
-        info!("reading cache from file: {:?}", path);
+        info!("reading DNS cache from file: {:?}", path);
         let now = Instant::now();
 
         fn read_from_cache_file(path: &Path) -> ProtoResult<Vec<Lookup>> {
@@ -797,13 +799,18 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
         }
         match read_from_cache_file(path) {
             Ok(lookups) => {
+                let count = lookups.len();
                 let cache = self;
                 for lookup in lookups {
                     let query = lookup.query().clone().clone();
 
                     cache.put(query, {
                         let valid_until = lookup.valid_until();
-                        let ttl = valid_until - Instant::now();
+
+                        let ttl = lookup
+                            .max_ttl()
+                            .map(|ttl| Duration::from_secs(ttl as u64))
+                            .unwrap_or_default();
 
                         DnsCacheEntry {
                             lookup: Ok(lookup),
@@ -812,9 +819,9 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
                         }
                     });
                 }
-                info!("reading cache elapsed {:?}", now.elapsed());
+                info!("DNS cache {} records loaded, elapsed {:?}", count, now.elapsed());
             }
-            Err(err) => error!("failed to read cache file {:?} {}", path, err),
+            Err(err) => error!("failed to read DNS cache file {:?} {}", path, err),
         }
     }
 }
@@ -848,12 +855,11 @@ mod tests {
         assert_eq!(&lookups[1], &lookup2[1]);
     }
 
-    #[ignore = "reason"]
     #[test]
     fn test_cache_persist() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let lookup1 = create_lookup("abc.exmample.com", RecordType::A, 3000);
-            let lookup2 = create_lookup("xyz.exmample.com", RecordType::A, 3000);
+            let lookup1 = create_lookup("abc.exmample.com.", RecordType::A, 3000);
+            let lookup2 = create_lookup("xyz.exmample.com.", RecordType::A, 3000);
 
             let cache = DnsLruCache::new(10, TtlOpts::default());
 
@@ -908,7 +914,8 @@ mod tests {
             assert_eq!(out_of_date, OutOfDate::No);
 
             let lookup = res.unwrap();
-            assert_eq!(lookup, lookup1);
+            assert_eq!(lookup.query(), lookup1.query());
+            assert_eq!(lookup.records(), lookup1.records());
         })
     }
 }

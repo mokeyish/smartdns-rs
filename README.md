@@ -19,7 +19,7 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 smartdns](https://github.com/pymumu/s
 
 ## 构建与运行
 
-打开的你的命令行界面,执行如下命令：
+打开你的命令行界面,执行如下命令：
 
 ```shell
 git clone https://github.com/mokeyish/smartdns-rs.git
@@ -143,12 +143,12 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 | log-file                         | 日志文件路径                               | :white_check_mark:     | /var/log/smartdns/smartdns.log                               | 合法路径字符串                                               | log-file /var/log/smartdns/smartdns.log                      |
 | log-size                         | 日志大小                                   | :white_check_mark:     | 128K                                                         | 数字 + K、M 或 G                                             | log-size 128K                                                |
 | log-num                          | 日志归档个数                               | :white_check_mark:     | 2                                                            | 大于等于 0 的数字                                            | log-num 2                                                    |
-| log-file-mode | 日志归档文件权限 |  | o640 | 文件权限 | log-file-mode 644 |
+| log-file-mode | 日志归档文件权限 | :white_check_mark: | o640 | 文件权限 | log-file-mode 644 |
 | audit-enable                     | 设置审计启用                               | :white_check_mark: | no                                                           | [yes\|no]                                                    | audit-enable yes                                             |
 | audit-file                       | 审计文件路径                               | :white_check_mark: | /var/log/smartdns/smartdns-audit.log                         | 合法路径字符串，log 后缀可改成 csv                           | audit-file /var/log/smartdns/smartdns-audit.log              |
 | audit-size                       | 审计大小                                   | :white_check_mark: | 128K                                                         | 数字 + K、M 或 G                                             | audit-size 128K                                              |
 | audit-num                        | 审计归档个数                               | :white_check_mark: | 2                                                            | 大于等于 0 的数字                                            | audit-num 2                                                  |
-| audit-file-mode | 审计归档文件权限 |  | o640 | 文件权限 | log-file-mode 644 |
+| audit-file-mode | 审计归档文件权限 | :white_check_mark: | o640 | 文件权限 | log-file-mode 644 |
 | conf-file                        | 附加配置文件                               | :white_check_mark: | 无                                                           | 合法路径字符串                                               | conf-file /etc/smartdns/smartdns.more.conf                   |
 | server                           | 上游 UDP DNS                               | :white_check_mark: | 无                                                           | 可重复。<br>[ip][:port]：服务器 IP:端口（可选）<br>[-blacklist-ip]：配置 IP 过滤结果。<br>[-whitelist-ip]：指定仅接受参数中配置的 IP 范围<br>[-group [group] ...]：DNS 服务器所属组，比如 office 和 foreign，和 nameserver 配套使用<br>[-exclude-default-group]：将 DNS 服务器从默认组中排除 | server 8.8.8.8:53 -blacklist-ip -group g1                    |
 | server-tcp                       | 上游 TCP DNS                               | :white_check_mark: | 无                                                           | 可重复。<br>[ip][:port]：服务器 IP:端口（可选）<br>[-blacklist-ip]：配置 IP 过滤结果<br>[-whitelist-ip]：指定仅接受参数中配置的 IP 范围。<br>[-group [group] ...]：DNS 服务器所属组，比如 office 和 foreign，和 nameserver 配套使用<br>[-exclude-default-group]：将 DNS 服务器从默认组中排除 | server-tcp 8.8.8.8:53                                        |
