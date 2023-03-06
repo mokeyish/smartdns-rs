@@ -4,6 +4,7 @@ use std::{
     io,
     path::PathBuf,
     process::{Command, Stdio},
+    time::Duration,
 };
 
 // use regex::Regex;
@@ -102,6 +103,7 @@ impl ServiceManager {
             }
             None => {
                 self.stop().unwrap_or_default();
+                std::thread::sleep(Duration::from_secs(1));
                 self.start()?;
             }
         }

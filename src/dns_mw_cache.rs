@@ -125,10 +125,12 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
 
         let res = match res {
             Ok(lookup) => {
-                self.get_cache(ctx.cfg(), None)
-                    .await
-                    .insert_records(query, lookup.records().iter().cloned(), Instant::now())
-                    .await;
+                if !ctx.no_cache {
+                    self.get_cache(ctx.cfg(), None)
+                        .await
+                        .insert_records(query, lookup.records().iter().cloned(), Instant::now())
+                        .await;
+                }
 
                 if let Some(rr_ttl_reply_max) = ctx.cfg().rr_ttl_reply_max() {
                     Ok(lookup.with_new_ttl(rr_ttl_reply_max as u32))
@@ -819,7 +821,11 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
                         }
                     });
                 }
-                info!("DNS cache {} records loaded, elapsed {:?}", count, now.elapsed());
+                info!(
+                    "DNS cache {} records loaded, elapsed {:?}",
+                    count,
+                    now.elapsed()
+                );
             }
             Err(err) => error!("failed to read DNS cache file {:?} {}", path, err),
         }

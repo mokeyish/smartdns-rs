@@ -101,24 +101,25 @@ impl DnsClientBuilder {
                     map
                 });
 
-        let bootstrap = Arc::new(Self::create_bootstrap(resolver_opts));
+        let bootstrap = BootstrapResolver::new(Self::create_bootstrap(resolver_opts).into());
 
         let bootstrap = async {
             let bootstrap_info = name_server_info_groups.get(&NameServerGroupName::Bootstrap);
 
-            let bootstrap = bootstrap.clone();
             match bootstrap_info {
                 Some(server_infos) => {
-                    let bootstrap = bootstrap.clone();
-                    Arc::new(
-                        Self::create_name_server_group(
-                            NameServerGroupName::Bootstrap,
-                            &server_infos.iter().cloned().collect::<Vec<_>>(),
-                            tls_client_config.clone(),
-                            bootstrap,
-                        )
-                        .await,
+                    let resolver = Self::create_name_server_group(
+                        NameServerGroupName::Bootstrap,
+                        &server_infos.iter().cloned().collect::<Vec<_>>(),
+                        tls_client_config.clone(),
+                        &bootstrap,
                     )
+                    .await;
+                    if !resolver.is_empty() {
+                        bootstrap.with_new_resolver(resolver.into())
+                    } else {
+                        bootstrap
+                    }
                 }
                 None => bootstrap,
             }
@@ -155,7 +156,7 @@ impl DnsClientBuilder {
         name: NameServerGroupName,
         infos: &[NameServerInfo],
         tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
-        resolver: Arc<impl GenericResolver + Sync>,
+        resolver: &BootstrapResolver<impl GenericResolver + Sync + Send>,
     ) -> NameServerGroup {
         let mut servers = vec![];
 
@@ -347,7 +348,7 @@ impl DnsClientBuilder {
 
 pub struct DnsClient {
     resolver_opts: ResolverOpts,
-    bootstrap: Arc<NameServerGroup>,
+    bootstrap: BootstrapResolver<NameServerGroup>,
     #[allow(clippy::type_complexity)]
     servers:
         HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
@@ -359,14 +360,10 @@ impl DnsClient {
         DnsClientBuilder::default()
     }
 
-    pub fn bootstrap(&self) -> Arc<NameServerGroup> {
-        self.bootstrap.clone()
-    }
-
     pub async fn default(&self) -> Arc<NameServerGroup> {
         match self.get_server_group(NameServerGroupName::Default).await {
             Some(server) => server,
-            None => self.bootstrap(),
+            None => self.bootstrap().resolver.clone(),
         }
     }
 
@@ -401,6 +398,14 @@ impl DnsClient {
             None => None,
         }
     }
+
+    pub async fn lookup_nameserver(&self, name: Name, record_type: RecordType) -> Option<Lookup> {
+        self.bootstrap().local_lookup(name, record_type).await
+    }
+
+    fn bootstrap(&self) -> &BootstrapResolver<NameServerGroup> {
+        &self.bootstrap
+    }
 }
 
 #[async_trait::async_trait]
@@ -413,6 +418,80 @@ impl GenericResolver for DnsClient {
     async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
         let ns = self.default().await;
         GenericResolver::lookup(ns.as_ref(), name, record_type).await
+    }
+}
+
+struct BootstrapResolver<T: GenericResolver>
+where
+    T: Send + Sync,
+{
+    resolver: Arc<T>,
+    ip_store: RwLock<HashMap<Query, Arc<[Record]>>>,
+}
+
+impl<T: GenericResolver + Sync + Send> BootstrapResolver<T> {
+    fn new(resolver: Arc<T>) -> Self {
+        Self {
+            resolver,
+            ip_store: Default::default(),
+        }
+    }
+
+    fn with_new_resolver(self, resolver: Arc<T>) -> Self {
+        Self {
+            resolver,
+            ip_store: self.ip_store,
+        }
+    }
+
+    async fn local_lookup(&self, name: Name, record_type: RecordType) -> Option<Lookup> {
+        let query = Query::query(name.clone(), record_type);
+        let store = self.ip_store.read().await;
+
+        let lookup = store.get(&query).cloned();
+
+        lookup.map(|records| Lookup::new_with_max_ttl(query, records))
+    }
+}
+
+#[async_trait::async_trait]
+impl<T: GenericResolver + Sync + Send> GenericResolver for BootstrapResolver<T> {
+    fn options(&self) -> &ResolverOpts {
+        self.resolver.options()
+    }
+
+    #[inline]
+    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+        debug!("lookup nameserver {} {}", name, record_type);
+
+        if let Some(lookup) = self.local_lookup(name.clone(), record_type).await {
+            return Ok(lookup);
+        }
+
+        match GenericResolver::lookup(self.resolver.as_ref(), name.clone(), record_type).await {
+            Ok(lookup) => {
+                self.ip_store.write().await.insert(
+                    Query::query(
+                        {
+                            let mut name = name.clone();
+                            name.set_fqdn(true);
+                            name
+                        },
+                        record_type,
+                    ),
+                    lookup.records().to_vec().into(),
+                );
+
+                Ok(lookup)
+            }
+            err => err,
+        }
+    }
+}
+
+impl<T: GenericResolver + Sync + Send> From<Arc<T>> for BootstrapResolver<T> {
+    fn from(resolver: Arc<T>) -> Self {
+        Self::new(resolver)
     }
 }
 
@@ -516,6 +595,16 @@ impl NameServerGroup {
     #[inline]
     pub fn iter(&self) -> Iter<NameServer> {
         self.servers.iter()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.servers.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.servers.is_empty()
     }
 }
 
