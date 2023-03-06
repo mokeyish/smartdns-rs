@@ -13,7 +13,7 @@ use crate::{
     dns_conf::SpeedCheckMode,
     dns_error::LookupError,
     dns_rule::ResponseMode,
-    log::{debug, warn},
+    log::{debug, error},
     middleware::*,
 };
 
@@ -30,32 +30,22 @@ impl NameServerMiddleware {
         Self { client }
     }
 
-    async fn get_name_server_group(&self, ctx: &DnsContext) -> Arc<NameServerGroup> {
+    async fn get_name_server_group(&self, ctx: &DnsContext) -> Option<Arc<NameServerGroup>> {
         let client = &self.client;
         if let Some(name) = ctx.server_opts.group() {
-            match client.get_server_group(name).await {
-                Some(ns) => ns,
-                None => {
-                    warn!("nameserver group {} not found, fallback to default", name);
-                    client.default().await
-                }
-            }
+            client.get_server_group(name).await
         } else {
             let mut node = ctx.domain_rule.as_ref();
 
             while let Some(rule) = node {
                 if let Some(name) = rule.nameserver.as_deref() {
-                    match client.get_server_group(name).await {
-                        Some(ns) => return ns,
-                        None => {
-                            debug!("nameserver group {} not found, fallback to parent", name);
-                        }
-                    }
+                    return client.get_server_group(name).await;
                 }
 
                 node = rule.zone();
             }
-            client.default().await
+
+            Some(client.default().await)
         }
     }
 }
@@ -79,13 +69,19 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             return client.lookup(name.clone(), rtype).await;
         }
 
-        let name_server_group = self.get_name_server_group(ctx).await;
+        let name_server_group = match self.get_name_server_group(ctx).await {
+            Some(ns) => ns,
+            None => {
+                error!("no available nameserver found for {}", name);
+                return Err(ResolveErrorKind::NoConnections.into());
+            }
+        };
 
         debug!(
-            "query name: {} type: {} via [group:{}]",
+            "query name: {} type: {} via {:?}",
             name,
             rtype,
-            name_server_group.name().as_str()
+            name_server_group.name()
         );
 
         ctx.source = LookupFrom::Server(name_server_group.name().to_string());
@@ -118,12 +114,6 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
             match lookup_ip(name_server_group.deref(), name.clone(), rtype, &opts).await {
                 Ok(lookup_ip) => Ok(lookup_ip.into()),
-                Err(_err) if !name_server_group.name().is_default() => {
-                    // fallback to default
-                    lookup_ip(client.default().await.as_ref(), name.clone(), rtype, &opts)
-                        .await
-                        .map(|lookup_ip| lookup_ip.into())
-                }
                 Err(err) => Err(err),
             }
         } else {
