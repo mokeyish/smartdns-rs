@@ -28,8 +28,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
         let no_rule_soa = ctx.server_opts.no_rule_soa();
 
         if !no_rule_soa
-            && (matches!(ctx.cfg.force_aaaa_soa, Some(true) if query_type == RecordType::AAAA)
-                || ctx.cfg.force_qtype_soa.contains(&query_type))
+            && (ctx.cfg().force_aaaa_soa() && query_type == RecordType::AAAA
+                || ctx.cfg().force_qtype_soa().contains(&query_type))
         {
             // force SOA
             rdata = Some(RData::default_soa());
@@ -71,7 +71,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
         }
 
         if let Some(rdata) = rdata {
-            let local_ttl = ctx.cfg.local_ttl();
+            let local_ttl = ctx.cfg().local_ttl();
 
             let query = req.query().original().clone();
             let name = query.name().to_owned();
@@ -87,6 +87,22 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
             return Ok(lookup);
         }
 
-        next.run(ctx, req).await
+        let res = next.run(ctx, req).await;
+
+        // handle max_reply_ip_num
+        if let (Some(max_reply_ip_num), Ok(lookup)) = (ctx.cfg().max_reply_ip_num(), &res) {
+            if lookup.records().len() > max_reply_ip_num as usize {
+                let records = &lookup.records()[0..max_reply_ip_num as usize];
+                Ok(Lookup::new_with_deadline(
+                    lookup.query().clone(),
+                    records.to_vec().into(),
+                    lookup.valid_until(),
+                ))
+            } else {
+                res
+            }
+        } else {
+            res
+        }
     }
 }

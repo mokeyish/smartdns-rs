@@ -9,7 +9,7 @@ use std::{
 
 use rustls::ClientConfig;
 
-use trust_dns_proto::{
+use crate::trust_dns::proto::{
     error::ProtoResult,
     op::{Edns, Message, MessageType, OpCode, Query},
     rr::{
@@ -19,6 +19,7 @@ use trust_dns_proto::{
     xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
     DnsHandle,
 };
+use tokio::sync::RwLock;
 
 use crate::dns_error::LookupError;
 use trust_dns_resolver::{
@@ -112,7 +113,7 @@ impl DnsClientBuilder {
                     Arc::new(
                         Self::create_name_server_group(
                             NameServerGroupName::Bootstrap,
-                            server_infos,
+                            &server_infos.iter().cloned().collect::<Vec<_>>(),
                             tls_client_config.clone(),
                             bootstrap,
                         )
@@ -125,14 +126,11 @@ impl DnsClientBuilder {
         .await;
 
         let mut servers = HashMap::with_capacity(name_server_info_groups.len());
-        servers.insert(NameServerGroupName::Bootstrap, bootstrap.clone());
 
         for (group_name, group) in name_server_info_groups {
             if group_name == NameServerGroupName::Bootstrap {
                 continue;
             }
-            let bootstrap = bootstrap.clone();
-
             debug!(
                 "create name server group: {}, servers {}",
                 group_name.as_str(),
@@ -141,20 +139,13 @@ impl DnsClientBuilder {
 
             servers.insert(
                 group_name.clone(),
-                Arc::new(
-                    Self::create_name_server_group(
-                        group_name,
-                        &group,
-                        tls_client_config.clone(),
-                        bootstrap,
-                    )
-                    .await,
-                ),
+                (group.into_iter().collect::<Vec<_>>(), Default::default()),
             );
         }
 
         DnsClient {
             resolver_opts,
+            bootstrap,
             servers,
             tls_client_config,
         }
@@ -162,7 +153,7 @@ impl DnsClientBuilder {
 
     async fn create_name_server_group(
         name: NameServerGroupName,
-        infos: &HashSet<NameServerInfo>,
+        infos: &[NameServerInfo],
         tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
         resolver: Arc<impl GenericResolver + Sync>,
     ) -> NameServerGroup {
@@ -356,7 +347,10 @@ impl DnsClientBuilder {
 
 pub struct DnsClient {
     resolver_opts: ResolverOpts,
-    servers: HashMap<NameServerGroupName, Arc<NameServerGroup>>,
+    bootstrap: Arc<NameServerGroup>,
+    #[allow(clippy::type_complexity)]
+    servers:
+        HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
     tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
 }
 
@@ -366,25 +360,46 @@ impl DnsClient {
     }
 
     pub fn bootstrap(&self) -> Arc<NameServerGroup> {
-        self.servers
-            .get(&NameServerGroupName::Bootstrap)
-            .expect("Bootstrap nameserver not found.")
-            .clone()
+        self.bootstrap.clone()
     }
 
-    pub fn default(&self) -> Arc<NameServerGroup> {
-        self.servers
-            .get(&Default::default())
-            .cloned()
-            .unwrap_or_else(|| self.bootstrap())
+    pub async fn default(&self) -> Arc<NameServerGroup> {
+        match self.get_server_group(NameServerGroupName::Default).await {
+            Some(server) => server,
+            None => self.bootstrap(),
+        }
     }
 
-    pub fn get_server_group<N: Into<NameServerGroupName>>(
+    pub async fn get_server_group<N: Into<NameServerGroupName>>(
         &self,
         name: N,
     ) -> Option<Arc<NameServerGroup>> {
         let name = name.into();
-        self.servers.get(&name).cloned()
+        match self.servers.get(&name) {
+            Some((infos, entry_lock)) => {
+                let entry = entry_lock.read().await;
+
+                if entry.is_none() {
+                    drop(entry);
+
+                    debug!("initialize name server {:?}", name);
+                    let ns = Arc::new(
+                        DnsClientBuilder::create_name_server_group(
+                            name,
+                            infos,
+                            self.tls_client_config.clone(),
+                            self.bootstrap(),
+                        )
+                        .await,
+                    );
+                    entry_lock.write().await.replace(ns.clone());
+                    Some(ns)
+                } else {
+                    entry.as_ref().cloned()
+                }
+            }
+            None => None,
+        }
     }
 }
 
@@ -396,12 +411,12 @@ impl GenericResolver for DnsClient {
 
     #[inline]
     async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
-        let ns = self.default();
+        let ns = self.default().await;
         GenericResolver::lookup(ns.as_ref(), name, record_type).await
     }
 }
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Clone, Eq)]
 pub enum NameServerGroupName {
     Bootstrap,
     Default,
@@ -431,6 +446,26 @@ impl NameServerGroupName {
     }
 }
 
+impl std::hash::Hash for NameServerGroupName {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            NameServerGroupName::Bootstrap => "bootstrap".hash(state),
+            NameServerGroupName::Default => "default".hash(state),
+            NameServerGroupName::Name(n) => n.to_lowercase().as_str().hash(state),
+        }
+    }
+}
+
+impl std::fmt::Debug for NameServerGroupName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bootstrap => write!(f, "[Group: Bootstrap]"),
+            Self::Default => write!(f, "[Group: Default]"),
+            Self::Name(name) => write!(f, "[Group: {}]", name),
+        }
+    }
+}
+
 impl From<&str> for NameServerGroupName {
     #[inline]
     fn from(value: &str) -> Self {
@@ -446,16 +481,6 @@ impl Deref for NameServerGroupName {
             NameServerGroupName::Bootstrap => "Bootstrap",
             NameServerGroupName::Default => "Default",
             NameServerGroupName::Name(s) => s.as_str(),
-        }
-    }
-}
-
-impl std::hash::Hash for NameServerGroupName {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            NameServerGroupName::Bootstrap => "bootstrap".hash(state),
-            NameServerGroupName::Default => "default".hash(state),
-            NameServerGroupName::Name(n) => n.to_lowercase().as_str().hash(state),
         }
     }
 }

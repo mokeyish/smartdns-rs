@@ -10,7 +10,6 @@ use trust_dns_resolver::error::ResolveErrorKind;
 use crate::{
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
     dns_conf::{ServerOpts, SmartDnsConfig},
-    dns_rule::DomainRuleMap,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
@@ -18,7 +17,6 @@ pub type DnsMiddlewareHost = MiddlewareHost<DnsContext, DnsRequest, DnsResponse,
 
 pub struct DnsMiddlewareHandler {
     cfg: Arc<SmartDnsConfig>,
-    domain_rule_map: DomainRuleMap,
     host: DnsMiddlewareHost,
 }
 
@@ -28,21 +26,8 @@ impl DnsMiddlewareHandler {
         req: &DnsRequest,
         server_opts: &ServerOpts,
     ) -> Result<DnsResponse, DnsError> {
-        let _cfg = self.cfg.as_ref();
-
-        let domain_rule = self
-            .domain_rule_map
-            .find(req.query().name().borrow())
-            .cloned();
-
-        let mut ctx = DnsContext {
-            cfg: self.cfg.clone(),
-            fastest_speed: Default::default(),
-            source: Default::default(),
-            server_opts: server_opts.clone(),
-            domain_rule,
-        };
-
+        let cfg = self.cfg.clone();
+        let mut ctx = DnsContext::new(req.query().name().borrow(), cfg, server_opts.clone());
         self.host.execute(&mut ctx, req).await
     }
 }
@@ -67,17 +52,9 @@ impl DnsMiddlewareBuilder {
     }
 
     pub fn build(self, cfg: Arc<SmartDnsConfig>) -> DnsMiddlewareHandler {
-        let domain_rule_map = DomainRuleMap::create(
-            &cfg.domain_rules,
-            &cfg.address_rules,
-            &cfg.forward_rules,
-            &cfg.domain_sets,
-        );
-
         DnsMiddlewareHandler {
             host: self.builder.build(),
             cfg,
-            domain_rule_map,
         }
     }
 }
@@ -94,7 +71,7 @@ impl MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, DnsError> for
     ) -> Result<DnsResponse, DnsError> {
         let soa = Record::from_rdata(
             req.query().name().to_owned().into(),
-            ctx.cfg.rr_ttl() as u32,
+            ctx.cfg().rr_ttl().unwrap_or_default() as u32,
             RData::default_soa(),
         );
         Err(ResolveErrorKind::NoRecordsFound {
