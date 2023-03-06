@@ -312,7 +312,7 @@ fn run_server(conf: Option<PathBuf>) {
 
     info!("awaiting connections...");
 
-    info!("Server starting up");
+    info!("server starting up");
 
     runtime.block_on(async {
         signal::ctrl_c().await.unwrap();
