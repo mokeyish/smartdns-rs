@@ -64,6 +64,22 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
         let client = &self.client;
 
+        if let Some(lookup) = client.lookup_nameserver(name.clone(), rtype).await {
+            debug!(
+                "lookup nameserver {} {} ip {:?}",
+                name,
+                rtype,
+                lookup
+                    .records()
+                    .iter()
+                    .filter_map(|record| record.data().map(|data| data.to_ip_addr()))
+                    .flatten()
+                    .collect::<Vec<_>>()
+            );
+            ctx.no_cache = true;
+            return Ok(lookup);
+        }
+
         // skip nameserver rule
         if ctx.server_opts.no_rule_nameserver() {
             return client.lookup(name.clone(), rtype).await;

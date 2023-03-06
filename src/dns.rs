@@ -25,6 +25,7 @@ pub struct DnsContext {
     pub domain_rule: Option<Arc<DomainRuleTreeNode>>,
     pub fastest_speed: Duration,
     pub source: LookupFrom,
+    pub no_cache: bool,
 }
 
 impl DnsContext {
@@ -36,6 +37,7 @@ impl DnsContext {
             domain_rule,
             fastest_speed: Default::default(),
             source: Default::default(),
+            no_cache: false,
         }
     }
 
