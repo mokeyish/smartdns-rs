@@ -341,6 +341,14 @@ impl SmartDnsConfig {
             })
         }
 
+        let server_domains = cfg
+            .servers
+            .values()
+            .flatten()
+            .filter_map(|o| o.host_name.as_deref().or(o.url.domain()))
+            .filter_map(|domain| Name::from_str(domain).ok())
+            .collect::<Vec<_>>();
+
         let server_count: usize = cfg.servers.values().map(|o| o.len()).sum();
 
         if server_count == 0 {
@@ -360,6 +368,7 @@ impl SmartDnsConfig {
             cfg.address_rules(),
             cfg.forward_rules(),
             cfg.domain_sets(),
+            server_domains,
         );
 
         cfg

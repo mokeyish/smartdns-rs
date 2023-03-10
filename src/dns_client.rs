@@ -129,19 +129,19 @@ impl DnsClientBuilder {
         let mut servers = HashMap::with_capacity(name_server_info_groups.len());
 
         for (group_name, group) in name_server_info_groups {
-            if group_name == NameServerGroupName::Bootstrap {
-                continue;
-            }
+            let group = group.into_iter().collect::<Vec<_>>();
+            let resolver = if group_name == NameServerGroupName::Bootstrap {
+                Some(bootstrap.resolver.clone()).into()
+            } else {
+                Default::default()
+            };
+
             debug!(
-                "create name server group: {}, servers {}",
-                group_name.as_str(),
+                "create name server {:?}, servers {}",
+                group_name,
                 group.len()
             );
-
-            servers.insert(
-                group_name.clone(),
-                (group.into_iter().collect::<Vec<_>>(), Default::default()),
-            );
+            servers.insert(group_name.clone(), (group, resolver));
         }
 
         DnsClient {

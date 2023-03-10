@@ -21,6 +21,7 @@ impl DomainRuleMap {
         address_rules: &AddressRules,
         forward_rules: &ForwardRules,
         domain_sets: &DomainSets,
+        server_domains: Vec<Name>,
     ) -> Self {
         let mut name_rule_map = HashMap::<Name, DomainRule>::new();
 
@@ -82,6 +83,15 @@ impl DomainRuleMap {
                     .entry(name)
                     .or_insert_with(Default::default)
                     .nameserver = Some(rule.nameserver.clone())
+            }
+        }
+
+        // append nameserver
+        for name in server_domains {
+            let rule = name_rule_map.entry(name).or_insert_with(Default::default);
+
+            if rule.nameserver.is_none() {
+                rule.nameserver = Some("bootstrap".to_string());
             }
         }
 
@@ -241,6 +251,7 @@ mod tests {
             ],
             &Default::default(),
             &Default::default(),
+            Default::default(),
         );
 
         let rule1 = map.find(&Name::from_str("z.a.b.c.www.example.com").unwrap().into());
