@@ -71,7 +71,7 @@ impl DnsCacheMiddleware {
                     cache.lock().await.load(cache_file.as_path());
                 }
                 tokio::spawn(async move {
-                    tokio::signal::ctrl_c()
+                    crate::signal::terminate()
                         .await
                         .expect("failed to wait ctrl_c for persist cache.");
                     cache.lock().await.persist(cache_file.as_path());
@@ -254,7 +254,7 @@ impl DomainPrefetcher {
                                         .map(|r| Duration::from_secs(u64::from(r.ttl())));
 
                                     debug!(
-                                        "Prefetch domain {} {}, elapsed {:?}, ttl {:?}",
+                                        "prefetch domain {} {}, elapsed {:?}, ttl {:?}",
                                         name,
                                         typ,
                                         now.elapsed(),
@@ -334,7 +334,7 @@ impl DomainPrefetcher {
                             expired.push(query.to_owned());
                         }
                         debug!(
-                            "Check prefetch domains(total: {}) elapsed {:?}",
+                            "check prefetch domains(total: {}) elapsed {:?}",
                             len,
                             now.elapsed()
                         );
@@ -344,7 +344,7 @@ impl DomainPrefetcher {
                         let tx = tx.clone();
                         tokio::spawn(async move {
                             if tx.send(expired).await.is_err() {
-                                error!("Failed to send queries to prefetch domain!",);
+                                error!("failed to send queries to prefetch domain!",);
                             }
                         });
                     }

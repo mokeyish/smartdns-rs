@@ -103,7 +103,7 @@ impl ServiceManager {
             }
             None => {
                 self.stop().unwrap_or_default();
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(Duration::from_millis(500));
                 self.start()?;
             }
         }
