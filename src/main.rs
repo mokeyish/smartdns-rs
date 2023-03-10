@@ -5,7 +5,7 @@ use dns_conf::BindServer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, UdpSocket},
-    runtime, signal,
+    runtime,
 };
 
 mod cli;
@@ -82,9 +82,10 @@ fn main() {
 fn main() -> windows_service::Result<()> {
     if matches!(std::env::args().last(), Some(flag) if flag == "--ws7642ea814a90496daaa54f2820254f12")
     {
-        return service::windows::run();
+        service::windows::run();
+    } else {
+        Cli::parse().run();
     }
-    Cli::parse().run();
     Ok(())
 }
 
@@ -314,13 +315,11 @@ fn run_server(conf: Option<PathBuf>) {
 
     info!("server starting up");
 
-    runtime.block_on(async {
-        signal::ctrl_c().await.unwrap();
-        // we're exiting for some reason...
-        info!("{} {} shutdown", NAME, version());
-    });
+    runtime.block_on(signal::terminate()).unwrap_or_default();
 
-    drop(runtime);
+    runtime.shutdown_timeout(Duration::from_secs(5));
+
+    info!("{} {} shutdown", NAME, version());
 }
 
 #[cfg(feature = "dns-over-tls")]
@@ -490,6 +489,43 @@ fn serve_quic(
 #[inline]
 fn hello_starting() {
     info!("Smart-DNS 🐋 {} starting", version());
+}
+
+mod signal {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static TERMINATING: AtomicBool = AtomicBool::new(false);
+
+    pub async fn terminate() -> std::io::Result<()> {
+        use tokio::signal::ctrl_c;
+
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            match signal(SignalKind::terminate()) {
+                Ok(mut terminate) => tokio::select! {
+                    _ = terminate.recv() => SignalKind::terminate(),
+                    _ = ctrl_c() => SignalKind::interrupt()
+                },
+                _ => {
+                    ctrl_c().await?;
+                    SignalKind::interrupt()
+                }
+            };
+        }
+
+        #[cfg(not(unix))]
+        {
+            ctrl_c().await?;
+        }
+
+        if !TERMINATING.load(Ordering::Relaxed) {
+            TERMINATING.store(true, Ordering::Relaxed);
+            super::info!("terminating...");
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "linux")]
