@@ -41,9 +41,15 @@ impl DnsContext {
         }
     }
 
+    #[inline]
     pub fn cfg(&self) -> &Arc<SmartDnsConfig> {
         &self.cfg
     }
+
+    #[inline]
+    pub fn server_opts(&self) -> &ServerOpts {
+        &self.server_opts
+    } 
 }
 
 #[derive(Clone)]
