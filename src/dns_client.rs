@@ -8,6 +8,7 @@ use std::{
 };
 
 use rustls::ClientConfig;
+use tokio::sync::RwLock;
 
 use crate::trust_dns::proto::{
     error::ProtoResult,
@@ -19,22 +20,23 @@ use crate::trust_dns::proto::{
     xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
     DnsHandle,
 };
-use tokio::sync::RwLock;
 
-use crate::dns_error::LookupError;
+
 use trust_dns_resolver::{
     config::{NameServerConfig, Protocol, ResolverOpts, TlsClientConfig},
     lookup::Lookup,
     lookup_ip::LookupIp,
-    name_server::{GenericConnection, GenericConnectionProvider, TokioRuntime},
-    TokioHandle, TryParseIp,
+    TryParseIp,
 };
 
 use crate::{
     dns_conf::NameServerInfo,
+    dns_error::LookupError,
     dns_url::DnsUrl,
     log::{debug, warn},
 };
+
+use connection_provider::TokioRuntimeProvider;
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
@@ -639,21 +641,15 @@ impl GenericResolver for NameServerGroup {
 
 pub struct NameServer {
     opts: NameServerOpts,
-    inner: trust_dns_resolver::name_server::NameServer<
-        GenericConnection,
-        GenericConnectionProvider<TokioRuntime>,
-    >,
+    inner: trust_dns_resolver::name_server::NameServer<TokioRuntimeProvider>,
 }
 
 impl NameServer {
     fn new(config: NameServerConfig, opts: NameServerOpts) -> Self {
         use trust_dns_resolver::name_server::NameServer as N;
 
-        let inner = N::new_with_provider(
-            config,
-            opts.resolver_opts,
-            GenericConnectionProvider::<TokioRuntime>::new(TokioHandle),
-        );
+        let inner =
+            N::<TokioRuntimeProvider>::new(config, opts.resolver_opts, TokioRuntimeProvider::new());
 
         Self { opts, inner }
     }
@@ -686,7 +682,7 @@ impl NameServer {
                     protocol: Protocol::Udp,
                     tls_dns_name: None,
                     tls_config: None,
-                    trust_nx_responses: true,
+                    trust_negative_responses: true,
                     bind_addr: None,
                 })
                 .collect::<Vec<_>>(),
@@ -696,7 +692,7 @@ impl NameServer {
                     protocol: Protocol::Tcp,
                     tls_dns_name: None,
                     tls_config: None,
-                    trust_nx_responses: true,
+                    trust_negative_responses: true,
                     bind_addr: None,
                 })
                 .collect::<Vec<_>>(),
@@ -705,7 +701,7 @@ impl NameServer {
                     socket_addr: addr,
                     protocol: Protocol::Https,
                     tls_dns_name: Some(tls_dns_name.clone()),
-                    trust_nx_responses: true,
+                    trust_negative_responses: true,
                     bind_addr: None,
                     tls_config: Some(TlsClientConfig(if url.enable_sni() {
                         tls_client_config_sni_on.clone()
@@ -719,7 +715,7 @@ impl NameServer {
                     socket_addr: addr,
                     protocol: Protocol::Tls,
                     tls_dns_name: Some(tls_dns_name.clone()),
-                    trust_nx_responses: true,
+                    trust_negative_responses: true,
                     bind_addr: None,
                     tls_config: Some(TlsClientConfig(if url.enable_sni() {
                         tls_client_config_sni_on.clone()
@@ -832,16 +828,16 @@ pub trait GenericResolver {
 
 #[async_trait::async_trait]
 pub trait GenericResolverExt {
-    // /// Generic lookup for any RecordType
-    // ///
-    // /// # Arguments
-    // ///
-    // /// * `name` - name of the record to lookup, if name is not a valid domain name, an error will be returned
-    // /// * `record_type` - type of record to lookup, all RecordData responses will be filtered to this type
-    // ///
-    // /// # Returns
-    // ///
-    // //  A future for the returned Lookup RData
+    /// Generic lookup for any RecordType
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - name of the record to lookup, if name is not a valid domain name, an error will be returned
+    /// * `record_type` - type of record to lookup, all RecordData responses will be filtered to this type
+    ///
+    /// # Returns
+    ///
+    //  A future for the returned Lookup RData
     // async fn lookup<N: IntoName + Send>(
     //     &self,
     //     name: N,
@@ -1001,6 +997,65 @@ fn build_message(query: Query, options: DnsRequestOptions) -> Message {
             .set_version(0);
     }
     message
+}
+
+
+mod connection_provider{
+    use std::io;
+    use std::pin::Pin;
+    use futures::Future;
+    use tokio::net::UdpSocket as TokioUdpSocket;
+    use tokio::net::TcpStream as TokioTcpStream;
+    use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
+
+    use std::net::SocketAddr;
+
+    use trust_dns_proto::TokioTime;
+    use trust_dns_resolver::{name_server::RuntimeProvider, TokioHandle};
+
+
+    /// The Tokio Runtime for async execution
+    #[derive(Clone, Default)]
+    pub struct TokioRuntimeProvider{
+        handle : TokioHandle
+    }
+
+    impl TokioRuntimeProvider {
+        pub fn new() -> Self {
+            Self { handle: TokioHandle::default() }
+        }
+    }
+
+
+    impl RuntimeProvider for TokioRuntimeProvider {
+        type Handle = TokioHandle;
+        type Timer = TokioTime;
+        type Udp = TokioUdpSocket;
+        type Tcp = AsyncIoTokioAsStd<TokioTcpStream>;
+
+        fn create_handle(&self) -> Self::Handle {
+            self.handle.clone()
+        }
+
+        fn connect_tcp(
+            &self,
+            server_addr: SocketAddr,
+        ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Tcp>>>> {
+            Box::pin(async move {
+                TokioTcpStream::connect(server_addr)
+                    .await
+                    .map(AsyncIoTokioAsStd)
+            })
+        }
+
+        fn bind_udp(
+            &self,
+            local_addr: SocketAddr,
+            _server_addr: SocketAddr,
+        ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Udp>>>> {
+            Box::pin(tokio::net::UdpSocket::bind(local_addr))
+        }
+    }
 }
 
 #[cfg(test)]

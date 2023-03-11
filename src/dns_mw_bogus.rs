@@ -1,4 +1,4 @@
-use trust_dns_client::op::ResponseCode;
+use trust_dns_proto::op::ResponseCode;
 
 use crate::dns::*;
 
