@@ -1376,6 +1376,8 @@ pub enum SpeedCheckMode {
     None,
     Ping,
     Tcp(u16),
+    Http(u16),
+    Https(u16),
 }
 
 impl Default for SpeedCheckMode {
@@ -1393,6 +1395,14 @@ impl FromStr for SpeedCheckMode {
             Ok(SpeedCheckMode::Ping)
         } else if let Some(port) = s.strip_prefix("tcp:") {
             u16::from_str(port).map(SpeedCheckMode::Tcp).map_err(|_| ())
+        } else if let Some(port) = s.strip_prefix("http:") {
+            u16::from_str(port)
+                .map(SpeedCheckMode::Http)
+                .map_err(|_| ())
+        } else if let Some(port) = s.strip_prefix("https:") {
+            u16::from_str(port)
+                .map(SpeedCheckMode::Https)
+                .map_err(|_| ())
         } else {
             Err(())
         }

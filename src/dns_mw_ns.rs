@@ -105,9 +105,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         if rtype.is_ip_addr() {
             let cfg = ctx.cfg();
 
-            let opts = match ctx.domain_rule.as_ref() {
+            let mut opts = match ctx.domain_rule.as_ref() {
                 Some(rule) => LookupIpOptions {
-                    response_strategy: rule.response_mode.unwrap_or_else(|| cfg.response_mode()),
+                    response_strategy: rule.get(|n|n.response_mode).unwrap_or_else(|| cfg.response_mode()),
                     speed_check_mode: if rule.speed_check_mode.is_empty() {
                         cfg.speed_check_mode().clone()
                     } else {
@@ -127,6 +127,10 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     whitelist_ip: cfg.whitelist_ip().clone(),
                 },
             };
+
+            if ctx.background {
+                opts.response_strategy = ResponseMode::FastestIp;
+            }
 
             match lookup_ip(name_server_group.deref(), name.clone(), rtype, &opts).await {
                 Ok(lookup_ip) => Ok(lookup_ip.into()),
@@ -197,6 +201,28 @@ async fn lookup_ip(
                                 .map(|ip| PingAddr::Tcp(SocketAddr::new(*ip, *port)))
                                 .collect::<Vec<_>>()
                         }
+                        SpeedCheckMode::Http(port) => {
+                            debug!(
+                                "Speed test {} http ping {:?} port {}",
+                                lookup_ip.query().name(),
+                                ips,
+                                port
+                            );
+                            ips.iter()
+                                .map(|ip| PingAddr::Http(SocketAddr::new(*ip, *port)))
+                                .collect::<Vec<_>>()
+                        },
+                        SpeedCheckMode::Https(port) => {
+                            debug!(
+                                "Speed test {} https ping {:?} port {}",
+                                lookup_ip.query().name(),
+                                ips,
+                                port
+                            );
+                            ips.iter()
+                                .map(|ip| PingAddr::Https(SocketAddr::new(*ip, *port)))
+                                .collect::<Vec<_>>()
+                        },
                     };
 
                     ping_tasks.push(ping_fastest(ping_dests, ping_ops).boxed());

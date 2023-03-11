@@ -13,11 +13,23 @@ pub async fn ping(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutpu
 
     for (_seq, dest) in dests.iter().enumerate() {
         outs.push(match dest {
-            PingAddr::Icmp(addr) => icmp_ping::ping(*addr, opts).await,
-            PingAddr::Tcp(addr) => tcp_ping::ping(*addr, opts).await,
+            PingAddr::Icmp(addr) => icmp::ping(*addr, opts).await,
+            PingAddr::Tcp(addr) => tcp::ping(*addr, opts).await,
+            PingAddr::Https(addr) => https::ping(*addr, opts).await,
+            PingAddr::Http(addr) => http::ping(*addr, opts).await,
         })
     }
     outs
+}
+
+pub async fn ping_one<D: TryInto<PingAddr, Error = PingError>>(dest: D, opts: PingOptions) -> Result<PingOutput, PingError> {
+    let dest = dest.try_into()?;
+    match dest {
+        PingAddr::Icmp(addr) => icmp::ping(addr, opts).await,
+        PingAddr::Tcp(addr) => tcp::ping(addr, opts).await,
+        PingAddr::Https(addr) => https::ping(addr, opts).await,
+        PingAddr::Http(addr) => http::ping(addr, opts).await,
+    }
 }
 
 pub async fn ping_fastest(
@@ -27,8 +39,10 @@ pub async fn ping_fastest(
     use futures_util::future::select_ok;
 
     let ping_tasks = dests.iter().map(|dst| match dst {
-        PingAddr::Icmp(addr) => icmp_ping::ping(*addr, opts).boxed(),
-        PingAddr::Tcp(addr) => tcp_ping::ping(*addr, opts).boxed(),
+        PingAddr::Icmp(addr) => icmp::ping(*addr, opts).boxed(),
+        PingAddr::Tcp(addr) => tcp::ping(*addr, opts).boxed(),
+        PingAddr::Https(addr) => https::ping(*addr, opts).boxed(),
+        PingAddr::Http(addr) => http::ping(*addr, opts).boxed(),
     });
 
     let res = select_ok(ping_tasks).await;
@@ -38,15 +52,6 @@ pub async fn ping_fastest(
         Err(err) => Err(err),
     }
 }
-
-// pub trait PingClient {
-
-//     fn ping(dest: PingAddr, opts: PingOptions) -> Result<PingOutput, PingError>;
-
-//     fn ping_batch(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutput, PingError>>;
-
-//     fn ping_fastest(dests: &[PingAddr], opts: PingOptions) -> Result<PingOutput, PingError>;
-// }
 
 #[derive(Debug, Clone, Copy)]
 pub struct PingOptions {
@@ -104,6 +109,8 @@ impl Default for PingOptions {
 pub enum PingAddr {
     Icmp(IpAddr),
     Tcp(SocketAddr),
+    Https(SocketAddr),
+    Http(SocketAddr),
 }
 
 impl PingAddr {
@@ -111,6 +118,8 @@ impl PingAddr {
         match self {
             PingAddr::Icmp(ip) => ip,
             PingAddr::Tcp(addr) => addr.ip(),
+            PingAddr::Http(addr) => addr.ip(),
+            PingAddr::Https(addr) => addr.ip(),
         }
     }
 }
@@ -136,6 +145,39 @@ impl Display for PingAddr {
         match self {
             PingAddr::Icmp(addr) => write!(f, "icmp://{}", addr),
             PingAddr::Tcp(addr) => write!(f, "tcp://{}", addr),
+            PingAddr::Http(addr) => write!(f, "http://{}", addr),
+            PingAddr::Https(addr) => write!(f, "https://{}", addr),
+        }
+    }
+}
+
+impl FromStr for PingAddr {
+    type Err = PingError;
+
+    #[inline]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.try_into()
+    }
+}
+
+impl TryFrom<&str> for PingAddr {
+    type Error = PingError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let s = s.trim();
+        if let Some(sock_addr) = s.strip_prefix("tcp://") {
+            let sock_addr = SocketAddr::from_str(sock_addr)?;
+            Ok(Self::Tcp(sock_addr))
+        } else if let Some(sock_addr) = s.strip_prefix("http://") {
+            let sock_addr = SocketAddr::from_str(sock_addr)?;
+            Ok(Self::Http(sock_addr))
+        } else if let Some(sock_addr) = s.strip_prefix("https://") {
+            let sock_addr = SocketAddr::from_str(sock_addr)?;
+            Ok(Self::Https(sock_addr))
+        } else {
+            let s = s.strip_prefix("icmp://").unwrap_or(s);
+            let ip_addr = IpAddr::from_str(s)?;
+            Ok(Self::Icmp(ip_addr))
         }
     }
 }
@@ -164,30 +206,7 @@ impl PingOutput {
     }
 }
 
-impl FromStr for PingAddr {
-    type Err = PingError;
 
-    #[inline]
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.try_into()
-    }
-}
-
-impl TryFrom<&str> for PingAddr {
-    type Error = PingError;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        let s = s.trim();
-        if let Some(sock_addr) = s.strip_prefix("tcp://") {
-            let sock_addr = SocketAddr::from_str(sock_addr)?;
-            Ok(Self::Tcp(sock_addr))
-        } else {
-            let s = s.strip_prefix("icmp://").unwrap_or(s);
-            let ip_addr = IpAddr::from_str(s)?;
-            Ok(Self::Icmp(ip_addr))
-        }
-    }
-}
 
 #[derive(Debug, Error)]
 pub enum PingError {
@@ -243,7 +262,7 @@ fn do_agg(durations: Vec<Duration>, agg: DurationAgg) -> Option<Duration> {
 }
 
 #[cfg(feature = "disable_icmp_ping")]
-mod icmp_ping {
+mod icmp {
     //! ignore, Github actions not surpport icmp ping.
 
     use std::{net::IpAddr, time::Duration};
@@ -259,7 +278,7 @@ mod icmp_ping {
 }
 
 #[cfg(not(feature = "disable_icmp_ping"))]
-mod icmp_ping {
+mod icmp {
     use std::{net::IpAddr, time::Duration};
 
     use rand::random;
@@ -337,7 +356,7 @@ mod icmp_ping {
     }
 }
 
-mod tcp_ping {
+mod tcp {
     use std::{
         io,
         net::SocketAddr,
@@ -429,6 +448,181 @@ mod tcp_ping {
     }
 }
 
+mod http {
+    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
+    use crate::third_ext::FutureTimeoutExt;
+    use std::net::SocketAddr;
+    use std::time::{Duration, Instant};
+    use tokio::io::{self, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+    use tokio::net::TcpStream;
+
+    #[inline]
+    pub async fn ping(sock_addr: SocketAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
+        let PingOptions {
+            times,
+            timeout,
+            all_success,
+            duration_agg,
+        } = opts;
+
+        let mut durations = Vec::new();
+
+        let mut last_err = None;
+
+        for _seq in 0..times {
+            let duration = ping_http(sock_addr)
+                .timeout(timeout)
+                .await
+                .unwrap_or_else(|_| Err(PingError::Timeout));
+
+            match duration {
+                Ok(dur) => durations.push(dur),
+                Err(err) => {
+                    if all_success {
+                        return Err(err);
+                    } else {
+                        last_err = Some(err);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        let duration = do_agg(durations, duration_agg);
+
+        match duration {
+            Some(v) => Ok(PingOutput {
+                seq: 0,
+                duration: v,
+                destination: PingAddr::Http(sock_addr),
+            }),
+            None => match last_err {
+                Some(err) => Err(err),
+                None => Err(PingError::NoAddress),
+            },
+        }
+    }
+
+    #[inline]
+    pub async fn ping_http(sock_addr: SocketAddr) -> Result<Duration, PingError> {
+        let now = Instant::now();
+        let mut stream = TcpStream::connect(sock_addr).await?;
+        send_ping(&mut stream).await?;
+        Ok(now.elapsed())
+    }
+
+    pub(super) async fn send_ping<S: AsyncRead + AsyncWrite + std::marker::Unpin>(
+        stream: &mut S,
+    ) -> io::Result<bool> {
+        stream.write_all(b"GET / HTTP/1.1\r\n\r\n").await?;
+        let mut plaintext = String::new();
+        let mut reader = BufReader::new(stream);
+        reader.read_line(&mut plaintext).await?;
+        Ok(plaintext.starts_with("HTTP/"))
+    }
+}
+
+mod https {
+    use std::{
+        net::SocketAddr,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use rustls::ServerName;
+    use tokio::net::TcpStream;
+    use tokio_rustls::TlsConnector;
+
+    use crate::third_ext::FutureTimeoutExt;
+
+    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
+
+    struct NoCertificateVerification;
+
+    impl rustls::client::ServerCertVerifier for NoCertificateVerification {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::Certificate,
+            _intermediates: &[rustls::Certificate],
+            _server_name: &rustls::ServerName,
+            _scts: &mut dyn Iterator<Item = &[u8]>,
+            _ocsp: &[u8],
+            _now: std::time::SystemTime,
+        ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::ServerCertVerified::assertion())
+        }
+    }
+
+    #[inline]
+    pub async fn ping(sock_addr: SocketAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
+        let PingOptions {
+            times,
+            timeout,
+            all_success,
+            duration_agg,
+        } = opts;
+
+        let mut durations = Vec::new();
+
+        let mut last_err = None;
+
+        for _seq in 0..times {
+            let duration = ping_https(sock_addr)
+                .timeout(timeout)
+                .await
+                .unwrap_or_else(|_| Err(PingError::Timeout));
+
+            match duration {
+                Ok(dur) => durations.push(dur),
+                Err(err) => {
+                    if all_success {
+                        return Err(err);
+                    } else {
+                        last_err = Some(err);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        let duration = do_agg(durations, duration_agg);
+
+        match duration {
+            Some(v) => Ok(PingOutput {
+                seq: 0,
+                duration: v,
+                destination: PingAddr::Https(sock_addr),
+            }),
+            None => match last_err {
+                Some(err) => Err(err),
+                None => Err(PingError::NoAddress),
+            },
+        }
+    }
+
+    async fn ping_https(addr: SocketAddr) -> Result<Duration, PingError> {
+        let now = Instant::now();
+        let config = Arc::new({
+            let mut config = rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+                .with_no_client_auth();
+            config.enable_sni = false;
+            config
+        });
+
+        let server_name = ServerName::IpAddress(addr.ip());
+
+        let connector = TlsConnector::from(config);
+
+        let sock = TcpStream::connect(addr).await?;
+        let mut tls = connector.connect(server_name, sock).await?;
+
+        super::http::send_ping(&mut tls).await?;
+        Ok(now.elapsed())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,30 +640,58 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ping_target() {
+    fn test_parse_ping_addr_icmp() {
         let a = PingAddr::from_str("127.0.0.1").unwrap();
         assert!(matches!(a, PingAddr::Icmp(ip) if ip == "127.0.0.1".parse::<IpAddr>().unwrap() ));
 
         let b = PingAddr::from_str("icmp://127.0.0.1").unwrap();
         assert!(matches!(b, PingAddr::Icmp(ip) if ip == "127.0.0.1".parse::<IpAddr>().unwrap() ));
+    }
 
-        let c = PingAddr::from_str("tcp://223.5.5.5:80").unwrap();
-        assert!(
-            matches!(c, PingAddr::Tcp(ip) if ip == "223.5.5.5:80".parse::<SocketAddr>().unwrap() )
-        );
-
-        let d = PingAddr::from_str("tcp://223.5.5.5");
-        assert!(d.is_err());
-
+    #[test]
+    fn test_parse_ping_addr_icmp_ipv6() {
         let a = PingAddr::from_str("::1").unwrap();
         assert!(matches!(a, PingAddr::Icmp(ip) if ip == "::1".parse::<IpAddr>().unwrap() ));
 
         let b = PingAddr::from_str("icmp://::1").unwrap();
         assert!(matches!(b, PingAddr::Icmp(ip) if ip == "::1".parse::<IpAddr>().unwrap() ));
+    }
 
+    #[test]
+    fn test_parse_ping_addr_tcp() {
+        let c = PingAddr::from_str("tcp://223.5.5.5:80").unwrap();
+        assert!(
+            matches!(c, PingAddr::Tcp(ip) if ip == "223.5.5.5:80".parse::<SocketAddr>().unwrap() )
+        );
+    }
+
+    #[test]
+    fn test_parse_ping_addr_tcp_ipv6() {
         let c = PingAddr::from_str("tcp://[fe80::ec37:e7ff:fe56:bba7]:80").unwrap();
         assert!(
             matches!(c, PingAddr::Tcp(ip) if ip == "[fe80::ec37:e7ff:fe56:bba7]:80".parse::<SocketAddr>().unwrap() )
+        );
+    }
+
+    #[test]
+    fn test_parse_ping_addr_tcp_err() {
+        let d = PingAddr::from_str("tcp://223.5.5.5");
+        assert!(d.is_err());
+    }
+
+    #[test]
+    fn test_parse_ping_addr_http() {
+        let c = PingAddr::from_str("http://223.5.5.5:80").unwrap();
+        assert!(
+            matches!(c, PingAddr::Http(ip) if ip == "223.5.5.5:80".parse::<SocketAddr>().unwrap() )
+        );
+    }
+
+    #[test]
+    fn test_parse_ping_addr_https() {
+        let c = PingAddr::from_str("https://223.5.5.5:80").unwrap();
+        assert!(
+            matches!(c, PingAddr::Https(ip) if ip == "223.5.5.5:80".parse::<SocketAddr>().unwrap() )
         );
     }
 
@@ -525,5 +747,17 @@ mod tests {
                 .unwrap();
                 assert_eq!(out.destination, "127.0.0.1".parse::<PingAddr>().unwrap());
             });
+    }
+
+    #[test]
+    fn test_ping_https() {
+        tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let res = ping_one("https://1.1.1.1:443", Default::default()).await.unwrap();
+            assert!(res.duration < Duration::from_secs(5))
+        });
     }
 }

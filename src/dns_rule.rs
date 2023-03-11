@@ -212,6 +212,14 @@ impl DomainRuleTreeNode {
     pub fn zone(&self) -> Option<&Arc<DomainRuleTreeNode>> {
         self.zone.as_ref()
     }
+
+    pub fn get<T>(&self, f: impl Fn(&Self) -> Option<T>) -> Option<T> {
+        f(self).or_else(|| {
+            self.zone()
+                .map(|z| f(z))
+                .unwrap_or_default()
+        })
+    }
 }
 
 impl Deref for DomainRuleTreeNode {
