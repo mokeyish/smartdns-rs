@@ -69,9 +69,9 @@ csv = "1.1"
 hostname = { version = "*", git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 byte-unit = "4.0.17"
 ipnet = "2.7"
-
 which = "4.3.0"
 sysinfo = "0.27"
+fast-socks5 = "0.8.1"
 # regex = "1"
 # rnp = "0.1"
 # boomphf = "0.5.9"

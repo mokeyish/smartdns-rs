@@ -18,6 +18,7 @@ use crate::dns_url::DnsUrl;
 use crate::infra::file_mode::FileMode;
 use crate::infra::ipset::IpSet;
 use crate::log::{debug, error, info, warn};
+use crate::proxy::ProxyConfig;
 
 const DEFAULT_SERVER: &str = "https://cloudflare-dns.com/dns-query";
 
@@ -270,6 +271,9 @@ pub struct SmartDnsConfig {
     /// set domain rules
     domain_rules: DomainRules,
 
+    /// The proxy server for upstream querying.
+    proxy_servers: Arc<HashMap<String, ProxyConfig>>,
+
     resolv_file: Option<String>,
     domain_sets: HashMap<String, HashSet<Name>>,
 
@@ -386,10 +390,20 @@ impl SmartDnsConfig {
                 continue;
             }
             for server in servers {
+                let proxy = server
+                    .proxy
+                    .as_deref()
+                    .map(|n| self.proxies().get(n))
+                    .unwrap_or_default();
+
                 info!(
-                    "upstream server: {} [Group: {}]",
+                    "upstream server: {} [Group: {}] {}",
                     server.url.to_string(),
-                    group
+                    group,
+                    match proxy {
+                        Some(s) => format!("over {}", s),
+                        None => "".to_string(),
+                    }
                 );
             }
         }
@@ -695,6 +709,11 @@ impl SmartDnsConfig {
     #[inline]
     pub fn domain_rules(&self) -> &DomainRules {
         &self.domain_rules
+    }
+
+    #[inline]
+    pub fn proxies(&self) -> &Arc<HashMap<String, ProxyConfig>> {
+        &self.proxy_servers
     }
 
     #[inline]
@@ -1561,6 +1580,7 @@ mod parse {
                         "address" => self.config_address(options),
                         "domain-rules" => self.config_domain_rule(options),
                         "domain-rule" => self.config_domain_rule(options),
+                        "proxy-server" => self.config_proxy_server(options),
                         "resolv-file" => self.resolv_file = Some(options.to_string()),
                         "domain-set" => self
                             .config_domain_set(options)
@@ -1651,6 +1671,31 @@ mod parse {
             }
         }
 
+        #[inline]
+        fn config_proxy_server(&mut self, options: &str) {
+            let mut parts = split_options(options, ' ');
+
+            let mut name = None;
+            let mut proxy = None;
+
+            while let Some(part) = parts.next() {
+                match part {
+                    "-n" | "-name" => name = parts.next().map(|s| s.to_string()),
+                    _ => proxy = ProxyConfig::from_str(part).ok(),
+                }
+            }
+
+            match (name, proxy) {
+                (Some(name), Some(proxy)) => {
+                    let mut tmp = self.proxy_servers.as_ref().clone();
+                    tmp.insert(name, proxy);
+                    self.proxy_servers = tmp.into();
+                }
+                _ => warn!("the proxy url or name not specific"),
+            }
+        }
+
+        #[inline]
         fn config_domain_rule(&mut self, options: &str) {
             if let Ok(rule) = options.parse() {
                 self.domain_rules.push(rule)
@@ -2107,6 +2152,17 @@ mod parse {
                 DomainId::from_str("doh.pub").unwrap().into()
             );
             assert_eq!(cfg.forward_rules.first().unwrap().nameserver, "bootstrap");
+        }
+
+        #[test]
+        fn test_parse_config_proxy_server() {
+            let mut cfg = SmartDnsConfig::new();
+            cfg.config_item("proxy-server socks5://127.0.0.1:1080 -n abc");
+
+            assert_eq!(
+                cfg.proxy_servers.get("abc").map(|s| s.to_string()),
+                Some("socks5://127.0.0.1:1080".to_string())
+            );
         }
 
         #[test]

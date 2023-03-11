@@ -10,7 +10,7 @@ use std::{
 use rustls::ClientConfig;
 use tokio::sync::RwLock;
 
-use crate::trust_dns::proto::{
+use crate::{trust_dns::proto::{
     error::ProtoResult,
     op::{Edns, Message, MessageType, OpCode, Query},
     rr::{
@@ -19,8 +19,7 @@ use crate::trust_dns::proto::{
     },
     xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
     DnsHandle,
-};
-
+}, proxy::ProxyConfig};
 
 use trust_dns_resolver::{
     config::{NameServerConfig, Protocol, ResolverOpts, TlsClientConfig},
@@ -48,6 +47,7 @@ pub struct DnsClientBuilder {
     server_infos: Vec<NameServerInfo>,
     ca_file: Option<PathBuf>,
     ca_path: Option<PathBuf>,
+    proxies: Arc<HashMap<String, ProxyConfig>>
 }
 
 impl DnsClientBuilder {
@@ -60,13 +60,19 @@ impl DnsClientBuilder {
         self
     }
 
-    pub fn set_ca_file(mut self, file: PathBuf) -> Self {
+    pub fn with_ca_file(mut self, file: PathBuf) -> Self {
         self.ca_file = Some(file);
         self
     }
 
-    pub fn set_ca_path(mut self, file: PathBuf) -> Self {
+    pub fn with_ca_path(mut self, file: PathBuf) -> Self {
         self.ca_path = Some(file);
+        self
+    }
+
+    pub fn with_proxies(mut self, proxies: Arc<HashMap<String, ProxyConfig>>) -> Self {
+        self.proxies = proxies;
+
         self
     }
 
@@ -76,6 +82,7 @@ impl DnsClientBuilder {
             server_infos,
             ca_file,
             ca_path,
+            proxies
         } = self;
 
         let tls_client_config = Self::create_tls_client_config_pair(ca_path, ca_file);
@@ -115,6 +122,7 @@ impl DnsClientBuilder {
                         &server_infos.iter().cloned().collect::<Vec<_>>(),
                         tls_client_config.clone(),
                         &bootstrap,
+                        &proxies
                     )
                     .await;
                     if !resolver.is_empty() {
@@ -151,6 +159,7 @@ impl DnsClientBuilder {
             bootstrap,
             servers,
             tls_client_config,
+            proxies
         }
     }
 
@@ -159,6 +168,7 @@ impl DnsClientBuilder {
         infos: &[NameServerInfo],
         tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
         resolver: &BootstrapResolver<impl GenericResolver + Sync + Send>,
+        proxies: &HashMap<String, ProxyConfig>
     ) -> NameServerGroup {
         let mut servers = vec![];
 
@@ -209,8 +219,10 @@ impl DnsClientBuilder {
             let name_server_configs =
                 NameServer::create_config_from_url(&verified_url, tls_client_config.clone());
 
+            let proxy = info.proxy.as_deref().map(|n| proxies.get(n)).unwrap_or_default().cloned();
+
             for name_server_config in name_server_configs {
-                servers.push(NameServer::new(name_server_config, nameserver_opts.clone()))
+                servers.push(NameServer::new(name_server_config, nameserver_opts.clone(), proxy.clone()))
             }
         }
 
@@ -262,7 +274,7 @@ impl DnsClientBuilder {
 
         let servers = cfgs
             .into_iter()
-            .map(|cfg| NameServer::new(cfg, nameserver_opts.clone()))
+            .map(|cfg| NameServer::new(cfg, nameserver_opts.clone(), None))
             .collect::<Vec<_>>();
 
         NameServerGroup {
@@ -355,6 +367,7 @@ pub struct DnsClient {
     servers:
         HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
     tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
+    proxies: Arc<HashMap<String, ProxyConfig>>
 }
 
 impl DnsClient {
@@ -388,6 +401,7 @@ impl DnsClient {
                             infos,
                             self.tls_client_config.clone(),
                             self.bootstrap(),
+                            &self.proxies
                         )
                         .await,
                     );
@@ -645,11 +659,14 @@ pub struct NameServer {
 }
 
 impl NameServer {
-    fn new(config: NameServerConfig, opts: NameServerOpts) -> Self {
+    fn new(config: NameServerConfig, opts: NameServerOpts, proxy: Option<ProxyConfig>) -> Self {
         use trust_dns_resolver::name_server::NameServer as N;
 
-        let inner =
-            N::<TokioRuntimeProvider>::new(config, opts.resolver_opts, TokioRuntimeProvider::new());
+        let inner = N::<TokioRuntimeProvider>::new(
+            config,
+            opts.resolver_opts,
+            TokioRuntimeProvider::new(proxy),
+        );
 
         Self { opts, inner }
     }
@@ -999,13 +1016,13 @@ fn build_message(query: Query, options: DnsRequestOptions) -> Message {
     message
 }
 
-
-mod connection_provider{
+mod connection_provider {
+    use fast_socks5::client::Socks5Stream;
+    use futures::Future;
     use std::io;
     use std::pin::Pin;
-    use futures::Future;
-    use tokio::net::UdpSocket as TokioUdpSocket;
     use tokio::net::TcpStream as TokioTcpStream;
+    use tokio::net::UdpSocket as TokioUdpSocket;
     use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
 
     use std::net::SocketAddr;
@@ -1013,25 +1030,29 @@ mod connection_provider{
     use trust_dns_proto::TokioTime;
     use trust_dns_resolver::{name_server::RuntimeProvider, TokioHandle};
 
+    use crate::proxy::ProxyConfig;
 
     /// The Tokio Runtime for async execution
-    #[derive(Clone, Default)]
-    pub struct TokioRuntimeProvider{
-        handle : TokioHandle
+    #[derive(Clone)]
+    pub struct TokioRuntimeProvider {
+        proxy: Option<ProxyConfig>,
+        handle: TokioHandle,
     }
 
     impl TokioRuntimeProvider {
-        pub fn new() -> Self {
-            Self { handle: TokioHandle::default() }
+        pub fn new(proxy: Option<ProxyConfig>) -> Self {
+            Self {
+                proxy,
+                handle: TokioHandle::default(),
+            }
         }
     }
-
 
     impl RuntimeProvider for TokioRuntimeProvider {
         type Handle = TokioHandle;
         type Timer = TokioTime;
         type Udp = TokioUdpSocket;
-        type Tcp = AsyncIoTokioAsStd<TokioTcpStream>;
+        type Tcp = AsyncIoTokioAsStd<TcpStream>;
 
         fn create_handle(&self) -> Self::Handle {
             self.handle.clone()
@@ -1041,10 +1062,46 @@ mod connection_provider{
             &self,
             server_addr: SocketAddr,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Tcp>>>> {
+            let proxy = self.proxy.clone();
+
             Box::pin(async move {
-                TokioTcpStream::connect(server_addr)
-                    .await
-                    .map(AsyncIoTokioAsStd)
+                match proxy {
+                    Some(config) => match config {
+                        ProxyConfig::Socks(socks) => {
+                            let target_addr = server_addr.ip().to_string();
+                            let target_port = server_addr.port();
+
+                            let socks5stream = if socks.username.is_some() {
+                                Socks5Stream::connect_with_password(
+                                    socks.server,
+                                    target_addr,
+                                    target_port,
+                                    socks.username.unwrap(),
+                                    socks.password.unwrap(),
+                                    Default::default(),
+                                )
+                                .await
+                            } else {
+                                Socks5Stream::connect(
+                                    socks.server,
+                                    target_addr,
+                                    target_port,
+                                    Default::default(),
+                                )
+                                .await
+                            };
+
+                            socks5stream
+                                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+                                .map(TcpStream::Proxy)
+                                .map(AsyncIoTokioAsStd)
+                        }
+                    },
+                    None => TokioTcpStream::connect(server_addr)
+                        .await
+                        .map(TcpStream::Tokio)
+                        .map(AsyncIoTokioAsStd),
+                }
             })
         }
 
@@ -1054,6 +1111,57 @@ mod connection_provider{
             _server_addr: SocketAddr,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Udp>>>> {
             Box::pin(tokio::net::UdpSocket::bind(local_addr))
+        }
+    }
+
+    pub enum TcpStream {
+        Tokio(TokioTcpStream),
+        Proxy(Socks5Stream<TokioTcpStream>),
+    }
+
+    impl tokio::io::AsyncRead for TcpStream {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            match self.get_mut() {
+                TcpStream::Tokio(s) => Pin::new(s).poll_read(cx, buf),
+                TcpStream::Proxy(s) => Pin::new(s).poll_read(cx, buf),
+            }
+        }
+    }
+
+    impl tokio::io::AsyncWrite for TcpStream {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<Result<usize, io::Error>> {
+            match self.get_mut() {
+                TcpStream::Tokio(s) => Pin::new(s).poll_write(cx, buf),
+                TcpStream::Proxy(s) => Pin::new(s).poll_write(cx, buf),
+            }
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), io::Error>> {
+            match self.get_mut() {
+                TcpStream::Tokio(s) => Pin::new(s).poll_flush(cx),
+                TcpStream::Proxy(s) => Pin::new(s).poll_flush(cx),
+            }
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), io::Error>> {
+            match self.get_mut() {
+                TcpStream::Tokio(s) => Pin::new(s).poll_shutdown(cx),
+                TcpStream::Proxy(s) => Pin::new(s).poll_shutdown(cx),
+            }
         }
     }
 }
