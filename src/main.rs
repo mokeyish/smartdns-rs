@@ -30,6 +30,7 @@ mod dnsmasq;
 mod infra;
 mod log;
 mod preset_ns;
+mod proxy;
 mod service;
 mod third_ext;
 mod trust_dns;
@@ -82,10 +83,10 @@ fn main() {
 fn main() -> windows_service::Result<()> {
     if matches!(std::env::args().last(), Some(flag) if flag == "--ws7642ea814a90496daaa54f2820254f12")
     {
-        service::windows::run();
-    } else {
-        Cli::parse().run();
+        return service::windows::run();
     }
+
+    Cli::parse().run();
     Ok(())
 }
 
@@ -235,16 +236,19 @@ fn run_server(conf: Option<PathBuf>) {
             let servers = cfg.servers().clone();
             let ca_path = cfg.ca_path();
             let ca_file = cfg.ca_file();
+            let proxies = cfg.proxies().clone();
+
             runtime.block_on(async move {
                 let mut builder = DnsClient::builder();
                 builder = builder
                     .add_servers(servers.values().flat_map(|s| s.clone()).collect::<Vec<_>>());
                 if let Some(path) = ca_path {
-                    builder = builder.set_ca_path(path.to_owned());
+                    builder = builder.with_ca_path(path.to_owned());
                 }
                 if let Some(file) = ca_file {
-                    builder = builder.set_ca_path(file.to_owned());
+                    builder = builder.with_ca_path(file.to_owned());
                 }
+                builder = builder.with_proxies(proxies);
                 builder.build().await
             })
         }));
