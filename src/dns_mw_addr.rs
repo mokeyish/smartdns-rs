@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use crate::dns::*;
 use crate::middleware::*;
 use crate::trust_dns::proto::rr::{RData, RecordType};
+use crate::trust_dns::resolver::LookupTtl;
 
 #[derive(Debug)]
 pub struct AddressMiddleware;
@@ -89,20 +90,24 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
 
         let res = next.run(ctx, req).await;
 
-        // handle max_reply_ip_num
-        if let (Some(max_reply_ip_num), Ok(lookup)) = (ctx.cfg().max_reply_ip_num(), &res) {
-            if lookup.records().len() > max_reply_ip_num as usize {
-                let records = &lookup.records()[0..max_reply_ip_num as usize];
-                Ok(Lookup::new_with_deadline(
-                    lookup.query().clone(),
-                    records.to_vec().into(),
-                    lookup.valid_until(),
-                ))
-            } else {
-                res
-            }
-        } else {
-            res
+        match res {
+            Ok(mut lookup) => Ok({
+                if let Some(max_reply_ip_num) = ctx.cfg().max_reply_ip_num() {
+                    let records = &lookup.records()[0..max_reply_ip_num as usize];
+                    lookup = Lookup::new_with_deadline(
+                        lookup.query().clone(),
+                        records.to_vec().into(),
+                        lookup.valid_until(),
+                    )
+                }
+
+                if let Some(rr_ttl_reply_max) = ctx.cfg().rr_ttl_reply_max() {
+                    lookup = lookup.with_max_ttl(rr_ttl_reply_max as u32)
+                }
+
+                lookup
+            }),
+            Err(err) => Err(err),
         }
     }
 }

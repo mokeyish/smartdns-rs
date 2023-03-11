@@ -10,16 +10,19 @@ use std::{
 use rustls::ClientConfig;
 use tokio::sync::RwLock;
 
-use crate::{trust_dns::proto::{
-    error::ProtoResult,
-    op::{Edns, Message, MessageType, OpCode, Query},
-    rr::{
-        domain::{IntoName, Name},
-        Record, RecordType,
+use crate::{
+    proxy::ProxyConfig,
+    trust_dns::proto::{
+        error::ProtoResult,
+        op::{Edns, Message, MessageType, OpCode, Query},
+        rr::{
+            domain::{IntoName, Name},
+            Record, RecordType,
+        },
+        xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
+        DnsHandle,
     },
-    xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
-    DnsHandle,
-}, proxy::ProxyConfig};
+};
 
 use trust_dns_resolver::{
     config::{NameServerConfig, Protocol, ResolverOpts, TlsClientConfig},
@@ -47,7 +50,7 @@ pub struct DnsClientBuilder {
     server_infos: Vec<NameServerInfo>,
     ca_file: Option<PathBuf>,
     ca_path: Option<PathBuf>,
-    proxies: Arc<HashMap<String, ProxyConfig>>
+    proxies: Arc<HashMap<String, ProxyConfig>>,
 }
 
 impl DnsClientBuilder {
@@ -82,7 +85,7 @@ impl DnsClientBuilder {
             server_infos,
             ca_file,
             ca_path,
-            proxies
+            proxies,
         } = self;
 
         let tls_client_config = Self::create_tls_client_config_pair(ca_path, ca_file);
@@ -122,7 +125,7 @@ impl DnsClientBuilder {
                         &server_infos.iter().cloned().collect::<Vec<_>>(),
                         tls_client_config.clone(),
                         &bootstrap,
-                        &proxies
+                        &proxies,
                     )
                     .await;
                     if !resolver.is_empty() {
@@ -159,7 +162,7 @@ impl DnsClientBuilder {
             bootstrap,
             servers,
             tls_client_config,
-            proxies
+            proxies,
         }
     }
 
@@ -168,7 +171,7 @@ impl DnsClientBuilder {
         infos: &[NameServerInfo],
         tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
         resolver: &BootstrapResolver<impl GenericResolver + Sync + Send>,
-        proxies: &HashMap<String, ProxyConfig>
+        proxies: &HashMap<String, ProxyConfig>,
     ) -> NameServerGroup {
         let mut servers = vec![];
 
@@ -219,10 +222,19 @@ impl DnsClientBuilder {
             let name_server_configs =
                 NameServer::create_config_from_url(&verified_url, tls_client_config.clone());
 
-            let proxy = info.proxy.as_deref().map(|n| proxies.get(n)).unwrap_or_default().cloned();
+            let proxy = info
+                .proxy
+                .as_deref()
+                .map(|n| proxies.get(n))
+                .unwrap_or_default()
+                .cloned();
 
             for name_server_config in name_server_configs {
-                servers.push(NameServer::new(name_server_config, nameserver_opts.clone(), proxy.clone()))
+                servers.push(NameServer::new(
+                    name_server_config,
+                    nameserver_opts.clone(),
+                    proxy.clone(),
+                ))
             }
         }
 
@@ -367,7 +379,7 @@ pub struct DnsClient {
     servers:
         HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
     tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
-    proxies: Arc<HashMap<String, ProxyConfig>>
+    proxies: Arc<HashMap<String, ProxyConfig>>,
 }
 
 impl DnsClient {
@@ -401,7 +413,7 @@ impl DnsClient {
                             infos,
                             self.tls_client_config.clone(),
                             self.bootstrap(),
-                            &self.proxies
+                            &self.proxies,
                         )
                         .await,
                     );
