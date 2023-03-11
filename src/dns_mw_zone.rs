@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 
-use trust_dns_client::rr::LowerName;
+use trust_dns_proto::rr::LowerName;
 use trust_dns_server::authority::{AuthorityObject, LookupOptions};
 
 use crate::dns::*;

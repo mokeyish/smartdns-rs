@@ -1,7 +1,6 @@
 use std::{io, sync::Arc};
 use thiserror::Error;
-use trust_dns_proto::error::ProtoError;
-use trust_dns_proto::op::ResponseCode;
+use trust_dns_proto::{error::ProtoError, op::ResponseCode};
 use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
 
 #[allow(clippy::large_enum_variant)]

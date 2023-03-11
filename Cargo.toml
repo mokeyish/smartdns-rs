@@ -29,7 +29,6 @@ dns-over-quic = ["trust-dns-server/dns-over-quic"]
 
 dns-over-https-rustls = [
   "trust-dns-proto/dns-over-https-rustls",
-  "trust-dns-client/dns-over-https-rustls",
   "trust-dns-resolver/dns-over-https-rustls",
   "trust-dns-server/dns-over-https-rustls",
 ]
@@ -53,10 +52,9 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 tokio = { version = "1.21", features = ["time", "rt", "signal", "macros"] }
 url = "2.3.1"
-trust-dns-proto = { version = "0.22.0" }
-trust-dns-client = { version = "0.22.0" }
-trust-dns-resolver = { version = "0.22.0", features = ["serde-config"] }
-trust-dns-server = { version = "0.22.0", features = ["resolver"] }
+trust-dns-proto = { version = "0.22.0", git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
+trust-dns-resolver = { version = "0.22.0", features = ["serde-config"] , git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
+trust-dns-server = { version = "0.22.0", features = ["resolver"] , git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
 webpki-roots = "0.22.1"
 rustls = "0.20.0"
 rustls-native-certs = { version = "0.6.2", git = "https://github.com/mokeyish/rustls-native-certs.git" }

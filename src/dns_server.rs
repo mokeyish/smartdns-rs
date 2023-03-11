@@ -12,10 +12,12 @@ use crate::{
     dns_error::LookupError,
     log::{debug, error, info, warn},
 };
-use trust_dns_client::op::{Edns, Header, MessageType, OpCode, ResponseCode};
-use trust_dns_proto::rr::Record;
-pub use trust_dns_server::server::Request;
-pub use trust_dns_server::ServerFuture;
+
+use trust_dns_proto::{
+    op::{Edns, Header, MessageType, OpCode, ResponseCode},
+    rr::Record,
+};
+
 use trust_dns_server::{
     authority::{
         AuthLookup, EmptyLookup, LookupObject, LookupOptions, MessageResponse,
@@ -24,6 +26,7 @@ use trust_dns_server::{
     server::{RequestHandler, ResponseHandler, ResponseInfo},
     store::forwarder::ForwardLookup,
 };
+pub use trust_dns_server::{server::Request, ServerFuture};
 
 use crate::dns::DnsRequest;
 use crate::dns_mw::DnsMiddlewareHandler;

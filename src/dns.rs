@@ -78,8 +78,10 @@ mod request {
 
     use std::net::SocketAddr;
 
-    use trust_dns_client::op::LowerQuery;
-    use trust_dns_proto::{op::Query, rr::RecordType};
+    use trust_dns_proto::{
+        op::{LowerQuery, Query},
+        rr::RecordType,
+    };
     use trust_dns_server::server::Protocol;
 
     use crate::dns_server::Request as OriginRequest;
