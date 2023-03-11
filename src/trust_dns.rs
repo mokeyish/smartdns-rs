@@ -13,6 +13,14 @@ pub mod resolver {
         fn with_new_ttl(&self, ttl: u32) -> Self
         where
             Self: Sized;
+
+        fn with_max_ttl(&self, ttl: u32) -> Self
+        where
+            Self: Sized;
+
+        fn with_min_ttl(&self, ttl: u32) -> Self
+        where
+            Self: Sized;
     }
 
     impl LookupTtl for Lookup {
@@ -31,6 +39,34 @@ pub mod resolver {
                 .map(|record| {
                     let mut record = record.clone();
                     record.set_ttl(ttl);
+                    record
+                })
+                .collect::<Vec<_>>();
+
+            Lookup::new_with_deadline(self.query().clone(), records.into(), self.valid_until())
+        }
+
+        fn with_max_ttl(&self, ttl: u32) -> Self {
+            let records = self
+                .records()
+                .iter()
+                .map(|record| {
+                    let mut record = record.clone();
+                    record.set_ttl(ttl.min(record.ttl()));
+                    record
+                })
+                .collect::<Vec<_>>();
+
+            Lookup::new_with_deadline(self.query().clone(), records.into(), self.valid_until())
+        }
+
+        fn with_min_ttl(&self, ttl: u32) -> Self {
+            let records = self
+                .records()
+                .iter()
+                .map(|record| {
+                    let mut record = record.clone();
+                    record.set_ttl(ttl.max(record.ttl()));
                     record
                 })
                 .collect::<Vec<_>>();

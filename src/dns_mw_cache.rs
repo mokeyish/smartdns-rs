@@ -3,7 +3,6 @@ use std::collections::HashSet;
 
 use std::fs::File;
 use std::io::Read;
-use std::io::Write;
 use std::num::NonZeroUsize;
 
 use std::ops::Deref;
@@ -131,12 +130,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                         .insert_records(query, lookup.records().iter().cloned(), Instant::now())
                         .await;
                 }
-
-                if let Some(rr_ttl_reply_max) = ctx.cfg().rr_ttl_reply_max() {
-                    Ok(lookup.with_new_ttl(rr_ttl_reply_max as u32))
-                } else {
-                    Ok(lookup)
-                }
+                Ok(lookup)
             }
             Err(err) => {
                 // try to return expired result.
@@ -264,7 +258,6 @@ impl DomainPrefetcher {
                                     if let Some(min_ttl) = min_ttl {
                                         if let Some(entry) = cache.lock().await.peek_mut(&query) {
                                             entry.valid_until = now + min_ttl;
-                                            entry.origin_ttl = min_ttl;
                                             entry.lookup = Ok(lookup);
                                         }
                                     }
@@ -315,16 +308,6 @@ impl DomainPrefetcher {
                                 continue;
                             }
 
-                            // Prefetch the domain that ttl greater than 10s to reduce cpu usage.
-                            if entry.origin_ttl() < MIN_TTL {
-                                debug!(
-                                    "skiping {} {}, ttl:{:?}",
-                                    query.name(),
-                                    query.query_type(),
-                                    entry.origin_ttl()
-                                );
-                                continue;
-                            }
                             if entry.is_current(now) {
                                 let ttl = entry.ttl(now);
                                 most_recent = most_recent.min(ttl);
@@ -419,6 +402,8 @@ impl DnsLruCache {
         // If the cache was configured with a minimum TTL, and that value is higher
         // than the minimum TTL in the values, use it instead.
         let ttl = self.ttl.positive_min.max(ttl);
+        let ttl = self.ttl.positive_max.min(ttl);
+
         let valid_until = now + ttl;
 
         // insert into the LRU
@@ -432,7 +417,6 @@ impl DnsLruCache {
                 DnsCacheEntry {
                     lookup: Ok(lookup.clone()),
                     valid_until,
-                    origin_ttl: ttl,
                 },
             );
         } else {
@@ -660,7 +644,6 @@ enum OutOfDate {
 struct DnsCacheEntry {
     lookup: Result<Lookup, DnsError>,
     valid_until: Instant,
-    origin_ttl: Duration,
 }
 
 impl DnsCacheEntry {
@@ -672,10 +655,6 @@ impl DnsCacheEntry {
     /// Returns the ttl as a Duration of time remaining.
     fn ttl(&self, now: Instant) -> Duration {
         self.valid_until.saturating_duration_since(now)
-    }
-
-    fn origin_ttl(&self) -> Duration {
-        self.origin_ttl
     }
 }
 
@@ -690,27 +669,28 @@ mod lookup {
     };
     use trust_dns_resolver::lookup::Lookup;
 
-    pub fn serialize(lookups: &[Lookup]) -> ProtoResult<Vec<u8>> {
+    pub fn serialize(lookups: &[Lookup], writer: &mut impl std::io::Write) -> ProtoResult<()> {
         let mut buf = vec![];
-
-        let mut encoder = BinEncoder::new(&mut buf);
-
-        encoder.emit_u32(lookups.len() as u32)?;
-
         for lookup in lookups {
-            serialize_one(lookup, &mut encoder)?;
+            {
+                let mut encoder = BinEncoder::new(&mut buf);
+                serialize_one(lookup, &mut encoder)?;
+            }
+            writer.write_all(&buf)?;
+            buf.truncate(0);
         }
 
-        Ok(buf)
+        Ok(())
     }
 
     pub fn deserialize(data: &[u8]) -> ProtoResult<Vec<Lookup>> {
         let mut lookups = vec![];
-        let mut decoder = BinDecoder::new(data);
-        let count = decoder.read_u32()?.unverified();
+        let mut offset = 0;
 
-        for _ in 0..count {
-            lookups.push(deserialize_one(&mut decoder)?)
+        while offset < data.len() {
+            let mut decoder = BinDecoder::new(&data[offset..]);
+            lookups.push(deserialize_one(&mut decoder)?);
+            offset += decoder.index();
         }
 
         Ok(lookups)
@@ -767,13 +747,13 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
     fn persist<P: AsRef<Path>>(&self, path: P) {
         let path = path.as_ref();
         fn cache_to_file(lookups: &[Lookup], path: &Path) -> ProtoResult<()> {
-            let data = lookup::serialize(lookups)?;
             let mut file = File::options()
                 .create(true)
                 .truncate(true)
                 .write(true)
                 .open(path)?;
-            file.write_all(&data)?;
+
+            lookup::serialize(lookups, &mut file)?;
             Ok(())
         }
 
@@ -809,15 +789,9 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
                     cache.put(query, {
                         let valid_until = lookup.valid_until();
 
-                        let ttl = lookup
-                            .max_ttl()
-                            .map(|ttl| Duration::from_secs(ttl as u64))
-                            .unwrap_or_default();
-
                         DnsCacheEntry {
                             lookup: Ok(lookup),
                             valid_until,
-                            origin_ttl: ttl,
                         }
                     });
                 }
@@ -850,12 +824,14 @@ mod tests {
     fn test_lookup_serde() {
         let lookups = vec![
             create_lookup("abc.exmample.com", RecordType::A, 30),
-            create_lookup("xyz.exmample.com", RecordType::AAAA, 38),
+            create_lookup("xyz.exmample.com.", RecordType::AAAA, 38),
         ];
 
-        let data = lookup::serialize(&lookups).unwrap();
-
+        let mut data = vec![];
+        lookup::serialize(&lookups, &mut data).unwrap();
         let lookup2 = lookup::deserialize(&data).unwrap();
+
+        assert_eq!(lookup2.len(), lookups.len());
 
         assert_eq!(&lookups[0], &lookup2[0]);
         assert_eq!(&lookups[1], &lookup2[1]);
