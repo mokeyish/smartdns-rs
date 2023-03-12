@@ -1918,7 +1918,6 @@ mod parse {
             assert_eq!(bind.device, Some("eth1".to_string()));
         }
 
-        
         #[test]
         fn test_config_bind_with_device_flags() {
             let mut cfg = SmartDnsConfig::new();

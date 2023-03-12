@@ -26,7 +26,7 @@ pub struct DnsContext {
     pub fastest_speed: Duration,
     pub source: LookupFrom,
     pub no_cache: bool,
-    pub background: bool
+    pub background: bool,
 }
 
 impl DnsContext {
@@ -39,7 +39,7 @@ impl DnsContext {
             fastest_speed: Default::default(),
             source: Default::default(),
             no_cache: false,
-            background: false
+            background: false,
         }
     }
 
@@ -51,7 +51,7 @@ impl DnsContext {
     #[inline]
     pub fn server_opts(&self) -> &ServerOpts {
         &self.server_opts
-    } 
+    }
 }
 
 #[derive(Clone)]
