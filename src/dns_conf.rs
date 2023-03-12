@@ -844,7 +844,7 @@ impl FromStr for BindServer {
             } else if addr.is_none() {
                 addr = Some(part);
             } else {
-                error!("repeat addr ");
+                error!("unexpected options: {}", part);
             }
         }
 
@@ -1640,14 +1640,15 @@ mod parse {
                     );
                 }
 
-                match self
-                    .servers
-                    .entry(server.group.clone().unwrap_or("default".to_string()))
-                {
-                    Entry::Occupied(g) => g.into_mut(),
-                    Entry::Vacant(g) => g.insert(vec![]),
+                if let Some(group) = server.group.as_deref() {
+                    match self.servers.entry(group.to_string()) {
+                        Entry::Occupied(g) => g.into_mut(),
+                        Entry::Vacant(g) => g.insert(vec![]),
+                    }
+                    .push(server);
+                } else if server.exclude_default_group {
+                    warn!("group name required when `-exclude_default_group` enabled");
                 }
-                .push(server);
             }
         }
 
