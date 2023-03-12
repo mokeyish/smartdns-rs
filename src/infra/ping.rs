@@ -22,7 +22,10 @@ pub async fn ping(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutpu
     outs
 }
 
-pub async fn ping_one<D: TryInto<PingAddr, Error = PingError>>(dest: D, opts: PingOptions) -> Result<PingOutput, PingError> {
+pub async fn ping_one<D: TryInto<PingAddr, Error = PingError>>(
+    dest: D,
+    opts: PingOptions,
+) -> Result<PingOutput, PingError> {
     let dest = dest.try_into()?;
     match dest {
         PingAddr::Icmp(addr) => icmp::ping(addr, opts).await,
@@ -205,8 +208,6 @@ impl PingOutput {
         self.destination
     }
 }
-
-
 
 #[derive(Debug, Error)]
 pub enum PingError {
@@ -752,12 +753,14 @@ mod tests {
     #[test]
     fn test_ping_https() {
         tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let res = ping_one("https://1.1.1.1:443", Default::default()).await.unwrap();
-            assert!(res.duration < Duration::from_secs(5))
-        });
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let res = ping_one("https://1.1.1.1:443", Default::default())
+                    .await
+                    .unwrap();
+                assert!(res.duration < Duration::from_secs(5))
+            });
     }
 }

@@ -107,7 +107,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
             let mut opts = match ctx.domain_rule.as_ref() {
                 Some(rule) => LookupIpOptions {
-                    response_strategy: rule.get(|n|n.response_mode).unwrap_or_else(|| cfg.response_mode()),
+                    response_strategy: rule
+                        .get(|n| n.response_mode)
+                        .unwrap_or_else(|| cfg.response_mode()),
                     speed_check_mode: if rule.speed_check_mode.is_empty() {
                         cfg.speed_check_mode().clone()
                     } else {
@@ -211,7 +213,7 @@ async fn lookup_ip(
                             ips.iter()
                                 .map(|ip| PingAddr::Http(SocketAddr::new(*ip, *port)))
                                 .collect::<Vec<_>>()
-                        },
+                        }
                         SpeedCheckMode::Https(port) => {
                             debug!(
                                 "Speed test {} https ping {:?} port {}",
@@ -222,7 +224,7 @@ async fn lookup_ip(
                             ips.iter()
                                 .map(|ip| PingAddr::Https(SocketAddr::new(*ip, *port)))
                                 .collect::<Vec<_>>()
-                        },
+                        }
                     };
 
                     ping_tasks.push(ping_fastest(ping_dests, ping_ops).boxed());

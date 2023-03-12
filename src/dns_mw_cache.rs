@@ -237,7 +237,7 @@ impl DomainPrefetcher {
                                 let now = Instant::now();
                                 let mut ctx =
                                     DnsContext::new(query.name(), cfg.clone(), Default::default());
-                                    
+
                                 ctx.background = true;
 
                                 if let Ok(lookup) =
