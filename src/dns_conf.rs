@@ -785,6 +785,9 @@ pub struct BindServer {
     /// bind adress
     pub addrs: Vec<SocketAddr>,
 
+    /// bind network device.
+    pub device: Option<String>,
+
     /// ssl config
     pub ssl_config: Option<SslConfig>,
 
@@ -799,6 +802,7 @@ impl FromStr for BindServer {
         let mut parts = parse::split_options(s, ' ');
 
         let mut addr = None;
+        let mut device = None;
         let mut group = None;
         let mut no_rule_addr = None;
         let mut no_rule_nameserver = None;
@@ -844,6 +848,13 @@ impl FromStr for BindServer {
             }
         }
 
+        if let Some(s) = addr {
+            if let Some(at_idx) = s.find('@') {
+                device = Some(s[at_idx + 1..].to_string());
+                addr = Some(&s[0..at_idx])
+            }
+        }
+
         let sock_addrs = addr
             .map(|addr| parse::parse_sock_addrs(addr).ok())
             .unwrap_or_default()
@@ -862,6 +873,7 @@ impl FromStr for BindServer {
 
         Ok(Self {
             addrs: sock_addrs,
+            device,
             ssl_config,
             opts: ServerOpts {
                 group,
@@ -1892,6 +1904,34 @@ mod parse {
         use trust_dns_resolver::config::Protocol;
 
         use super::*;
+
+        #[test]
+        fn test_config_bind_with_device() {
+            let mut cfg = SmartDnsConfig::new();
+
+            cfg.config_item("bind 0.0.0.0:4453@eth1");
+
+            let bind = cfg.binds.get(0).unwrap();
+
+            assert_eq!(bind.addrs, vec!["0.0.0.0:4453".parse().unwrap()]);
+
+            assert_eq!(bind.device, Some("eth1".to_string()));
+        }
+
+        
+        #[test]
+        fn test_config_bind_with_device_flags() {
+            let mut cfg = SmartDnsConfig::new();
+
+            cfg.config_item("bind-https 0.0.0.0:443@eth2 -no-rule-addr");
+
+            let bind = cfg.binds_https.get(0).unwrap();
+
+            assert_eq!(bind.addrs, vec!["0.0.0.0:443".parse().unwrap()]);
+
+            assert_eq!(bind.device, Some("eth2".to_string()));
+            assert!(bind.opts.no_rule_addr());
+        }
 
         #[test]
         fn test_config_bind_https() {
