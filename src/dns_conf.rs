@@ -136,10 +136,10 @@ pub struct SmartDnsConfig {
 
     /// speed check mode
     ///
-    /// speed-check-mode [ping|tcp:port|none|,]
+    /// speed-check-mode [ping|tcp:port|http:port|https:port|none|,]
     /// ```ini
     /// example:
-    ///   speed-check-mode ping,tcp:80,tcp:443
+    ///   speed-check-mode ping,tcp:8080,http:80,https
     ///   speed-check-mode tcp:443,ping
     ///   speed-check-mode none
     /// ```
@@ -1403,20 +1403,25 @@ impl FromStr for SpeedCheckMode {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "ping" {
-            Ok(SpeedCheckMode::Ping)
-        } else if let Some(port) = s.strip_prefix("tcp:") {
-            u16::from_str(port).map(SpeedCheckMode::Tcp).map_err(|_| ())
-        } else if let Some(port) = s.strip_prefix("http:") {
-            u16::from_str(port)
-                .map(SpeedCheckMode::Http)
-                .map_err(|_| ())
-        } else if let Some(port) = s.strip_prefix("https:") {
-            u16::from_str(port)
-                .map(SpeedCheckMode::Https)
-                .map_err(|_| ())
-        } else {
-            Err(())
+        match s {
+            "ping" => Ok(SpeedCheckMode::Ping),
+            "http" => Ok(SpeedCheckMode::Http(80)),
+            "https" => Ok(SpeedCheckMode::Https(443)),
+            _ => {
+                if let Some(port) = s.strip_prefix("tcp:") {
+                    u16::from_str(port).map(SpeedCheckMode::Tcp).map_err(|_| ())
+                } else if let Some(port) = s.strip_prefix("http:") {
+                    u16::from_str(port)
+                        .map(SpeedCheckMode::Http)
+                        .map_err(|_| ())
+                } else if let Some(port) = s.strip_prefix("https:") {
+                    u16::from_str(port)
+                        .map(SpeedCheckMode::Https)
+                        .map_err(|_| ())
+                } else {
+                    Err(())
+                }
+            }
         }
     }
 }
@@ -2173,6 +2178,23 @@ mod parse {
             assert_eq!(
                 cfg.speed_check_mode.get(1).unwrap(),
                 &SpeedCheckMode::Tcp(123)
+            );
+        }
+
+        #[test]
+        fn test_parse_config_speed_check_mode_https_omit_port() {
+            let mut cfg = SmartDnsConfig::new();
+            cfg.config_item("speed-check-mode http,https");
+
+            assert_eq!(cfg.speed_check_mode.len(), 2);
+
+            assert_eq!(
+                cfg.speed_check_mode.get(0).unwrap(),
+                &SpeedCheckMode::Http(80)
+            );
+            assert_eq!(
+                cfg.speed_check_mode.get(1).unwrap(),
+                &SpeedCheckMode::Https(443)
             );
         }
 

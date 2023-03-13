@@ -15,8 +15,8 @@ pub async fn ping(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutpu
         outs.push(match dest {
             PingAddr::Icmp(addr) => icmp::ping(*addr, opts).await,
             PingAddr::Tcp(addr) => tcp::ping(*addr, opts).await,
-            PingAddr::Https(addr) => https::ping(*addr, opts).await,
             PingAddr::Http(addr) => http::ping(*addr, opts).await,
+            PingAddr::Https(addr) => https::ping(*addr, opts).await,
         })
     }
     outs
@@ -30,8 +30,8 @@ pub async fn ping_one<D: TryInto<PingAddr, Error = PingError>>(
     match dest {
         PingAddr::Icmp(addr) => icmp::ping(addr, opts).await,
         PingAddr::Tcp(addr) => tcp::ping(addr, opts).await,
-        PingAddr::Https(addr) => https::ping(addr, opts).await,
         PingAddr::Http(addr) => http::ping(addr, opts).await,
+        PingAddr::Https(addr) => https::ping(addr, opts).await,
     }
 }
 
@@ -44,8 +44,8 @@ pub async fn ping_fastest(
     let ping_tasks = dests.iter().map(|dst| match dst {
         PingAddr::Icmp(addr) => icmp::ping(*addr, opts).boxed(),
         PingAddr::Tcp(addr) => tcp::ping(*addr, opts).boxed(),
-        PingAddr::Https(addr) => https::ping(*addr, opts).boxed(),
         PingAddr::Http(addr) => http::ping(*addr, opts).boxed(),
+        PingAddr::Https(addr) => https::ping(*addr, opts).boxed(),
     });
 
     let res = select_ok(ping_tasks).await;
@@ -112,8 +112,8 @@ impl Default for PingOptions {
 pub enum PingAddr {
     Icmp(IpAddr),
     Tcp(SocketAddr),
-    Https(SocketAddr),
     Http(SocketAddr),
+    Https(SocketAddr),
 }
 
 impl PingAddr {
@@ -172,10 +172,12 @@ impl TryFrom<&str> for PingAddr {
             let sock_addr = SocketAddr::from_str(sock_addr)?;
             Ok(Self::Tcp(sock_addr))
         } else if let Some(sock_addr) = s.strip_prefix("http://") {
-            let sock_addr = SocketAddr::from_str(sock_addr)?;
+            let sock_addr = SocketAddr::from_str(sock_addr)
+                .or_else(|_| IpAddr::from_str(sock_addr).map(|ip| SocketAddr::new(ip, 80)))?;
             Ok(Self::Http(sock_addr))
         } else if let Some(sock_addr) = s.strip_prefix("https://") {
-            let sock_addr = SocketAddr::from_str(sock_addr)?;
+            let sock_addr = SocketAddr::from_str(sock_addr)
+                .or_else(|_| IpAddr::from_str(sock_addr).map(|ip| SocketAddr::new(ip, 443)))?;
             Ok(Self::Https(sock_addr))
         } else {
             let s = s.strip_prefix("icmp://").unwrap_or(s);
@@ -689,10 +691,26 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ping_addr_https() {
-        let c = PingAddr::from_str("https://223.5.5.5:80").unwrap();
+    fn test_parse_ping_addr_http_omit_port() {
+        let c = PingAddr::from_str("http://223.5.5.5").unwrap();
         assert!(
-            matches!(c, PingAddr::Https(ip) if ip == "223.5.5.5:80".parse::<SocketAddr>().unwrap() )
+            matches!(c, PingAddr::Http(ip) if ip == "223.5.5.5:80".parse::<SocketAddr>().unwrap() )
+        );
+    }
+
+    #[test]
+    fn test_parse_ping_addr_https() {
+        let c = PingAddr::from_str("https://223.5.5.5:4431").unwrap();
+        assert!(
+            matches!(c, PingAddr::Https(ip) if ip == "223.5.5.5:4431".parse::<SocketAddr>().unwrap() )
+        );
+    }
+
+    #[test]
+    fn test_parse_ping_addr_https_omit_port() {
+        let c = PingAddr::from_str("https://223.5.5.5").unwrap();
+        assert!(
+            matches!(c, PingAddr::Https(ip) if ip == "223.5.5.5:443".parse::<SocketAddr>().unwrap() )
         );
     }
 
