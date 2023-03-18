@@ -30,22 +30,25 @@ impl NameServerMiddleware {
         Self { client }
     }
 
-    async fn get_name_server_group(&self, ctx: &DnsContext) -> Option<Arc<NameServerGroup>> {
+    async fn get_name_server_group<'s, 'c>(
+        &self,
+        ctx: &'c DnsContext,
+    ) -> Option<(&'c str, Arc<NameServerGroup>)> {
         let client = &self.client;
         if let Some(name) = ctx.server_opts.group() {
-            client.get_server_group(name).await
+            client.get_server_group(name).await.map(|ns| (name, ns))
         } else {
             let mut node = ctx.domain_rule.as_ref();
 
             while let Some(rule) = node {
                 if let Some(name) = rule.nameserver.as_deref() {
-                    return client.get_server_group(name).await;
+                    return client.get_server_group(name).await.map(|ns| (name, ns));
                 }
 
                 node = rule.zone();
             }
 
-            Some(client.default().await)
+            Some(("default", client.default().await))
         }
     }
 }
@@ -85,7 +88,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             return client.lookup(name.clone(), rtype).await;
         }
 
-        let name_server_group = match self.get_name_server_group(ctx).await {
+        let (group_name, name_server_group) = match self.get_name_server_group(ctx).await {
             Some(ns) => ns,
             None => {
                 error!("no available nameserver found for {}", name);
@@ -94,13 +97,11 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         };
 
         debug!(
-            "query name: {} type: {} via {:?}",
-            name,
-            rtype,
-            name_server_group.name()
+            "query name: {} type: {} via [Group: {}]",
+            name, rtype, group_name
         );
 
-        ctx.source = LookupFrom::Server(name_server_group.name().to_string());
+        ctx.source = LookupFrom::Server(group_name.to_string());
 
         if rtype.is_ip_addr() {
             let cfg = ctx.cfg();
