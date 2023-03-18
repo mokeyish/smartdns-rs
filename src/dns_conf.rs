@@ -68,6 +68,13 @@ pub struct SmartDnsConfig {
     /// bind quic server
     pub binds_quic: Vec<BindServer>,
 
+    /// SSL Certificate file path
+    bind_cert_file: Option<PathBuf>,
+    /// SSL Certificate key file path
+    bind_cert_key_file: Option<PathBuf>,
+    /// SSL Certificate key file password
+    bind_cert_key_pass: Option<String>,
+
     /// tcp connection idle timeout
     ///
     /// tcp-idle-time [second]
@@ -499,6 +506,19 @@ impl SmartDnsConfig {
         .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
     }
 
+    /// SSL Certificate file path
+    pub fn bind_cert_file(&self) -> Option<&Path> {
+        self.bind_cert_file.as_deref()
+    }
+    /// SSL Certificate key file path
+    pub fn bind_cert_key_file(&self) -> Option<&Path> {
+        self.bind_cert_key_file.as_deref()
+    }
+    /// bind_cert_key_pass
+    pub fn bind_cert_key_pass(&self) -> Option<&str> {
+        self.bind_cert_key_pass.as_deref()
+    }
+
     /// whether resolv local hostname to ip address
     #[inline]
     pub fn resolv_hostanme(&self) -> bool {
@@ -926,16 +946,11 @@ impl FromStr for BindServer {
             .unwrap_or_default()
             .unwrap_or_else(|| panic!("{} addr expect [::]:53 or 0.0.0.0:53", s));
 
-        let ssl_config = match (server_name, ssl_certificate, ssl_certificate_key) {
-            (Some(server_name), Some(ssl_certificate), Some(ssl_certificate_key)) => {
-                Some(SslConfig {
-                    server_name,
-                    certificate: ssl_certificate,
-                    certificate_key: ssl_certificate_key,
-                })
-            }
-            _ => None,
-        };
+        let ssl_config = server_name.map(|server_name| SslConfig {
+            server_name,
+            certificate: ssl_certificate,
+            certificate_key: ssl_certificate_key,
+        });
 
         Ok(Self {
             sock_addr: sock_addrs,
@@ -966,8 +981,8 @@ impl BindServer {
 #[derive(Debug, Clone)]
 pub struct SslConfig {
     pub server_name: String,
-    pub certificate: PathBuf,
-    pub certificate_key: PathBuf,
+    pub certificate: Option<PathBuf>,
+    pub certificate_key: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
@@ -1597,6 +1612,13 @@ mod parse {
                                 self.binds_quic.push(v)
                             }
                         }
+                        "bind-cert-file" => {
+                            self.bind_cert_file = Some(Path::new(options).to_owned())
+                        }
+                        "bind-cert-key-file" => {
+                            self.bind_cert_key_file = Some(Path::new(options).to_owned())
+                        }
+                        "bind-cert-key-pass" => self.bind_cert_key_pass = Some(options.to_string()),
                         "tcp-idle-time" => self.tcp_idle_time = options.parse().ok(),
                         "cache-size" => self.cache_size = options.parse().ok(),
                         "cache-persist" => self.cache_persist = Some(parse_bool(options)),
@@ -2000,11 +2022,11 @@ mod parse {
             assert_eq!(ssl_cfg.server_name, "dns.example.com".to_string());
             assert_eq!(
                 ssl_cfg.certificate,
-                Path::new("/etc/nginx/dns.example.com.crt").to_path_buf()
+                Some(Path::new("/etc/nginx/dns.example.com.crt").to_path_buf())
             );
             assert_eq!(
                 ssl_cfg.certificate_key,
-                Path::new("/etc/nginx/dns.example.com.key").to_path_buf()
+                Some(Path::new("/etc/nginx/dns.example.com.key").to_path_buf())
             );
         }
 

@@ -303,11 +303,32 @@ fn run_server(conf: Option<PathBuf>) {
     }
 
     #[cfg(feature = "dns-over-tls")]
-    serve_tls(&mut server, &cfg.binds_tls, &runtime, tcp_idle_time);
+    serve_tls(
+        &mut server,
+        &cfg.binds_tls,
+        &runtime,
+        tcp_idle_time,
+        cfg.bind_cert_file(),
+        cfg.bind_cert_key_file(),
+    );
     #[cfg(feature = "dns-over-https")]
-    serve_https(&mut server, &cfg.binds_https, &runtime, tcp_idle_time);
+    serve_https(
+        &mut server,
+        &cfg.binds_https,
+        &runtime,
+        tcp_idle_time,
+        cfg.bind_cert_file(),
+        cfg.bind_cert_key_file(),
+    );
     #[cfg(feature = "dns-over-quic")]
-    serve_quic(&mut server, &cfg.binds_quic, &runtime, tcp_idle_time);
+    serve_quic(
+        &mut server,
+        &cfg.binds_quic,
+        &runtime,
+        tcp_idle_time,
+        cfg.bind_cert_file(),
+        cfg.bind_cert_key_file(),
+    );
 
     // config complete, starting!
 
@@ -330,6 +351,8 @@ fn serve_tls(
     binds: &[BindServer],
     runtime: &runtime::Runtime,
     tcp_idle_time: u64,
+    certificate: Option<&std::path::Path>,
+    certificate_key: Option<&std::path::Path>,
 ) {
     use futures::TryFutureExt;
     use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
@@ -340,15 +363,25 @@ fn serve_tls(
         }
         let ssl_config = bind.ssl_config.as_ref().unwrap();
 
+        let certificate = ssl_config
+            .certificate
+            .as_deref()
+            .or(certificate)
+            .expect("A certificate file must be specified for binding TLS");
+        let certificate_key = ssl_config
+            .certificate_key
+            .as_deref()
+            .or(certificate_key)
+            .expect("A certificate key file must be specified for binding TLS");
+
         info!(
             "loading cert for DNS over TLS named {} from {:?}",
-            ssl_config.server_name, ssl_config.certificate
+            ssl_config.server_name, certificate
         );
 
-        let certificate = read_cert(ssl_config.certificate.as_path())
-            .expect("error loading tls certificate file");
-        let certificate_key = read_key(ssl_config.certificate_key.as_path())
-            .expect("error loading tls certificate_key file");
+        let certificate = read_cert(certificate).expect("error loading tls certificate file");
+        let certificate_key =
+            read_key(certificate_key).expect("error loading tls certificate_key file");
 
         let addr = bind.sock_addr;
         debug!("binding TLS to {:?}", addr);
@@ -381,6 +414,8 @@ fn serve_https(
     binds: &[BindServer],
     runtime: &runtime::Runtime,
     tcp_idle_time: u64,
+    certificate: Option<&std::path::Path>,
+    certificate_key: Option<&std::path::Path>,
 ) {
     use futures::TryFutureExt;
     use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
@@ -391,17 +426,27 @@ fn serve_https(
         }
         let ssl_config = bind.ssl_config.as_ref().unwrap();
 
+        let certificate = ssl_config
+            .certificate
+            .as_deref()
+            .or(certificate)
+            .expect("A certificate file must be specified for binding HTTPS");
+        let certificate_key = ssl_config
+            .certificate_key
+            .as_deref()
+            .or(certificate_key)
+            .expect("A certificate key file must be specified for binding HTTPS");
+
         info!(
             "loading cert for DNS over HTTPS named {} from {:?}",
-            ssl_config.server_name, ssl_config.certificate
+            ssl_config.server_name, certificate
         );
 
         let server_name = ssl_config.server_name.as_str();
 
-        let certificate = read_cert(ssl_config.certificate.as_path())
-            .expect("error loading tls certificate file");
-        let certificate_key = read_key(ssl_config.certificate_key.as_path())
-            .expect("error loading tls certificate_key file");
+        let certificate = read_cert(certificate).expect("error loading tls certificate file");
+        let certificate_key =
+            read_key(certificate_key).expect("error loading tls certificate_key file");
 
         let addr = bind.sock_addr;
 
@@ -436,6 +481,8 @@ fn serve_quic(
     binds: &[BindServer],
     runtime: &runtime::Runtime,
     tcp_idle_time: u64,
+    certificate: Option<&std::path::Path>,
+    certificate_key: Option<&std::path::Path>,
 ) {
     use futures::TryFutureExt;
     use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
@@ -446,17 +493,27 @@ fn serve_quic(
         }
         let ssl_config = bind.ssl_config.as_ref().unwrap();
 
+        let certificate = ssl_config
+            .certificate
+            .as_deref()
+            .or(certificate)
+            .expect("A certificate file must be specified for binding QUIC");
+        let certificate_key = ssl_config
+            .certificate_key
+            .as_deref()
+            .or(certificate_key)
+            .expect("A certificate key file must be specified for binding QUIC");
+
         info!(
             "loading cert for DNS over QUIC named {} from {:?}",
-            ssl_config.server_name, ssl_config.certificate
+            ssl_config.server_name, certificate
         );
 
         let server_name = ssl_config.server_name.as_str();
 
-        let certificate = read_cert(ssl_config.certificate.as_path())
-            .expect("error loading tls certificate file");
-        let certificate_key = read_key(ssl_config.certificate_key.as_path())
-            .expect("error loading tls certificate_key file");
+        let certificate = read_cert(certificate).expect("error loading tls certificate file");
+        let certificate_key =
+            read_key(certificate_key).expect("error loading tls certificate_key file");
 
         let addr = bind.sock_addr;
         debug!("binding QUIC to {:?}", addr);
