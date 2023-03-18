@@ -18,15 +18,15 @@ cfg_if! {
     if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod linux;
         use linux::create_service_definition;
-        pub use linux::{BIN_PATH, CONF_PATH};
+        pub use linux::CONF_PATH;
     } else if #[cfg(target_os = "macos")] {
         mod macos;
         use self::macos::create_service_definition;
-        pub use macos::{BIN_PATH, CONF_PATH};
+        pub use macos::CONF_PATH;
     } else if #[cfg(target_os = "windows")] {
         pub mod windows;
         use self::windows::create_service_definition;
-        pub use self::windows::{BIN_PATH, CONF_PATH};
+        pub use self::windows::CONF_PATH;
     } else {
         unimplemented!();
     }

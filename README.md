@@ -3,18 +3,20 @@
 ![Test](https://github.com/mokeyish/smartdns-rs/actions/workflows/test.yml/badge.svg?branch=main)
 [![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/mokeyish/smartdns-rs?display_name=tag&include_prereleases)](https://github.com/mokeyish/smartdns-rs/releases)
 
-[Docs](https://pymumu.github.io/smartdns/) • [Discord](https://discord.gg/SDhQSA72)
+[Docs](https://pymumu.github.io/smartdns/en/) • [Discord](https://discord.gg/SDhQSA72)
 
 English | [中文](https://github.com/mokeyish/smartdns-rs/blob/main/README_zh-CN.md)
 
-A local DNS server imspired by [C smartdns](https://github.com/pymumu/smartdns) to accepts DNS query requests from local clients, obtains DNS query results from multiple upstream DNS servers, and returns the fastest access results to clients.
+SmartDNS-rs 🐋 is a local DNS server imspired by [C smartdns](https://github.com/pymumu/smartdns) to accepts DNS query requests from local clients, obtains DNS query results from multiple upstream DNS servers, and returns the fastest access results to clients.
 Avoiding DNS pollution and improving network access speed, supports high-performance ad filtering.
 
 Note: The C version of smartdns is very functional, but because it only supports **Linux**, while **MacOS and Windows** can only be supported through Docker or WSL. Therefore, I want to develop a rust version of SmartDNS that supports compiling to Windows, MacOS, Linux and Android Termux environment to run, and is compatible with its configuration.
 
 ---
 
-**Currently under development, please do not use in production environment.**
+**It is still under development, please do not use it in production environment, welcome to try and provide feedback.**
+
+Please refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md) for the function coverage
 
 ## Building
 
@@ -34,104 +36,72 @@ cargo build --release
 sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 ```
 
-## Installing as system service
+## Installing 
 
-Please download smartdns-rs from [here](https://github.com/mokeyish/smartdns-rs/releases). 
-Unzip and execute the following command for service management
+Building from source code might be troublesome, you can download the compiled package [here](https://github.com/mokeyish/smartdns-rs/releases) and unzip it.
 
+- Run as foreground
 
-You can use the following command to view the help of service management commands：
+  ```shell
+  ./smartdns run -c ./smartdns.conf -d
+  ```
 
-```shell
-./smartdns service help
-```
+  - `-d` or `--debug` is enabled to print debug logs 
 
-- MacOS
-  - [x] launchctl
-- Windows
-  - [x] Sc - [https://learn.microsoft.com/en-us/sc](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc754599(v=ws.11))
-- Linux
-  - [x] Systemd - https://en.wikipedia.org/wiki/Systemd
-  - [ ] OpenRc - https://en.wikipedia.org/wiki/OpenRC
-  - [ ] Procd(OpenWrt) - https://openwrt.org/docs/techref/procd
+- Install as a service and run automatically in the background at startup
 
-### Linux / MacOS
+  To install as a system service, you need administrator privileges. (MacOS users can use the Brew command to install, `brew install smartdns`) 
 
-1. Install service
+  - Install service
 
-   ```shell
-   sudo ./smartdns service install
-   ```
+    ```shell
+    ./smartdns service install
+    ```
 
-2. Start service
+  - Start service
 
-   ```shell
-   sudo ./smartdns service start
-   ```
+    ```shell
+    ./smartdns service start
+    ```
 
-3. Stop service
+  - Stop service
 
-   ```shell
-   sudo ./smartdns service stop
-   ```
+    ```shell
+    ./smartdns service stop
+    ```
 
-4. Uninstall service
+  - Uninstall service
 
-   ```shell
-   sudo ./smartdns service uninstall
-   ```
+    ```shell
+    ./smartdns service uninstall -p
+    ```
 
-### Windows
+    - `-p` or `--purge` will delete the configuration file along with it.
 
-Run cmd or powershell as administrator to execute the command below.
+  You can use the following command to view the help of service management commands：
 
-1. Install service
-
-   ```powershell
-   ./smartdns service install
-   ```
-
-2. Start service
-
-   ```powershell
-   ./smartdns service start
-   ```
-
-3. Stop service
-
-   ```powershell
-   ./smartdns service stop
-   ```
-
-4. Uninstall service
-
-   ```powershell
-   ./smartdns service uninstall
-   ```
+  ```shell'
+  ./smartdns service help
+  ```
 
 ## Configuration parameter
 
-Please refer to [here](https://github.com/pymumu/smartdns/blob/doc/en/docs/configuration.md) for configuration.
+Please refer to [here](https://github.com/pymumu/smartdns/blob/doc/en/docs/configuration.md) for configuration, and refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md) for the function coverage.
 
-
-## Acknowledgments !!!  
+## Acknowledgments !!! 
 
 This software wouldn't have been possible without:
 
 - [Trust-DNS](https://github.com/bluejekyll/trust-dns)
 - [SmartDNS](https://github.com/pymumu/smartdns)
 
-
-
 ## License
 
-This software contains codes from https://github.com/bluejekyll/trust-dns, which is licensed under either of
+This software contains codes from [](https://github.com/bluejekyll/trust-dns), which is licensed under either of
 
-
-- Apache License, Version 2.0, (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license (LICENSE-MIT or http://opensource.org/licenses/MIT)
-
+- Apache License, Version 2.0, (LICENSE-APACHE or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+- MIT license (LICENSE-MIT or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
 
 And other codes is licensed under
 
-- GPL-3.0 license (LICENSE-GPL-3.0 or https://opensource.org/licenses/GPL-3.0)
+- GPL-3.0 license (LICENSE-GPL-3.0 or [https://opensource.org/licenses/GPL-3.0](https://opensource.org/licenses/GPL-3.0))
