@@ -335,13 +335,17 @@ impl SmartDnsConfig {
         let mut cfg = Self::new();
         cfg.load_file(path).expect("load conf file filed");
 
-        if cfg.binds.is_empty() && cfg.binds_tcp.is_empty() {
+        if cfg.binds.is_empty()
+            && cfg.binds_tcp.is_empty()
+            && cfg.binds_https.is_empty()
+            && cfg.binds_tls.is_empty()
+            && cfg.binds_quic.is_empty()
+        {
             cfg.binds.push(BindServer {
-                addrs: ("0.0.0.0", 53)
-                    .to_socket_addrs()
-                    .unwrap()
-                    .collect::<Vec<_>>(),
-                ..Default::default()
+                sock_addr: ("0.0.0.0", 53).to_socket_addrs().unwrap().next().unwrap(),
+                device: None,
+                ssl_config: None,
+                opts: Default::default(),
             })
         }
 
@@ -349,7 +353,7 @@ impl SmartDnsConfig {
             .servers
             .values()
             .flatten()
-            .filter_map(|o| o.host_name.as_deref().or(o.url.domain()))
+            .filter_map(|o| o.host_name.as_deref().or_else(|| o.url.domain()))
             .filter_map(|domain| Name::from_str(domain).ok())
             .collect::<Vec<_>>();
 
@@ -374,6 +378,65 @@ impl SmartDnsConfig {
             cfg.domain_sets(),
             server_domains,
         );
+
+        {
+            let f = |bind: &'_ &mut BindServer| bind.device.is_some();
+
+            let binds = [
+                cfg.binds.iter_mut().filter(f),
+                cfg.binds_tcp.iter_mut().filter(f),
+                cfg.binds_https.iter_mut().filter(f),
+                cfg.binds_tls.iter_mut().filter(f),
+                cfg.binds_quic.iter_mut().filter(f),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+            if !binds.is_empty() {
+                #[cfg(not(target_os = "android"))]
+                {
+                    use local_ip_address::list_afinet_netifas;
+                    match list_afinet_netifas() {
+                        Ok(network_interfaces) => {
+                            for bind in binds {
+                                let device = bind.device.as_deref().expect("bind device");
+
+                                let ips = network_interfaces
+                                    .iter()
+                                    .filter(|(dev, _ip)| dev == device)
+                                    .map(|(_, ip)| *ip)
+                                    .collect::<Vec<_>>();
+
+                                if ips.is_empty() {
+                                    warn!("network device {} not found.", device);
+                                }
+
+                                let ip = ips.into_iter().find(|ip| {
+                                    match bind.sock_addr {
+                                        SocketAddr::V4(_) => ip.is_ipv4(),
+                                        SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
+                                    }
+                                });
+
+                                match ip {
+                                    Some(ip) => bind.sock_addr.set_ip(ip),
+                                    None => {
+                                        warn!("no ip address on device {}", device)
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!("bind device failed, {}", err);
+                        }
+                    }
+                }
+
+                #[cfg(target_os = "android")]
+                warn!("currently, bind device {} not support for android.", device);
+            }
+        }
 
         cfg
     }
@@ -780,10 +843,10 @@ impl<N: Clone, V: Clone> DerefMut for ConfigItem<N, V> {
 ///  IPV6:
 ///    bind [::]:53
 ///    bind-tcp [::]:53
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct BindServer {
     /// bind adress
-    pub addrs: Vec<SocketAddr>,
+    pub sock_addr: SocketAddr,
 
     /// bind network device.
     pub device: Option<String>,
@@ -872,7 +935,7 @@ impl FromStr for BindServer {
         };
 
         Ok(Self {
-            addrs: sock_addrs,
+            sock_addr: sock_addrs,
             device,
             ssl_config,
             opts: ServerOpts {
@@ -1070,7 +1133,7 @@ impl std::ops::AddAssign for ServerOpts {
 ///   - -check-edns: result must exist edns RR, or discard result.
 ///   - -group [group]: set server to group, use with nameserver /domain/group.
 ///   - -exclude-default-group: exclude this server from default group.
-/// ```
+/// ```ini, no-run
 /// server 8.8.8.8 -blacklist-ip -check-edns -group g1 -group g2
 ///
 /// remote tcp dns server list
@@ -1857,52 +1920,15 @@ mod parse {
         matches!(s, "y" | "yes" | "t" | "true" | "1")
     }
 
-    pub fn parse_sock_addrs(addr: &str) -> Result<Vec<SocketAddr>, AddrParseError> {
+    pub fn parse_sock_addrs(addr: &str) -> Result<SocketAddr, AddrParseError> {
         let addr = addr.trim();
-        let mut sock_addrs = vec![];
-
-        if let Some(Ok(port)) = addr
-            .to_lowercase()
-            .strip_prefix("localhost:")
-            .map(u16::from_str)
-        {
-            cfg_if! {
-                if #[cfg(any(target_os = "windows", target_os = "macos"))] {
-                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
-                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port));
-                }else if #[cfg(target_os = "linux")]  {
-                    // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
-                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port));
-                } else {
-                    // ipv4 default ?
-                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port));
-                }
-            };
-        } else if addr.starts_with("*:") || addr.starts_with(':') {
-            let port_str = addr.trim_start_matches("*:").trim_start_matches(':');
-            let port = u16::from_str(port_str)
-            .expect("The expected format for listening to both IPv4 and IPv6 addresses is :<port>,  *:<port>");
-
-            cfg_if! {
-                if #[cfg(any(target_os = "windows", target_os = "macos"))] {
-                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
-                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
-                }else if #[cfg(target_os = "linux")]  {
-                    // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
-                    sock_addrs.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
-                } else {
-                    // ipv4 default ?
-                    sock_addrs.push(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port));
-                }
-            };
+        if let Some(port) = addr.to_lowercase().strip_prefix("localhost:") {
+            format!("127.0.0.1:{}", port).as_str().parse()
+        } else if addr.starts_with(':') {
+            format!("0.0.0.0{}", addr).as_str().parse()
         } else {
-            match SocketAddr::from_str(addr) {
-                Ok(sock_addr) => sock_addrs.push(sock_addr),
-                Err(err) => return Err(err),
-            }
+            addr.parse()
         }
-
-        Ok(sock_addrs)
     }
 
     #[cfg(test)]
@@ -1919,7 +1945,7 @@ mod parse {
 
             let bind = cfg.binds.get(0).unwrap();
 
-            assert_eq!(bind.addrs, vec!["0.0.0.0:4453".parse().unwrap()]);
+            assert_eq!(bind.sock_addr, "0.0.0.0:4453".parse().unwrap());
 
             assert_eq!(bind.device, Some("eth1".to_string()));
         }
@@ -1932,7 +1958,7 @@ mod parse {
 
             let bind = cfg.binds_https.get(0).unwrap();
 
-            assert_eq!(bind.addrs, vec!["0.0.0.0:443".parse().unwrap()]);
+            assert_eq!(bind.sock_addr, "0.0.0.0:443".parse().unwrap());
 
             assert_eq!(bind.device, Some("eth2".to_string()));
             assert!(bind.opts.no_rule_addr());
@@ -1952,8 +1978,8 @@ mod parse {
             let ssl_cfg = bind.ssl_config.as_ref().unwrap();
 
             assert_eq!(
-                bind.addrs.get(0),
-                "0.0.0.0:4453".parse::<SocketAddr>().ok().as_ref()
+                bind.sock_addr,
+                "0.0.0.0:4453".parse::<SocketAddr>().unwrap()
             );
 
             assert_eq!(ssl_cfg.server_name, "dns.example.com".to_string());
@@ -2257,68 +2283,25 @@ mod parse {
         #[test]
         fn test_addr_parse() {
             assert_eq!(
-                parse_sock_addrs("[::1]:123"),
-                Ok(vec!["[::1]:123".parse::<SocketAddr>().unwrap()])
+                parse_sock_addrs("localhost:123"),
+                Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 123))
             );
-            assert!(parse_sock_addrs("[::]:123").is_ok());
-            assert!(parse_sock_addrs("0.0.0.0:123").is_ok());
-            assert!(parse_sock_addrs("localhost:123").is_ok());
-            assert!(parse_sock_addrs(":123").is_ok());
-            assert!(parse_sock_addrs("*:123").is_ok());
-        }
-
-        #[test]
-        fn test_to_socket_addrs_1() {
-            let sock_addrs = parse_sock_addrs("127.0.1.1:123").unwrap();
-            assert_eq!(sock_addrs.len(), 1);
-            let addr1 = sock_addrs[0];
-            assert_eq!(addr1.ip().to_string(), "127.0.1.1");
-            assert_eq!(addr1.port(), 123)
-        }
-
-        #[test]
-        fn test_to_socket_addrs_2() {
-            let sock_addrs = parse_sock_addrs("[::]:123").unwrap();
-            let addr1 = sock_addrs[0];
-            assert_eq!(addr1.ip().to_string(), "::");
-            assert_eq!(addr1.port(), 123)
-        }
-
-        #[test]
-        fn test_to_socket_addrs_3() {
-            let sock_addrs = parse_sock_addrs(":123").unwrap();
-
-            cfg_if! {
-                if #[cfg(any(target_os = "windows", target_os = "macos"))] {
-
-                    assert_eq!(sock_addrs.len(), 2);
-
-                    assert!(sock_addrs.get(0).unwrap().is_ipv4());
-                    assert!(sock_addrs.get(1).unwrap().is_ipv6());
-
-                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "0.0.0.0");
-                    assert_eq!(sock_addrs.get(1).unwrap().ip().to_string(), "::");
-
-                    assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
-                    assert_eq!(sock_addrs.get(1).unwrap().port(), 123);
-
-                }else if #[cfg(any(target_os = "linux"))]  {
-                    // Linux cannot listen to ipv4 and ipv6 on the same port at the same time
-
-                    assert_eq!(sock_addrs.len(), 1);
-                    assert!(sock_addrs.get(0).unwrap().is_ipv6());
-                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "::");
-                    assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
-
-
-                } else {
-                    // ipv4 default ?
-                    assert_eq!(sock_addrs.len(), 1);
-                    assert!(sock_addrs.get(0).unwrap().is_ipv4());
-                    assert_eq!(sock_addrs.get(0).unwrap().ip().to_string(), "0.0.0.0");
-                    assert_eq!(sock_addrs.get(0).unwrap().port(), 123);
-                }
-            };
+            assert_eq!(
+                parse_sock_addrs("0.0.0.0:123"),
+                Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 123))
+            );
+            assert_eq!(
+                parse_sock_addrs(":123"),
+                Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 123))
+            );
+            assert_eq!(
+                parse_sock_addrs("[::1]:123"),
+                "[::1]:123".parse::<SocketAddr>()
+            );
+            assert_eq!(
+                parse_sock_addrs("[::]:123"),
+                Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 123))
+            );
         }
     }
 }

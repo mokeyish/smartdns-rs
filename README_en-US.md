@@ -109,7 +109,7 @@ Run cmd or powershell as administrator to execute the command below.
 
 ## Configuration parameter
 
-Please refer to [here](https://github.com/pymumu/smartdns/blob/master/ReadMe_en.md#configuration-parameter) for configuration.
+Please refer to [here](https://github.com/pymumu/smartdns/blob/doc/en/docs/configuration.md) for configuration.
 
 
 ## Others

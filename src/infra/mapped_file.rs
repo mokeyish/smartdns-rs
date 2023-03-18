@@ -73,7 +73,7 @@ impl MappedFile {
             let dir = self
                 .path()
                 .parent()
-                .ok_or(io::Error::from(io::ErrorKind::NotFound))?;
+                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
             fs::create_dir_all(dir)?;
         }
         let file = self.get_active_file()?;

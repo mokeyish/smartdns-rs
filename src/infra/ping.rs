@@ -389,7 +389,7 @@ mod tcp {
             let duration = ping_tcp(sock_addr)
                 .timeout(timeout)
                 .await
-                .unwrap_or_else(|_| Err(PingError::Timeout));
+                .unwrap_or(Err(PingError::Timeout));
 
             match duration {
                 Ok(dur) => durations.push(dur),
@@ -476,7 +476,7 @@ mod http {
             let duration = ping_http(sock_addr)
                 .timeout(timeout)
                 .await
-                .unwrap_or_else(|_| Err(PingError::Timeout));
+                .unwrap_or(Err(PingError::Timeout));
 
             match duration {
                 Ok(dur) => durations.push(dur),
@@ -573,7 +573,7 @@ mod https {
             let duration = ping_https(sock_addr)
                 .timeout(timeout)
                 .await
-                .unwrap_or_else(|_| Err(PingError::Timeout));
+                .unwrap_or(Err(PingError::Timeout));
 
             match duration {
                 Ok(dur) => durations.push(dur),
