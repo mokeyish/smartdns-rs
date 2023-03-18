@@ -1,6 +1,6 @@
 [package]
 name = "smartdns"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["YISH <mokeyish@hotmail.com>"]
 edition = "2021"
 
@@ -37,6 +37,16 @@ dns-over-https-rustls = [
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[patch.crates-io]
+rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
+quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
+trust-dns-proto = { git = "https://github.com/mokeyish/trust-dns.git", rev = "eb68a91"}
+trust-dns-resolver = { git = "https://github.com/mokeyish/trust-dns.git", rev = "eb68a91"}
+trust-dns-server = { git = "https://github.com/mokeyish/trust-dns.git", rev = "eb68a91"}
+rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
+surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
+hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
+
 [dependencies]
 cfg-if = "1"
 clap = { version = "4.0", features = ["derive"] }
@@ -48,7 +58,7 @@ futures = { version = "0.3.5", default-features = false, features = ["std"] }
 futures-intrusive = "0.5"
 futures-util = "0.3"
 async-trait = "0.1.43"
-tokio = { version = "1.21", features = ["time", "rt", "signal", "macros"] }
+tokio = { version = "1.21", features = ["time", "rt", "signal", "macros", "parking_lot"] }
 tokio-rustls = "0.23.4"
 
 # log
@@ -61,23 +71,23 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # trustdns
-trust-dns-proto = { version = "0.22.0", git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
-trust-dns-resolver = { version = "0.22.0", features = ["serde-config"] , git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
-trust-dns-server = { version = "0.22.0", features = ["resolver"] , git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
+trust-dns-proto = { version = "0.22.0"}
+trust-dns-resolver = { version = "0.22.0", features = ["serde-config", "system-config"]}
+trust-dns-server = { version = "0.22.0", features = ["resolver"]}
 
 # ssl
 webpki-roots = "0.22.1"
 rustls = { version = "0.20.0", features = ["dangerous_configuration"]}
-rustls-native-certs = { version = "0.6.2", git = "https://github.com/mokeyish/rustls-native-certs.git" }
+rustls-native-certs = "0.6.2"
 
 lru = { version = "0.10", default-features = false}
 time = "0.3"
 chrono = "0.4"
-surge-ping = { version = "0.7.4", git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6"}
+surge-ping = "0.7.4"
 rand = "0.8.5"
 smallvec = "1.10.0"
 csv = "1.1"
-hostname = { version = "*", git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
+hostname = "0.3"
 byte-unit = "4.0.17"
 ipnet = "2.7"
 which = "4.3.0"

@@ -20,8 +20,6 @@ use crate::infra::ipset::IpSet;
 use crate::log::{debug, error, info, warn};
 use crate::proxy::ProxyConfig;
 
-const DEFAULT_SERVER: &str = "https://cloudflare-dns.com/dns-query";
-
 #[derive(Default)]
 pub struct SmartDnsConfig {
     /// dns server name, default is host name
@@ -357,21 +355,12 @@ impl SmartDnsConfig {
             .filter_map(|domain| Name::from_str(domain).ok())
             .collect::<Vec<_>>();
 
-        let server_count: usize = cfg.servers.values().map(|o| o.len()).sum();
-
-        if server_count == 0 {
-            cfg.servers
-                .get_mut("default")
-                .unwrap()
-                .push(NameServerInfo::from_str(DEFAULT_SERVER).unwrap());
-        }
-
         cfg.bogus_nxdomain = cfg.bogus_nxdomain.compact().into();
         cfg.blacklist_ip = cfg.blacklist_ip.compact().into();
         cfg.whitelist_ip = cfg.whitelist_ip.compact().into();
         cfg.ignore_ip = cfg.ignore_ip.compact().into();
 
-        cfg.domain_rule_map = DomainRuleMap::create(
+        let domain_rule_map = DomainRuleMap::create(
             cfg.domain_rules(),
             cfg.address_rules(),
             cfg.forward_rules(),
@@ -379,6 +368,19 @@ impl SmartDnsConfig {
             server_domains,
         );
 
+        // set nameserver group for bootstraping
+        for server in cfg.servers.values_mut().flatten() {
+            if server.url.addrs().is_empty() {
+                let host = server.url.host().to_string();
+                if let Ok(Some(rule)) =
+                    Name::from_str(host.as_str()).map(|domain| domain_rule_map.find(&domain))
+                {
+                    server.resolve_group = rule.get(|r| r.nameserver.clone());
+                }
+            }
+        }
+
+        // find device address
         {
             let f = |bind: &'_ &mut BindServer| bind.device.is_some();
 
@@ -438,6 +440,7 @@ impl SmartDnsConfig {
             }
         }
 
+        cfg.domain_rule_map = domain_rule_map;
         cfg
     }
 }
@@ -1188,6 +1191,12 @@ pub struct NameServerInfo {
 
     /// TLS SNI
     pub host_name: Option<String>,
+
+    /// set as bootstrap dns server
+    pub bootstrap_dns: bool,
+
+    /// nameserver group for resolving.
+    pub resolve_group: Option<String>,
 }
 
 impl FromStr for NameServerInfo {
@@ -1203,6 +1212,7 @@ impl FromStr for NameServerInfo {
         let mut check_edns = false;
         let mut proxy = None;
         let mut host_name = None;
+        let mut bootstrap_dns = false;
 
         while let Some(part) = parts.next() {
             if part.is_empty() {
@@ -1214,6 +1224,7 @@ impl FromStr for NameServerInfo {
                     "-blacklist-ip" => blacklist_ip = true,
                     "-whitelist-ip" => whitelist_ip = true,
                     "-check-edns" => check_edns = true,
+                    "-bootstrap_dns" => bootstrap_dns = true,
                     "-group" => group = Some(parts.next().expect("group name").to_string()),
                     "-proxy" => proxy = Some(parts.next().expect("proxy name").to_string()),
                     "-host-name" => host_name = Some(parts.next().expect("proxy name").to_string()),
@@ -1231,9 +1242,11 @@ impl FromStr for NameServerInfo {
                 exclude_default_group,
                 blacklist_ip,
                 whitelist_ip,
+                bootstrap_dns,
                 check_edns,
                 proxy,
                 host_name,
+                resolve_group: None,
             })
         } else {
             Err(())
@@ -1249,9 +1262,11 @@ impl From<DnsUrl> for NameServerInfo {
             exclude_default_group: false,
             blacklist_ip: false,
             whitelist_ip: false,
+            bootstrap_dns: false,
             check_edns: false,
             proxy: None,
             host_name: None,
+            resolve_group: None,
         }
     }
 }
