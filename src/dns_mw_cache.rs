@@ -122,7 +122,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
 
         let res = next.run(ctx, req).await;
 
-        let res = match res {
+        match res {
             Ok(lookup) => {
                 if !ctx.no_cache {
                     self.get_cache(ctx.cfg(), None)
@@ -144,9 +144,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                     Err(err)
                 }
             }
-        };
-
-        res
+        }
     }
 }
 

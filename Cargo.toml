@@ -39,10 +39,17 @@ dns-over-https-rustls = [
 cfg-if = "1"
 clap = { version = "4.0", features = ["derive"] }
 thiserror = "1.0"
+once_cell = "1.16.0"
+
+# async/await
 futures = { version = "0.3.5", default-features = false, features = ["std"] }
+futures-intrusive = "0.5"
 futures-util = "0.3"
 async-trait = "0.1.43"
-time = "0.3"
+tokio = { version = "1.21", features = ["time", "rt", "signal", "macros"] }
+tokio-rustls = "0.23.4"
+
+# log
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
   "std",
@@ -50,19 +57,20 @@ tracing-subscriber = { version = "0.3", features = [
   "env-filter",
 ] }
 # tracing-appender = "0.2"
-tokio = { version = "1.21", features = ["time", "rt", "signal", "macros"] }
-tokio-rustls = "0.23.4"
-url = "2.3.1"
+
+# trustdns
 trust-dns-proto = { version = "0.22.0", git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
 trust-dns-resolver = { version = "0.22.0", features = ["serde-config"] , git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
 trust-dns-server = { version = "0.22.0", features = ["resolver"] , git = "https://github.com/bluejekyll/trust-dns.git", rev = "5492bde"}
+
+# ssl
 webpki-roots = "0.22.1"
 rustls = { version = "0.20.0", features = ["dangerous_configuration"]}
 rustls-native-certs = { version = "0.6.2", git = "https://github.com/mokeyish/rustls-native-certs.git" }
+
 lru = { version = "0.10", default-features = false}
-once_cell = "1.16.0"
+time = "0.3"
 chrono = "0.4"
-futures-intrusive = "0.5"
 surge-ping = { version = "0.7.4", git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6"}
 rand = "0.8.5"
 smallvec = "1.10.0"
@@ -71,8 +79,13 @@ hostname = { version = "*", git = "https://github.com/mokeyish/hostname.git", br
 byte-unit = "4.0.17"
 ipnet = "2.7"
 which = "4.3.0"
+
+# process
 sysinfo = "0.27"
+
+# proxy
 fast-socks5 = "0.8.1"
+url = "2.3.1"
 # regex = "1"
 # rnp = "0.1"
 # boomphf = "0.5.9"

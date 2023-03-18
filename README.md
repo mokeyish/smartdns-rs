@@ -116,7 +116,7 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 
 ## 配置文件说明
 
-功能覆盖状态（更多详细的配置请参考 [这里](https://github.com/pymumu/smartdns#%E9%85%8D%E7%BD%AE%E6%96%87%E4%BB%B6%E8%AF%B4%E6%98%8E)）
+功能覆盖状态（更多详细的配置请参考 [这里](https://github.com/pymumu/smartdns/blob/doc/docs/configuration.md)）
 
 - :white_check_mark: 可用
 - :construction: 开发中

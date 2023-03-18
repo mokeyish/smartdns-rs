@@ -14,9 +14,9 @@ use super::{
 mod shell_escape;
 mod windows_service;
 
-pub const BIN_PATH: &'static str = "C:\\Windows\\System32\\smartdns.exe";
-pub const CONF_DIR: &'static str = "C:\\ProgramData\\smartdns";
-pub const CONF_PATH: &'static str = "C:\\ProgramData\\smartdns\\smartdns.conf";
+pub const BIN_PATH: &str = "C:\\Windows\\System32\\smartdns.exe";
+pub const CONF_DIR: &str = "C:\\ProgramData\\smartdns";
+pub const CONF_PATH: &str = "C:\\ProgramData\\smartdns\\smartdns.conf";
 
 pub use self::windows_service::run;
 

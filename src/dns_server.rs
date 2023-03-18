@@ -137,91 +137,70 @@ impl RequestHandler for ServerHandler {
                     );
 
                     let info = async {
-                        let res = async {
-                            // let query = request_info.query;
+                        let request_id = request.id();
 
-                            // let (response_header, sections) = self.build_response(
-                            //     request_info,
-                            //     request.id(),
-                            //     request.header(),
-                            //     query,
-                            // )
-                            // .await;
+                        let request_header = request.header();
 
-                            let request_id = request.id();
+                        let (response_header, sections) = async {
+                            let lookup_options = lookup_options_for_edns(request.edns());
 
-                            let request_header = request.header();
-
-                            let (response_header, sections) = async {
-                                let lookup_options = lookup_options_for_edns(request.edns());
-
-                                // log algorithms being requested
-                                if lookup_options.is_dnssec() {
-                                    info!(
-                                        "request: {} lookup_options: {:?}",
-                                        request_id, lookup_options
-                                    );
-                                }
-
-                                let mut response_header =
-                                    Header::response_from_request(request_header);
-                                response_header
-                                    .set_authoritative(ZoneType::Forward.is_authoritative());
-
-                                // debug!("performing {} on {}", query, authority.origin());
-
-                                // let future = self.dns_server.search(request_info, lookup_options);
-
-                                let future = async {
-                                    let req: &DnsRequest = &request.into();
-
-                                    let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
-                                        match self.handler.search(req, &self.server_opts).await {
-                                            Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
-                                            Err(err) => Err(err),
-                                        };
-
-                                    lookup_result
-                                };
-
-                                let sections = send_forwarded_response(
-                                    future,
-                                    request_header,
-                                    &mut response_header,
-                                )
-                                .await;
-
-                                (response_header, sections)
-                            }
-                            .await;
-
-                            let response = MessageResponseBuilder::from_message_request(request)
-                                .build(
-                                    response_header,
-                                    sections.answers.iter(),
-                                    sections.ns.iter(),
-                                    sections.soa.iter(),
-                                    sections.additionals.iter(),
+                            // log algorithms being requested
+                            if lookup_options.is_dnssec() {
+                                info!(
+                                    "request: {} lookup_options: {:?}",
+                                    request_id, lookup_options
                                 );
+                            }
 
-                            let result = send_response(
-                                response_edns.clone(),
-                                response,
-                                response_handle.clone(),
+                            let mut response_header = Header::response_from_request(request_header);
+                            response_header.set_authoritative(ZoneType::Forward.is_authoritative());
+
+                            // debug!("performing {} on {}", query, authority.origin());
+
+                            // let future = self.dns_server.search(request_info, lookup_options);
+
+                            let future = async {
+                                let req: &DnsRequest = &request.into();
+
+                                let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
+                                    match self.handler.search(req, &self.server_opts).await {
+                                        Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
+                                        Err(err) => Err(err),
+                                    };
+
+                                lookup_result
+                            };
+
+                            let sections = send_forwarded_response(
+                                future,
+                                request_header,
+                                &mut response_header,
                             )
                             .await;
 
-                            match result {
-                                Err(e) => {
-                                    error!("error sending response: {}", e);
-                                    ResponseInfo::serve_failed()
-                                }
-                                Ok(i) => i,
-                            }
+                            (response_header, sections)
                         }
                         .await;
 
-                        res
+                        let response = MessageResponseBuilder::from_message_request(request).build(
+                            response_header,
+                            sections.answers.iter(),
+                            sections.ns.iter(),
+                            sections.soa.iter(),
+                            sections.additionals.iter(),
+                        );
+
+                        let result =
+                            send_response(response_edns.clone(), response, response_handle.clone())
+                                .await;
+
+                        match result {
+                            Err(e) => {
+                                error!("error sending response: {}", e);
+                                ResponseInfo::serve_failed()
+                            }
+                            Ok(i) => i,
+                        }
                     }
                     .await;
 

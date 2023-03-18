@@ -38,7 +38,8 @@ impl DnsUrl {
     }
 
     pub fn port(&self) -> u16 {
-        self.port.unwrap_or(dns_proto_default_port(&self.proto))
+        self.port
+            .unwrap_or_else(|| dns_proto_default_port(&self.proto))
     }
 
     pub fn is_default_port(&self) -> bool {
