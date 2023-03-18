@@ -16,7 +16,9 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 smartdns](https://github.com/pymumu/s
 
 ---
 
-**目前正在开发中，请勿用于生产环境。**
+**目前仍在开发中，请勿用于生产环境，欢迎试用并提供反馈。**
+
+请参考 [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md) 查看功能覆盖情况。 
 
 ## 构建与运行
 
@@ -36,84 +38,53 @@ cargo build --release
 sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 ```
 
+## 安装
 
+从源码构建可能比较麻烦，可以到[这里](https://github.com/mokeyish/smartdns-rs/releases)下载编译好的程序包，解压即可。
 
-## 安装为系统服务
+- 前台运行
 
-到[此处](https://github.com/mokeyish/smartdns-rs/releases)下载编译好的程序包，解压执行如下命令进行服务管理。
+  ```shell
+  ./smartdns run -c ./smartdns.conf -d
+  ```
 
-可使用如下命令查看服务管理命令的帮助：
+  - `-d` 是开启打印调试日志
 
-```shell
-./smartdns service help
-```
+- 安装成服务，开机自动后台运行
 
-- MacOS
-  - [x] launchctl
-- Windows
-  - [x] Sc - [https://learn.microsoft.com/en-us/sc](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc754599(v=ws.11))
-- Linux
-  - [x] Systemd - https://en.wikipedia.org/wiki/Systemd
-  - [ ] OpenRc - https://en.wikipedia.org/wiki/OpenRC
-  - [x] Procd(OpenWrt) - https://openwrt.org/docs/techref/procd
+  安装成系统服务，需要管理员权限。（MacOS 用户可以使用 Brew 命令安装，`brew install smartdns`）
 
+  1. 安装服务
+  
+     ```shell
+     ./smartdns service install
+     ```
 
+  1. 启动服务
+  
+     ```shell
+     ./smartdns service start
+     ```
 
-### Linux / MacOS
+  1. 关闭服务
+  
+     ```shell
+     ./smartdns service stop
+     ```
 
-
-1. 安装服务
-
-   ```shell
-   sudo ./smartdns service install
-   ```
-
-2. 启动服务
-
-   ```shell
-   sudo ./smartdns service start
-   ```
-
-3. 关闭服务
-
-   ```shell
-   sudo ./smartdns service stop
-   ```
-
-4. 卸载服务
-
-   ```shell
-   sudo ./smartdns service uninstall
-   ```
-
-### Windows
-
-以管理员身份运行  cmd 或 powershell 执行下面的命令。
-
-1. 安装服务
-
-   ```powershell
-   ./smartdns service install
-   ```
-
-2. 启动服务
-
-   ```powershell
-   ./smartdns service start
-   ```
-
-3. 关闭服务
-
-   ```powershell
-   ./smartdns service stop
-   ```
-
-4. 卸载服务
-
-   ```powershell
-   ./smartdns service uninstall
-   ```
-
+  1. 卸载服务
+  
+     ```shell
+     ./smartdns service uninstall -p
+     ```
+  
+     - `-p` 会连同配置文件一起删除
+  
+  可使用如下命令查看服务管理命令的帮助：
+  
+  ```shell
+  ./smartdns service help
+  ```
 
 ## 配置文件说明
 
@@ -184,11 +155,6 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 | ca-file                          | 证书文件                                   | :white_check_mark:     | /etc/ssl/certs/ca-certificates.crt                           | 合法路径字符串                                               | ca-file /etc/ssl/certs/ca-certificates.crt                   |
 | ca-path                          | 证书文件路径                               | :white_check_mark:     | /etc/ssl/certs                                               | 合法路径字符串                                               | ca-path /etc/ssl/certs                                       |
 
-## 其他
-
-待补充
-
-
 ## 鸣谢!!!
 
 这个软件的诞生,少不了它们:
@@ -196,17 +162,13 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 - [Trust-DNS](https://github.com/bluejekyll/trust-dns)
 - [SmartDNS](https://github.com/pymumu/smartdns)
 
-
-
 ## 开源声明
 
-本软件包含来自 https://github.com/bluejekyll/trust-dns 的代码, 其许可是下列二选一
+本软件包含来自 [https://github.com/bluejekyll/trust-dns](https://github.com/bluejekyll/trust-dns) 的代码, 其许可是下列二选一
 
-
-- Apache License, Version 2.0, (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license (LICENSE-MIT or http://opensource.org/licenses/MIT)
-
+- Apache License, Version 2.0, (LICENSE-APACHE or [](http://www.apache.org/licenses/LICENSE-2.0))
+- MIT license (LICENSE-MIT or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
 
 其余代码则是
 
-- GPL-3.0 license (LICENSE-GPL-3.0 or https://opensource.org/licenses/GPL-3.0)
+- GPL-3.0 license (LICENSE-GPL-3.0 or [https://opensource.org/licenses/GPL-3.0](https://opensource.org/licenses/GPL-3.0))

@@ -86,6 +86,7 @@ jobs:
           mkdir $DIST_DIR
           cp LICENSE $DIST_DIR
           cp README*.md $DIST_DIR
+          cp etc/smartdns/smartdns.conf $DIST_DIR
         shell: bash
           
       - name: Publish archive
