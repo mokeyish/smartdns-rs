@@ -167,17 +167,12 @@ pub type DnsRequest = request::Request;
 pub type DnsResponse = Lookup;
 pub type DnsError = LookupError;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum LookupResponseStrategy {
-    FirstPing,       // query + ping
+    #[default]
+    FirstPing, // query + ping
     FastestIp,       // ping
     FastestResponse, // query
-}
-
-impl Default for LookupResponseStrategy {
-    fn default() -> Self {
-        LookupResponseStrategy::FirstPing
-    }
 }
 
 pub trait DefaultSOA {
