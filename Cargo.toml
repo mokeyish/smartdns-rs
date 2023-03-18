@@ -20,6 +20,8 @@ readme = "README.md"
 
 default = ["dns-over-tls", "dns-over-https", "dns-over-quic"]
 
+homebrew = ["dns-over-tls", "dns-over-https", "dns-over-quic"]
+
 failed_tests = []
 disable_icmp_ping = []
 
