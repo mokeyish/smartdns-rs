@@ -35,7 +35,7 @@ use crate::{
     dns_conf::NameServerInfo,
     dns_error::LookupError,
     dns_url::DnsUrl,
-    log::{debug, warn},
+    log::{debug, info, warn},
 };
 
 use bootstrap::BootstrapResolver;
@@ -95,7 +95,16 @@ impl DnsClientBuilder {
             async {
                 let mut bootstrap_infos = server_infos
                     .iter()
-                    .filter(|info| info.bootstrap_dns)
+                    .filter(|info| {
+                        info.bootstrap_dns && {
+                            if info.url.addrs().is_empty() {
+                                warn!("bootstrap-dns must use ip addess, {:?}", info.url.host());
+                                false
+                            } else {
+                                true
+                            }
+                        }
+                    })
                     .cloned()
                     .collect::<Vec<_>>();
 
@@ -107,7 +116,17 @@ impl DnsClientBuilder {
                         .collect::<Vec<_>>()
                 }
 
-                bootstrap_infos.dedup();
+                if bootstrap_infos.is_empty() {
+                    warn!("not bootstrap-dns found, use system_conf instead.");
+                } else {
+                    bootstrap_infos.dedup();
+                }
+
+                if !bootstrap_infos.is_empty() {
+                    for info in &bootstrap_infos {
+                        info!("bootstrap-dns {}", info.url.to_string());
+                    }
+                }
 
                 let resolver = BootstrapResolver::from_system_conf();
 

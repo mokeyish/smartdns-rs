@@ -9,8 +9,7 @@
         "args": [
           "build",
           "--bin=smartdns",
-          "--package=smartdns",
-          "--all-features"
+          "--package=smartdns"
         ],
         "filter": {
           "name": "smartdns",
