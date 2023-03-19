@@ -341,6 +341,9 @@ impl SmartDnsConfig {
         let path = path.as_ref();
 
         let mut cfg = Self::new();
+        if !path.exists() {
+            panic!("configuration file {:?} not exist.", path);
+        }
         cfg.load_file(path).expect("load conf file filed");
 
         if cfg.binds.is_empty()
