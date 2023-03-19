@@ -5,8 +5,8 @@ use trust_dns_proto::rr::Name;
 use crate::{
     collections::DomainMap,
     dns_conf::{
-        AddressRules, DomainAddress, DomainId::*, DomainRules, DomainSets, ForwardRules,
-        SpeedCheckModeList,
+        AddressRules, CNameRules, DomainAddress, DomainId::*, DomainRules, DomainSets,
+        ForwardRules, SpeedCheckModeList,
     },
 };
 
@@ -21,7 +21,7 @@ impl DomainRuleMap {
         address_rules: &AddressRules,
         forward_rules: &ForwardRules,
         domain_sets: &DomainSets,
-        server_domains: Vec<Name>,
+        cnames: &CNameRules,
     ) -> Self {
         let mut name_rule_map = HashMap::<Name, DomainRule>::new();
 
@@ -86,12 +86,22 @@ impl DomainRuleMap {
             }
         }
 
-        // append nameserver
-        for name in server_domains {
-            let rule = name_rule_map.entry(name).or_insert_with(Default::default);
-
-            if rule.nameserver.is_none() {
-                rule.nameserver = Some("bootstrap".to_string());
+        // set cname
+        for rule in cnames {
+            let names = match &rule.name {
+                Domain(name) => {
+                    vec![name.clone()]
+                }
+                DomainSet(s) => domain_sets
+                    .get(s)
+                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            };
+            for name in names {
+                name_rule_map
+                    .entry(name)
+                    .or_insert_with(Default::default)
+                    .cname = Some(rule.value.clone())
             }
         }
 
@@ -131,6 +141,8 @@ pub struct DomainRule {
     pub nameserver: Option<String>,
 
     pub address: Option<DomainAddress>,
+
+    pub cname: Option<CNameRule>,
 
     /// The mode of speed checking.
     pub speed_check_mode: SpeedCheckModeList,
@@ -226,6 +238,13 @@ impl Deref for DomainRuleTreeNode {
     }
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default)]
+pub enum CNameRule {
+    #[default]
+    Ignore,
+    Name(Name),
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -255,7 +274,7 @@ mod tests {
             ],
             &Default::default(),
             &Default::default(),
-            Default::default(),
+            &Default::default(),
         );
 
         let rule1 = map.find(&Name::from_str("z.a.b.c.www.example.com").unwrap().into());

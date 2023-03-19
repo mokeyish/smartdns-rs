@@ -19,6 +19,7 @@ mod dns_mw_addr;
 mod dns_mw_audit;
 mod dns_mw_bogus;
 mod dns_mw_cache;
+mod dns_mw_cname;
 mod dns_mw_dnsmasq;
 mod dns_mw_dualstack;
 mod dns_mw_ns;
@@ -40,6 +41,7 @@ use dns_mw_addr::AddressMiddleware;
 use dns_mw_audit::DnsAuditMiddleware;
 use dns_mw_bogus::DnsBogusMiddleware;
 use dns_mw_cache::DnsCacheMiddleware;
+use dns_mw_cname::DnsCNameMiddleware;
 use dns_mw_dnsmasq::DnsmasqMiddleware;
 use dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
 use dns_mw_ns::NameServerMiddleware;
@@ -204,6 +206,10 @@ fn run_server(conf: Option<PathBuf>) {
                 cfg.audit_num(),
                 cfg.audit_file_mode().into(),
             ));
+        }
+
+        if !cfg.cnames().is_empty() {
+            middleware_builder = middleware_builder.with(DnsCNameMiddleware);
         }
 
         middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
