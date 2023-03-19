@@ -1241,7 +1241,7 @@ impl FromStr for NameServerInfo {
                     "-blacklist-ip" => blacklist_ip = true,
                     "-whitelist-ip" => whitelist_ip = true,
                     "-check-edns" => check_edns = true,
-                    "-bootstrap_dns" => bootstrap_dns = true,
+                    "-bootstrap-dns" => bootstrap_dns = true,
                     "-group" => group = Some(parts.next().expect("group name").to_string()),
                     "-proxy" => proxy = Some(parts.next().expect("proxy name").to_string()),
                     "-host-name" => host_name = Some(parts.next().expect("proxy name").to_string()),
@@ -1252,7 +1252,7 @@ impl FromStr for NameServerInfo {
             }
         }
 
-        if let Some(url) = server.and_then(|s| DnsUrl::from_str(s).ok()) {
+        if let Some(Ok(url)) = server.map(DnsUrl::from_str) {
             Ok(Self {
                 url,
                 group,
@@ -1747,12 +1747,16 @@ mod parse {
 
             let server_options = server_options.as_deref().unwrap_or(options);
 
-            if let Ok(server) = NameServerInfo::from_str(server_options) {
+            if let Ok(mut server) = NameServerInfo::from_str(server_options) {
                 if !server.exclude_default_group {
                     self.servers
                         .get_mut("default")
                         .unwrap()
                         .push(server.clone());
+                }
+
+                if server.group.is_none() && server.bootstrap_dns {
+                    server.group = Some("bootstrap-dns".to_string());
                 }
 
                 if server.group.is_some() {
@@ -1771,6 +1775,8 @@ mod parse {
                     .push(server);
                 } else if server.exclude_default_group {
                     warn!("group name required when `-exclude_default_group` enabled");
+                } else if server.bootstrap_dns {
+                    warn!("upstream server {} not added!!!", server.url.to_string());
                 }
             }
         }
@@ -2093,6 +2099,27 @@ mod parse {
             assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
             assert!(server.group.is_none());
             assert!(!server.exclude_default_group);
+        }
+
+        #[test]
+        fn test_config_server_2() {
+            let mut cfg = SmartDnsConfig::new();
+            assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
+
+            cfg.config_item(
+                "server-https https://223.5.5.5/dns-query  -bootstrap-dns -exclude-default-group",
+            );
+
+            let servers = cfg.servers.get("bootstrap-dns").unwrap();
+
+            assert_eq!(servers.len(), 1);
+
+            let server = servers.first().unwrap();
+
+            assert_eq!(server.url.proto(), &Protocol::Https);
+            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert!(server.exclude_default_group);
+            assert!(server.bootstrap_dns);
         }
 
         #[test]
