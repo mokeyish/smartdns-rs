@@ -13,7 +13,7 @@ use ipnet::IpNet;
 use trust_dns_proto::rr::Name;
 
 use crate::dns::RecordType;
-use crate::dns_rule::{DomainRule, DomainRuleMap, DomainRuleTreeNode, ResponseMode};
+use crate::dns_rule::{CNameRule, DomainRule, DomainRuleMap, DomainRuleTreeNode, ResponseMode};
 use crate::dns_url::DnsUrl;
 use crate::infra::file_mode::FileMode;
 use crate::infra::ipset::IpSet;
@@ -276,6 +276,8 @@ pub struct SmartDnsConfig {
     /// set domain rules
     domain_rules: DomainRules,
 
+    cnames: CNameRules,
+
     /// The proxy server for upstream querying.
     proxy_servers: Arc<HashMap<String, ProxyConfig>>,
 
@@ -289,6 +291,7 @@ pub type DomainSets = HashMap<String, HashSet<Name>>;
 pub type ForwardRules = Vec<ForwardRule>;
 pub type AddressRules = Vec<ConfigItem<DomainId, DomainAddress>>;
 pub type DomainRules = Vec<ConfigItem<DomainId, DomainRule>>;
+pub type CNameRules = Vec<ConfigItem<DomainId, CNameRule>>;
 
 impl SmartDnsConfig {
     pub fn new() -> Self {
@@ -354,25 +357,19 @@ impl SmartDnsConfig {
             })
         }
 
-        let server_domains = cfg
-            .servers
-            .values()
-            .flatten()
-            .filter_map(|o| o.host_name.as_deref().or_else(|| o.url.domain()))
-            .filter_map(|domain| Name::from_str(domain).ok())
-            .collect::<Vec<_>>();
-
         cfg.bogus_nxdomain = cfg.bogus_nxdomain.compact().into();
         cfg.blacklist_ip = cfg.blacklist_ip.compact().into();
         cfg.whitelist_ip = cfg.whitelist_ip.compact().into();
         cfg.ignore_ip = cfg.ignore_ip.compact().into();
+
+        cfg.cnames.dedup_by(|a, b| a.name == b.name);
 
         let domain_rule_map = DomainRuleMap::create(
             cfg.domain_rules(),
             cfg.address_rules(),
             cfg.forward_rules(),
             cfg.domain_sets(),
-            server_domains,
+            &cfg.cnames,
         );
 
         // set nameserver group for bootstraping
@@ -810,6 +807,11 @@ impl SmartDnsConfig {
     #[inline]
     pub fn domain_sets(&self) -> &HashMap<String, HashSet<Name>> {
         &self.domain_sets
+    }
+
+    #[inline]
+    pub fn cnames(&self) -> &CNameRules {
+        &self.cnames
     }
 
     #[inline]
@@ -1345,6 +1347,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
 
         if let Ok(domain) = DomainId::from_str(parts[0]) {
             let mut speed_check_mode = vec![];
+            let mut cname = None;
             let mut address = None;
 
             let mut nameserver = None;
@@ -1379,6 +1382,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                     }
                     "-p" | "-ipset" => warn!("ignore ipset: {:?}", parts.next()),
                     "-t" | "-nftset" => warn!("ignore nftset: {:?}", parts.next()),
+                    "-cname" => cname = parts.next().map(|s| s.parse().ok()).unwrap_or_default(),
                     opt => warn!("unknown option: {}", opt),
                 }
             }
@@ -1391,6 +1395,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                         IpAddr::V4(ip) => DomainAddress::IPv4(ip),
                         IpAddr::V6(ip) => DomainAddress::IPv6(ip),
                     }),
+                    cname,
                     response_mode: None,
                     nameserver,
                     dualstack_ip_selection,
@@ -1407,7 +1412,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DomainId {
     Domain(Name),
     DomainSet(String),
@@ -1531,6 +1536,18 @@ impl FromStr for ResponseMode {
         };
 
         Ok(mode)
+    }
+}
+
+impl FromStr for CNameRule {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "-" {
+            Ok(Self::Ignore)
+        } else {
+            Name::from_str(s).map_err(|_| ()).map(Self::Name)
+        }
     }
 }
 
@@ -1709,6 +1726,7 @@ mod parse {
                         "domain-rule" => self.config_domain_rule(options),
                         "proxy-server" => self.config_proxy_server(options),
                         "resolv-file" => self.resolv_file = Some(options.to_string()),
+                        "cname" => self.config_cname(options),
                         "domain-set" => self
                             .config_domain_set(options)
                             .expect("load domain-set failed"),
@@ -1796,6 +1814,17 @@ mod parse {
                         value: addr,
                     });
                 }
+            }
+        }
+
+        fn config_cname(&mut self, options: &str) {
+            let mut parts = split_options(options, '/');
+
+            if let (Some(Ok(name)), Some(Ok(cname))) = (
+                parts.next().map(DomainId::from_str),
+                parts.next().map(CNameRule::from_str),
+            ) {
+                self.cnames.push(ConfigItem { name, value: cname })
             }
         }
 

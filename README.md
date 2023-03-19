@@ -2,6 +2,7 @@
 
 ![Test](https://github.com/mokeyish/smartdns-rs/actions/workflows/test.yml/badge.svg?branch=main)
 [![GitHub release (latest by date including pre-releases)](https://img.shields.io/github/v/release/mokeyish/smartdns-rs?display_name=tag&include_prereleases)](https://github.com/mokeyish/smartdns-rs/releases)
+![OS](https://img.shields.io/badge/os-Windows%20%7C%20MacOS%20%7C%20Linux-blue)
 
 [Docs](https://pymumu.github.io/smartdns/en/) • [Discord](https://discord.gg/SDhQSA72)
 
@@ -36,7 +37,7 @@ cargo build --release
 sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 ```
 
-## Installing 
+## Installing
 
 Building from source code might be troublesome, you can download the compiled package [here](https://github.com/mokeyish/smartdns-rs/releases) and unzip it.
 
@@ -88,7 +89,7 @@ Building from source code might be troublesome, you can download the compiled pa
 
 Please refer to [here](https://github.com/pymumu/smartdns/blob/doc/en/docs/configuration.md) for configuration, and refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md) for the function coverage.
 
-## Acknowledgments !!! 
+## Acknowledgments !!!
 
 This software wouldn't have been possible without:
 

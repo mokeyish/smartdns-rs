@@ -88,7 +88,7 @@ mod request {
 
     use trust_dns_proto::{
         op::{LowerQuery, Query},
-        rr::RecordType,
+        rr::{Name, RecordType},
     };
     use trust_dns_server::server::Protocol;
 
@@ -140,6 +140,15 @@ mod request {
         #[inline]
         pub fn protocol(&self) -> Protocol {
             self.protocol
+        }
+
+        pub fn with_cname(&self, name: Name) -> Self {
+            Self {
+                id: self.id,
+                query: LowerQuery::from(Query::query(name, self.query().query_type())),
+                src: self.src,
+                protocol: self.protocol,
+            }
         }
 
         pub fn set_query_type(&mut self, query_type: RecordType) {
