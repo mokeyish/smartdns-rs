@@ -6,14 +6,14 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=smartdns-rust
-PKG_VERSION:=0.3.0
+PKG_VERSION:=0.4.1
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/mokeyish/smartdns-rs.git
-PKG_SOURCE_VERSION:=9f87f49a5e441c518afd8f7f99e048cf9675764f
-PKG_MIRROR_HASH:=2117b1e7a6c1abb7c08ef10570dbcae9bfb831f8d970c9cf4d27f724b6816655
+PKG_SOURCE_VERSION:=9a4691e224c418d9474aa74a890a92d7d62f151d
+PKG_MIRROR_HASH:=abe9b00da257fa5f7607cc72d7f0798ed6ce5ab8c7b79599442adfe6172aa9e3
 
 PKG_MAINTAINER:=Zxlhhyccc <zxlhhyccc@gmail.com>
 PKG_LICENSE:=MIT
@@ -34,25 +34,32 @@ define Package/smartdns-rust/Default
     TITLE:=smartdns-rust server
     URL:=https://github.com/mokeyish/smartdns-rs.git
     DEPENDS:=$$(RUST_ARCH_DEPENDS)
-endef
+  endef
 
-define Package/smartdns-rust/install
-    $$(INSTALL_DIR) $$(1)/usr/sbin
-    $$(INSTALL_BIN) $$(PKG_INSTALL_DIR)/bin/smartdns $$(1)/usr/sbin/
-endef
+  define Package/smartdns-rust/description
+  A cross platform local DNS server (Dnsmasq like) written in rust to obtain the fastest website IP for the best Internet experience, supports DoT, DoH.
+  endef
+
+  define Package/smartdns-rust/install
+	$$(INSTALL_DIR) $$(1)/usr/sbin
+	$$(INSTALL_BIN) $$(PKG_INSTALL_DIR)/bin/smartdns $$(1)/usr/sbin/
+
+	$$(INSTALL_DIR) $$(1)/etc/init.d
+	$$(INSTALL_BIN) $(CURDIR)/conf/smartdns.init $$(1)/etc/init.d/smartdns
+  endef
 endef
 
 define smartdns-rust/templates
-    $(foreach smartdns,smartdns,
-        $(call Package/smartdns-rust/Default,$(smartdns))
+  $(foreach smartdns,smartdns,
+    $(call Package/smartdns-rust/Default,smartdns)
   )
 endef
 $(eval $(call smartdns-rust/templates))
 
 define Build/Compile
-    $(call Build/Compile/Cargo,, smartdns)
+	$(call Build/Compile/Cargo,, smartdns)
 endef
 
 $(foreach smartdns,smartdns, \
-    $(eval $(call BuildPackage,smartdns-rust)) \
+  $(eval $(call BuildPackage,smartdns-rust)) \
 )
