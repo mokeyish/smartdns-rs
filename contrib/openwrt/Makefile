@@ -44,7 +44,7 @@ define Package/smartdns-rust/Default
 	$$(INSTALL_DIR) $$(1)/usr/sbin
 	$$(INSTALL_BIN) $$(PKG_INSTALL_DIR)/bin/smartdns $$(1)/usr/sbin/
 
-	$$(INSTALL_DIR) $$(1)/etc/init.d $$(1)/etc/smartdns $$(1)/etc/config
+	$$(INSTALL_DIR) $$(1)/etc/init.d
 	$$(INSTALL_BIN) $(CURDIR)/conf/smartdns.init $$(1)/etc/init.d/smartdns
   endef
 endef
