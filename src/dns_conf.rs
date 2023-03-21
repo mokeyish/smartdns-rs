@@ -301,7 +301,7 @@ impl SmartDnsConfig {
         }
     }
 
-    pub fn load<P: AsRef<Path>>(path: Option<P>) -> Self {
+    pub fn load<P: AsRef<Path>>(path: Option<P>) -> Arc<Self> {
         if let Some(ref conf) = path {
             let path = conf.as_ref();
 
@@ -337,7 +337,7 @@ impl SmartDnsConfig {
         }
     }
 
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Self {
+    fn load_from_file<P: AsRef<Path>>(path: P) -> Arc<Self> {
         let path = path.as_ref();
 
         let mut cfg = Self::new();
@@ -345,110 +345,7 @@ impl SmartDnsConfig {
             panic!("configuration file {:?} not exist.", path);
         }
         cfg.load_file(path).expect("load conf file filed");
-
-        if cfg.binds.is_empty()
-            && cfg.binds_tcp.is_empty()
-            && cfg.binds_https.is_empty()
-            && cfg.binds_tls.is_empty()
-            && cfg.binds_quic.is_empty()
-        {
-            cfg.binds.push(BindServer {
-                sock_addr: ("0.0.0.0", 53).to_socket_addrs().unwrap().next().unwrap(),
-                device: None,
-                ssl_config: None,
-                opts: Default::default(),
-            })
-        }
-
-        cfg.bogus_nxdomain = cfg.bogus_nxdomain.compact().into();
-        cfg.blacklist_ip = cfg.blacklist_ip.compact().into();
-        cfg.whitelist_ip = cfg.whitelist_ip.compact().into();
-        cfg.ignore_ip = cfg.ignore_ip.compact().into();
-
-        cfg.cnames.dedup_by(|a, b| a.name == b.name);
-
-        let domain_rule_map = DomainRuleMap::create(
-            cfg.domain_rules(),
-            cfg.address_rules(),
-            cfg.forward_rules(),
-            cfg.domain_sets(),
-            &cfg.cnames,
-        );
-
-        // set nameserver group for bootstraping
-        for server in cfg.servers.values_mut().flatten() {
-            if server.url.addrs().is_empty() {
-                let host = server.url.host().to_string();
-                if let Ok(Some(rule)) =
-                    Name::from_str(host.as_str()).map(|domain| domain_rule_map.find(&domain))
-                {
-                    server.resolve_group = rule.get(|r| r.nameserver.clone());
-                }
-            }
-        }
-
-        // find device address
-        {
-            let f = |bind: &'_ &mut BindServer| bind.device.is_some();
-
-            let binds = [
-                cfg.binds.iter_mut().filter(f),
-                cfg.binds_tcp.iter_mut().filter(f),
-                cfg.binds_https.iter_mut().filter(f),
-                cfg.binds_tls.iter_mut().filter(f),
-                cfg.binds_quic.iter_mut().filter(f),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-
-            if !binds.is_empty() {
-                #[cfg(not(target_os = "android"))]
-                {
-                    use local_ip_address::list_afinet_netifas;
-                    match list_afinet_netifas() {
-                        Ok(network_interfaces) => {
-                            for bind in binds {
-                                let device = bind.device.as_deref().expect("bind device");
-
-                                let ips = network_interfaces
-                                    .iter()
-                                    .filter(|(dev, _ip)| dev == device)
-                                    .map(|(_, ip)| *ip)
-                                    .collect::<Vec<_>>();
-
-                                if ips.is_empty() {
-                                    warn!("network device {} not found.", device);
-                                }
-
-                                let ip = ips.into_iter().find(|ip| {
-                                    match bind.sock_addr {
-                                        SocketAddr::V4(_) => ip.is_ipv4(),
-                                        SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
-                                    }
-                                });
-
-                                match ip {
-                                    Some(ip) => bind.sock_addr.set_ip(ip),
-                                    None => {
-                                        warn!("no ip address on device {}", device)
-                                    }
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            warn!("bind device failed, {}", err);
-                        }
-                    }
-                }
-
-                #[cfg(target_os = "android")]
-                warn!("currently, bind device {} not support for android.", device);
-            }
-        }
-
-        cfg.domain_rule_map = domain_rule_map;
-        cfg
+        cfg.finalize()
     }
 }
 
@@ -1561,6 +1458,124 @@ mod parse {
     use std::{collections::hash_map::Entry, ffi::OsStr, net::AddrParseError};
 
     impl SmartDnsConfig {
+        pub(super) fn finalize(mut self) -> Arc<Self> {
+            if self.binds.is_empty()
+                && self.binds_tcp.is_empty()
+                && self.binds_https.is_empty()
+                && self.binds_tls.is_empty()
+                && self.binds_quic.is_empty()
+            {
+                self.binds.push(BindServer {
+                    sock_addr: ("0.0.0.0", 53).to_socket_addrs().unwrap().next().unwrap(),
+                    device: None,
+                    ssl_config: None,
+                    opts: Default::default(),
+                })
+            }
+
+            self.bogus_nxdomain = self.bogus_nxdomain.compact().into();
+            self.blacklist_ip = self.blacklist_ip.compact().into();
+            self.whitelist_ip = self.whitelist_ip.compact().into();
+            self.ignore_ip = self.ignore_ip.compact().into();
+
+            self.cnames.dedup_by(|a, b| a.name == b.name);
+
+            let domain_rule_map = DomainRuleMap::create(
+                self.domain_rules(),
+                self.address_rules(),
+                self.forward_rules(),
+                self.domain_sets(),
+                &self.cnames,
+            );
+
+            // set nameserver group for bootstraping
+            for server in self.servers.values_mut().flatten() {
+                if server.url.addrs().is_empty() {
+                    let host = server.url.host().to_string();
+                    if let Ok(Some(rule)) =
+                        Name::from_str(host.as_str()).map(|domain| domain_rule_map.find(&domain))
+                    {
+                        server.resolve_group = rule.get(|r| r.nameserver.clone());
+                    }
+                }
+            }
+
+            // find device address
+            {
+                let f = |bind: &'_ &mut BindServer| bind.device.is_some();
+
+                let binds = [
+                    self.binds.iter_mut().filter(f),
+                    self.binds_tcp.iter_mut().filter(f),
+                    self.binds_https.iter_mut().filter(f),
+                    self.binds_tls.iter_mut().filter(f),
+                    self.binds_quic.iter_mut().filter(f),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+                if !binds.is_empty() {
+                    #[cfg(not(target_os = "android"))]
+                    {
+                        use local_ip_address::list_afinet_netifas;
+                        match list_afinet_netifas() {
+                            Ok(network_interfaces) => {
+                                for bind in binds {
+                                    let device = bind.device.as_deref().expect("bind device");
+
+                                    let ips = network_interfaces
+                                        .iter()
+                                        .filter(|(dev, _ip)| dev == device)
+                                        .map(|(_, ip)| *ip)
+                                        .collect::<Vec<_>>();
+
+                                    if ips.is_empty() {
+                                        warn!("network device {} not found.", device);
+                                    }
+
+                                    let ip = ips.into_iter().find(|ip| {
+                                        match bind.sock_addr {
+                                            SocketAddr::V4(_) => ip.is_ipv4(),
+                                            SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
+                                        }
+                                    });
+
+                                    match ip {
+                                        Some(ip) => bind.sock_addr.set_ip(ip),
+                                        None => {
+                                            warn!("no ip address on device {}", device)
+                                        }
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                warn!("bind device failed, {}", err);
+                            }
+                        }
+                    }
+
+                    #[cfg(target_os = "android")]
+                    warn!("currently, bind device {} not support for android.", device);
+                }
+            }
+
+            self.domain_rule_map = domain_rule_map;
+
+            // dedup bind address
+            self.binds.dedup_by(|a, b| a.sock_addr == b.sock_addr);
+            self.binds_tcp.dedup_by(|a, b| a.sock_addr == b.sock_addr);
+            self.binds_https.dedup_by(|a, b| a.sock_addr == b.sock_addr);
+            self.binds_tls.dedup_by(|a, b| a.sock_addr == b.sock_addr);
+
+            self.into()
+        }
+
+        pub fn with(mut self, config: &str) -> Self {
+            self.config_item(config);
+            self
+        }
+
         pub fn load_file<P: AsRef<Path>>(
             &mut self,
             path: P,
@@ -2013,10 +2028,29 @@ mod parse {
         use super::*;
 
         #[test]
-        fn test_config_bind_with_device() {
-            let mut cfg = SmartDnsConfig::new();
+        fn test_config_binds_dedup() {
+            let cfg = SmartDnsConfig::new()
+                .with("bind-tcp 0.0.0.0:4453@eth1")
+                .with("bind-tcp 0.0.0.0:4453@eth1")
+                .finalize();
 
-            cfg.config_item("bind 0.0.0.0:4453@eth1");
+            assert_eq!(cfg.binds_tcp.len(), 1);
+
+            let bind = cfg.binds_tcp.get(0).unwrap();
+
+            assert_eq!(bind.sock_addr, "0.0.0.0:4453".parse().unwrap());
+
+            assert_eq!(bind.device, Some("eth1".to_string()));
+        }
+
+        #[test]
+        fn test_config_bind_with_device() {
+            let cfg = SmartDnsConfig::new()
+                .with("bind 0.0.0.0:4453@eth1")
+                .with("bind 0.0.0.0:4453@eth1")
+                .finalize();
+
+            assert_eq!(cfg.binds.len(), 1);
 
             let bind = cfg.binds.get(0).unwrap();
 

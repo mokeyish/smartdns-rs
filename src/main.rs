@@ -156,7 +156,7 @@ impl Cli {
 fn run_server(conf: Option<PathBuf>) {
     hello_starting();
 
-    let cfg = Arc::new(SmartDnsConfig::load(conf));
+    let cfg = SmartDnsConfig::load(conf);
 
     let _guard = if cfg.log_enabled() {
         Some(log::init_global_default(
