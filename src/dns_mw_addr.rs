@@ -46,12 +46,15 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
         match res {
             Ok(mut lookup) => Ok({
                 if let Some(max_reply_ip_num) = ctx.cfg().max_reply_ip_num() {
-                    let records = &lookup.records()[0..max_reply_ip_num as usize];
-                    lookup = Lookup::new_with_deadline(
-                        lookup.query().clone(),
-                        records.to_vec().into(),
-                        lookup.valid_until(),
-                    )
+                    let max_reply_ip_num = max_reply_ip_num as usize;
+                    if lookup.records().len() > max_reply_ip_num {
+                        let records = &lookup.records()[0..max_reply_ip_num];
+                        lookup = Lookup::new_with_deadline(
+                            lookup.query().clone(),
+                            records.to_vec().into(),
+                            lookup.valid_until(),
+                        )
+                    }
                 }
 
                 if let Some(rr_ttl_reply_max) = ctx.cfg().rr_ttl_reply_max() {
