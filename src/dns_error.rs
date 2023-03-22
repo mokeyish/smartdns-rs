@@ -1,7 +1,10 @@
 use std::{io, sync::Arc};
 use thiserror::Error;
 use trust_dns_proto::{error::ProtoError, op::ResponseCode};
-use trust_dns_resolver::error::{ResolveError, ResolveErrorKind};
+use trust_dns_resolver::{
+    error::{ResolveError, ResolveErrorKind},
+    lookup::Lookup,
+};
 
 #[allow(clippy::large_enum_variant)]
 /// A query could not be fulfilled
@@ -30,6 +33,23 @@ pub enum LookupError {
 impl LookupError {
     pub fn is_nx_domain(&self) -> bool {
         matches!(self, Self::ResponseCode(resc) if resc.eq(&ResponseCode::NXDomain))
+    }
+
+    pub fn as_soa(&self) -> Option<Lookup> {
+        if let Self::ResolveError(err) = self {
+            if let ResolveErrorKind::NoRecordsFound {
+                query,
+                soa: Some(record),
+                ..
+            } = err.kind()
+            {
+                return Some(Lookup::new_with_max_ttl(
+                    query.as_ref().to_owned(),
+                    vec![record.as_ref().to_owned()].into(),
+                ));
+            }
+        }
+        None
     }
 }
 

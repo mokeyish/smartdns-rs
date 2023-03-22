@@ -266,8 +266,16 @@ async fn send_forwarded_response(
                 if e.is_nx_domain() {
                     response_header.set_response_code(ResponseCode::NXDomain);
                 }
-                debug!("error resolving: {}", e);
-                Box::new(EmptyLookup)
+
+                let res: Box<dyn LookupObject> = match e.as_soa() {
+                    Some(soa) => Box::new(ForwardLookup(soa)),
+                    None => {
+                        debug!("error resolving: {}", e);
+                        Box::new(EmptyLookup)
+                    }
+                };
+
+                res
             }
             Ok(rsp) => rsp,
         }
