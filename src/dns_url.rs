@@ -141,31 +141,34 @@ impl FromStr for DnsUrl {
             return Err(DnsUrlParseErr::HostUnspecified);
         }
 
-        let host = host.unwrap();
+        let mut host = host.unwrap().to_owned();
 
-        let enable_sni = url
-            .query_pairs()
-            .into_iter()
-            .filter_map(|q| {
-                if q.0 == "enable_sni" {
-                    bool::from_str(q.1.to_string().as_str()).ok()
+        let addr_port = port.unwrap_or_else(|| dns_proto_default_port(&proto));
+
+        let addrs = match host {
+            Host::Domain(ref domain) => {
+                if let Ok(ip) = IpAddr::from_str(domain) {
+                    host = match ip {
+                        IpAddr::V4(ip) => Host::Ipv4(ip),
+                        IpAddr::V6(ip) => Host::Ipv6(ip),
+                    };
+
+                    vec![SocketAddr::new(ip, addr_port)]
                 } else {
-                    None
+                    vec![]
                 }
-            })
-            .next();
-
-        let addrs = match &host {
-            Host::Domain(_) => vec![],
-            Host::Ipv4(ip) => vec![SocketAddr::new(
-                IpAddr::V4(*ip),
-                port.unwrap_or_else(|| dns_proto_default_port(&proto)),
-            )],
-            Host::Ipv6(ip) => vec![SocketAddr::new(
-                IpAddr::V6(*ip),
-                port.unwrap_or_else(|| dns_proto_default_port(&proto)),
-            )],
+            }
+            Host::Ipv4(ip) => vec![SocketAddr::new(IpAddr::V4(ip), addr_port)],
+            Host::Ipv6(ip) => vec![SocketAddr::new(IpAddr::V6(ip), addr_port)],
         };
+
+        let enable_sni = url.query_pairs().into_iter().find_map(|q| {
+            if q.0 == "enable_sni" {
+                bool::from_str(q.1.to_string().as_str()).ok()
+            } else {
+                None
+            }
+        });
 
         Ok(Self {
             proto,
@@ -263,6 +266,7 @@ mod tests {
         assert_eq!(url.port(), 53);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://8.8.8.8");
+        assert!(!url.addrs().is_empty());
     }
 
     #[test]
@@ -273,16 +277,18 @@ mod tests {
         assert_eq!(url.port(), 53);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://8.8.8.8");
+        assert!(!url.addrs().is_empty());
     }
 
     #[test]
     fn test_parse_udp_2() {
-        let url = DnsUrl::from_str("udp://8.8.8.8:8053").unwrap();
+        let url = DnsUrl::from_str("udp://1.1.1.1:8053").unwrap();
         assert_eq!(url.proto, Protocol::Udp);
-        assert_eq!(url.host.to_string(), "8.8.8.8");
+        assert_eq!(url.host.to_string(), "1.1.1.1");
         assert_eq!(url.port(), 8053);
         assert_eq!(url.path(), "");
-        assert_eq!(url.to_string(), "udp://8.8.8.8:8053");
+        assert_eq!(url.to_string(), "udp://1.1.1.1:8053");
+        assert!(!url.addrs().is_empty());
     }
 
     #[test]
@@ -351,6 +357,7 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
+        assert!(url.addrs().is_empty());
     }
 
     #[test]
@@ -361,6 +368,7 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query1");
         assert_eq!(url.to_string(), "https://dns.google/dns-query1");
+        assert!(url.addrs().is_empty());
     }
 
     #[test]
@@ -372,6 +380,7 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
+        assert!(url.addrs().is_empty());
     }
 
     #[test]
@@ -382,6 +391,7 @@ mod tests {
         assert_eq!(url.port(), 1053);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://127.0.0.1:1053");
+        assert!(!url.addrs().is_empty());
     }
 
     #[test]
@@ -392,17 +402,20 @@ mod tests {
         assert_eq!(url.port(), 53);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://[240e:1f:1::1]");
+        assert!(!url.addrs().is_empty());
     }
 
     #[test]
     fn test_parse_enable_sni_false() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
         assert_eq!(url.enable_sni(), false);
+        assert!(url.addrs().is_empty());
     }
 
     #[test]
     fn test_parse_enable_sni_true() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
         assert_eq!(url.enable_sni(), false);
+        assert!(url.addrs().is_empty());
     }
 }
