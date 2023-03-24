@@ -172,7 +172,7 @@ impl FromStr for DnsUrl {
 
         Ok(Self {
             proto,
-            host: host.to_owned(),
+            host,
             port,
             path: if url.path() == "/" && !is_endwith_slash {
                 None

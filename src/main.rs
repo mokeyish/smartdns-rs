@@ -191,9 +191,10 @@ fn run_server(conf: Option<PathBuf>) {
         if let Some(num_workers) = cfg.num_workers() {
             builder.worker_threads(num_workers);
         }
-        builder.thread_name("smartdns-runtime")
-        .build()
-        .expect("failed to initialize Tokio Runtime")
+        builder
+            .thread_name("smartdns-runtime")
+            .build()
+            .expect("failed to initialize Tokio Runtime")
     };
 
     // build handle pipeline.

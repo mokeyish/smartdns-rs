@@ -1575,10 +1575,51 @@ mod parse {
             self.domain_rule_map = domain_rule_map;
 
             // dedup bind address
-            self.binds.dedup_by(|a, b| a.sock_addr == b.sock_addr);
-            self.binds_tcp.dedup_by(|a, b| a.sock_addr == b.sock_addr);
-            self.binds_https.dedup_by(|a, b| a.sock_addr == b.sock_addr);
-            self.binds_tls.dedup_by(|a, b| a.sock_addr == b.sock_addr);
+            {
+                // priority: QUIC => UDP
+                let mut udp_addr = HashSet::new();
+                // priority: Https => TLS => TCP
+                let mut tcp_addr = HashSet::new();
+
+                fn dedup(addr_set: &mut HashSet<SocketAddr>, binds: &[BindServer]) -> Vec<usize> {
+                    let mut remove_idx = vec![];
+                    for (idx, bind) in binds.iter().enumerate().rev() {
+                        if !addr_set.insert(bind.sock_addr) {
+                            remove_idx.push(idx);
+                        }
+                    }
+                    remove_idx
+                }
+
+                // quic udp
+                for idx in dedup(&mut udp_addr, &self.binds_quic) {
+                    let bind = self.binds_quic.remove(idx);
+                    warn!("remove duplicated bind-quic {:?}", bind.sock_addr);
+                }
+
+                // udp
+                for idx in dedup(&mut udp_addr, &self.binds) {
+                    let bind = self.binds.remove(idx);
+                    warn!("remove duplicated bind-udp {:?}", bind.sock_addr);
+                }
+
+                // https tcp
+                for idx in dedup(&mut tcp_addr, &self.binds_https) {
+                    let bind = self.binds_https.remove(idx);
+                    warn!("remove duplicated bind-https {:?}", bind.sock_addr);
+                }
+                // tls tcp
+                for idx in dedup(&mut tcp_addr, &self.binds_tls) {
+                    let bind = self.binds_tls.remove(idx);
+                    warn!("remove duplicated bind-tls {:?}", bind.sock_addr);
+                }
+
+                // tcp
+                for idx in dedup(&mut tcp_addr, &self.binds_tcp) {
+                    let bind = self.binds_tcp.remove(idx);
+                    warn!("remove duplicated bind-tcp {:?}", bind.sock_addr);
+                }
+            }
 
             self.into()
         }
@@ -2044,16 +2085,13 @@ mod parse {
         fn test_config_binds_dedup() {
             let cfg = SmartDnsConfig::new()
                 .with("bind-tcp 0.0.0.0:4453@eth1")
-                .with("bind-tcp 0.0.0.0:4453@eth1")
+                .with("bind-tls 0.0.0.0:4452@eth1")
+                .with("bind-https 0.0.0.0:4453@eth1")
                 .finalize();
 
-            assert_eq!(cfg.binds_tcp.len(), 1);
-
-            let bind = cfg.binds_tcp.get(0).unwrap();
-
-            assert_eq!(bind.sock_addr, "0.0.0.0:4453".parse().unwrap());
-
-            assert_eq!(bind.device, Some("eth1".to_string()));
+            assert_eq!(cfg.binds_tcp.len(), 0);
+            assert_eq!(cfg.binds_tls.len(), 1);
+            assert_eq!(cfg.binds_https.len(), 1);
         }
 
         #[test]
