@@ -185,12 +185,16 @@ fn run_server(conf: Option<PathBuf>) {
         }
     };
 
-    let runtime = runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(4)
-        .thread_name("smartdns-runtime")
+    let runtime = {
+        let mut builder = runtime::Builder::new_multi_thread();
+        builder.enable_all();
+        if let Some(num_workers) = cfg.num_workers() {
+            builder.worker_threads(num_workers);
+        }
+        builder.thread_name("smartdns-runtime")
         .build()
-        .expect("failed to initialize Tokio Runtime");
+        .expect("failed to initialize Tokio Runtime")
+    };
 
     // build handle pipeline.
     let middleware = {
