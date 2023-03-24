@@ -32,6 +32,9 @@ pub struct SmartDnsConfig {
     /// ```
     server_name: Option<Name>,
 
+    /// The number of worker threads
+    num_workers: Option<usize>,
+
     /// whether resolv local hostname to ip address
     resolv_hostname: Option<bool>,
 
@@ -403,15 +406,24 @@ impl SmartDnsConfig {
         .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
     }
 
+    /// The number of worker threads
+    #[inline]
+    pub fn num_workers(&self) -> Option<usize> {
+        self.num_workers
+    }
+
     /// SSL Certificate file path
+    #[inline]
     pub fn bind_cert_file(&self) -> Option<&Path> {
         self.bind_cert_file.as_deref()
     }
     /// SSL Certificate key file path
+    #[inline]
     pub fn bind_cert_key_file(&self) -> Option<&Path> {
         self.bind_cert_key_file.as_deref()
     }
     /// bind_cert_key_pass
+    #[inline]
     pub fn bind_cert_key_pass(&self) -> Option<&str> {
         self.bind_cert_key_pass.as_deref()
     }
@@ -1618,6 +1630,7 @@ mod parse {
 
                     match conf_name {
                         "server-name" => self.server_name = options.parse().ok(),
+                        "num-workers" => self.num_workers = options.parse().ok(),
                         "resolv-hostname" => self.resolv_hostname = Some(parse_bool(options)),
                         "user" => self.user = Some(options.to_string()),
                         "domain" => self.domain = options.parse().ok(),

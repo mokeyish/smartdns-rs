@@ -24,6 +24,10 @@ The functions that have been completed are not guaranteed to be completely probl
 
   DNS server name，lookup by `dig whoami ptr`
 
+- [x] `num-worker ` （Draft）
+
+   The number of worker threads
+
 - [x] `bind` 
 
   UDP mode DNS listening port number
