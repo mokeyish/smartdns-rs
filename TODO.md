@@ -165,7 +165,7 @@ The functions that have been completed are not guaranteed to be completely probl
   proxy server
 
   - [x] `socks5`
-  - [ ] `http`
+  - [x] `http`
 
 - [x] `speed-check-mode
 
