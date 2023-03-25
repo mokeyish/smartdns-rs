@@ -186,7 +186,7 @@ pub struct SmartDnsConfig {
     ///   edns-client-subnet 192.168.1.1/24
     ///   edns-client-subnet 8::8/56
     /// ```
-    edns_client_subnet: Vec<IpNet>,
+    edns_client_subnet: Option<IpNet>,
 
     /// ttl for all resource record
     rr_ttl: Option<u64>,
@@ -555,8 +555,8 @@ impl SmartDnsConfig {
     }
     /// edns client subnet
     #[inline]
-    pub fn edns_client_subnet(&self) -> &Vec<IpNet> {
-        &self.edns_client_subnet
+    pub fn edns_client_subnet(&self) -> Option<IpNet> {
+        self.edns_client_subnet
     }
 
     /// ttl for all resource record
@@ -1751,11 +1751,7 @@ mod parse {
                         "dualstack-ip-selection" => {
                             self.dualstack_ip_selection = Some(parse_bool(options))
                         }
-                        "edns-client-subnet" => {
-                            if let Ok(v) = options.parse() {
-                                self.edns_client_subnet.push(v)
-                            }
-                        }
+                        "edns-client-subnet" => self.edns_client_subnet = options.parse().ok(),
                         "rr-ttl" => self.rr_ttl = options.parse().ok(),
                         "rr-ttl-min" => self.rr_ttl_min = options.parse().ok(),
                         "rr-ttl-max" => self.rr_ttl_max = options.parse().ok(),

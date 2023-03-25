@@ -185,7 +185,7 @@ The functions that have been completed are not guaranteed to be completely probl
 
   dns64 translation
 
-- [ ] `edns-client-subnet`
+- [x] `edns-client-subnet`
 
   DNS ECS
 
