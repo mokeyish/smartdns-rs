@@ -131,6 +131,7 @@ impl FromStr for DnsUrl {
             "tcp" => Protocol::Tcp,
             "tls" => Protocol::Tls,
             "https" => Protocol::Https,
+            "quic" => Protocol::Quic,
             schema => return Err(DnsUrlParseErr::ProtocolNotSupport(schema.to_string())),
         };
 
@@ -193,6 +194,7 @@ impl ToString for DnsUrl {
                 Protocol::Tcp => format!("tcp://{}", self.host),
                 Protocol::Tls => format!("tls://{}", self.host),
                 Protocol::Https => format!("https://{}{}", self.host, self.path()),
+                Protocol::Quic => format!("quic://{}", self.host),
                 _ => todo!(),
             }
         } else {
@@ -201,6 +203,7 @@ impl ToString for DnsUrl {
                 Protocol::Tcp => format!("tcp://{}:{}", self.host, self.port()),
                 Protocol::Tls => format!("tls://{}:{}", self.host, self.port()),
                 Protocol::Https => format!("https://{}:{}{}", self.host, self.port(), self.path()),
+                Protocol::Quic => format!("quic://{}:{}", self.host, self.port()),
                 _ => todo!(),
             }
         }
@@ -244,6 +247,7 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
         Tcp => 53,
         Tls => 853,
         Https => 443,
+        Quic => 443,
         #[cfg(feature = "mdns")]
         #[cfg_attr(docsrs, doc(cfg(feature = "mdns")))]
         Mdns => 5353,
@@ -380,6 +384,18 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
+        assert!(url.addrs().is_empty());
+    }
+
+    #[test]
+    fn test_parse_quic() {
+        let url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
+
+        assert_eq!(url.proto, Protocol::Quic);
+        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.port(), 443);
+        assert_eq!(url.path(), "");
+        assert_eq!(url.to_string(), "quic://dns.adguard-dns.com");
         assert!(url.addrs().is_empty());
     }
 

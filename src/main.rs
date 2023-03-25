@@ -243,26 +243,9 @@ fn run_server(conf: Option<PathBuf>) {
             middleware_builder = middleware_builder.with(DnsBogusMiddleware);
         }
 
-        middleware_builder = middleware_builder.with(NameServerMiddleware::new({
-            let servers = cfg.servers().clone();
-            let ca_path = cfg.ca_path();
-            let ca_file = cfg.ca_file();
-            let proxies = cfg.proxies().clone();
-
-            runtime.block_on(async move {
-                let mut builder = DnsClient::builder();
-                builder = builder
-                    .add_servers(servers.values().flat_map(|s| s.clone()).collect::<Vec<_>>());
-                if let Some(path) = ca_path {
-                    builder = builder.with_ca_path(path.to_owned());
-                }
-                if let Some(file) = ca_file {
-                    builder = builder.with_ca_path(file.to_owned());
-                }
-                builder = builder.with_proxies(proxies);
-                builder.build().await
-            })
-        }));
+        middleware_builder = middleware_builder.with(NameServerMiddleware::new(
+            runtime.block_on(cfg.create_dns_client()),
+        ));
 
         Arc::new(middleware_builder.build(cfg.clone()))
     };
@@ -555,6 +538,26 @@ fn serve_quic(
 #[inline]
 fn hello_starting() {
     info!("Smart-DNS 🐋 {} starting", version());
+}
+
+impl SmartDnsConfig {
+    pub async fn create_dns_client(&self) -> DnsClient {
+        let servers = self.servers().clone();
+        let ca_path = self.ca_path();
+        let ca_file = self.ca_file();
+        let proxies = self.proxies().clone();
+
+        let mut builder = DnsClient::builder();
+        builder = builder.add_servers(servers.values().flat_map(|s| s.clone()).collect::<Vec<_>>());
+        if let Some(path) = ca_path {
+            builder = builder.with_ca_path(path.to_owned());
+        }
+        if let Some(file) = ca_file {
+            builder = builder.with_ca_path(file.to_owned());
+        }
+        builder = builder.with_proxies(proxies);
+        builder.build().await
+    }
 }
 
 mod signal {

@@ -9,6 +9,7 @@ use std::{
 
 use rustls::ClientConfig;
 use tokio::sync::RwLock;
+use trust_dns_proto::rr::rdata::opt::{ClientSubnet, EdnsOption};
 
 use crate::{
     proxy::ProxyConfig,
@@ -404,9 +405,13 @@ impl GenericResolver for DnsClient {
     }
 
     #[inline]
-    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+    async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
+        &self,
+        name: N,
+        options: O,
+    ) -> Result<Lookup, LookupError> {
         let ns = self.default().await;
-        GenericResolver::lookup(ns.as_ref(), name, record_type).await
+        GenericResolver::lookup(ns.as_ref(), name, options).await
     }
 }
 
@@ -523,12 +528,17 @@ impl GenericResolver for NameServerGroup {
         &self.resolver_opts
     }
 
-    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+    async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
+        &self,
+        name: N,
+        options: O,
+    ) -> Result<Lookup, LookupError> {
         use futures_util::future::select_all;
+        let name = name.into_name()?;
         let mut tasks = self
             .servers
             .iter()
-            .map(|ns| GenericResolver::lookup(ns, name.clone(), record_type))
+            .map(|ns| GenericResolver::lookup(ns, name.clone(), options.clone()))
             .collect::<Vec<_>>();
 
         loop {
@@ -620,6 +630,20 @@ impl NameServer {
                     })),
                 })
                 .collect::<Vec<_>>(),
+            Quic => sock_addrs
+                .map(|addr| NameServerConfig {
+                    socket_addr: addr,
+                    protocol: Protocol::Quic,
+                    tls_dns_name: Some(tls_dns_name.clone()),
+                    trust_negative_responses: true,
+                    bind_addr: None,
+                    tls_config: Some(TlsClientConfig(if url.enable_sni() {
+                        tls_client_config_sni_on.clone()
+                    } else {
+                        tls_client_config_sni_off.clone()
+                    })),
+                })
+                .collect::<Vec<_>>(),
             Protocol::Tls => sock_addrs
                 .map(|addr| NameServerConfig {
                     socket_addr: addr,
@@ -646,7 +670,14 @@ impl GenericResolver for NameServer {
         &self.opts
     }
 
-    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+    async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
+        &self,
+        name: N,
+        options: O,
+    ) -> Result<Lookup, LookupError> {
+        let name = name.into_name()?;
+        let options: LookupOptions = options.into();
+
         let request_options = {
             let opts = &self.options();
             let mut request_opts = DnsRequestOptions::default();
@@ -655,9 +686,12 @@ impl GenericResolver for NameServer {
             request_opts
         };
 
-        let query = Query::query(name, record_type);
+        let query = Query::query(name, options.record_type);
 
-        let req = DnsRequest::new(build_message(query, request_options), request_options);
+        let req = DnsRequest::new(
+            build_message(query, request_options, options.client_subnet),
+            request_options,
+        );
 
         let mut ns = self.inner.clone();
 
@@ -738,7 +772,11 @@ pub trait GenericResolver {
     /// # Returns
     ///
     ///  A future for the returned Lookup RData
-    async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError>;
+    async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
+        &self,
+        name: N,
+        options: O,
+    ) -> Result<Lookup, LookupError>;
 }
 
 #[async_trait::async_trait]
@@ -874,11 +912,39 @@ impl std::convert::TryFrom<DnsUrl> for VerifiedDnsUrl {
     }
 }
 
+#[derive(Clone)]
+pub struct LookupOptions {
+    pub record_type: RecordType,
+    pub client_subnet: Option<ClientSubnet>,
+}
+
+impl Default for LookupOptions {
+    fn default() -> Self {
+        Self {
+            record_type: RecordType::A,
+            client_subnet: Default::default(),
+        }
+    }
+}
+
+impl From<RecordType> for LookupOptions {
+    fn from(record_type: RecordType) -> Self {
+        Self {
+            record_type,
+            ..Default::default()
+        }
+    }
+}
+
 /// > An EDNS buffer size of 1232 bytes will avoid fragmentation on nearly all current networks.
 /// https://dnsflagday.net/2020/
 const MAX_PAYLOAD_LEN: u16 = 1232;
 
-fn build_message(query: Query, options: DnsRequestOptions) -> Message {
+fn build_message(
+    query: Query,
+    request_options: DnsRequestOptions,
+    client_subnet: Option<ClientSubnet>,
+) -> Message {
     // build the message
     let mut message: Message = Message::new();
     // TODO: This is not the final ID, it's actually set in the poll method of DNS future
@@ -889,15 +955,19 @@ fn build_message(query: Query, options: DnsRequestOptions) -> Message {
         .set_id(id)
         .set_message_type(MessageType::Query)
         .set_op_code(OpCode::Query)
-        .set_recursion_desired(options.recursion_desired);
+        .set_recursion_desired(request_options.recursion_desired);
 
     // Extended dns
-    if options.use_edns {
+    if client_subnet.is_some() || request_options.use_edns {
         message
             .extensions_mut()
             .get_or_insert_with(Edns::new)
             .set_max_payload(MAX_PAYLOAD_LEN)
             .set_version(0);
+
+        if let (Some(client_subnet), Some(edns)) = (client_subnet, message.extensions_mut()) {
+            edns.options_mut().insert(EdnsOption::Subnet(client_subnet));
+        }
     }
     message
 }
@@ -1158,12 +1228,19 @@ mod bootstrap {
         }
 
         #[inline]
-        async fn lookup(&self, name: Name, record_type: RecordType) -> Result<Lookup, LookupError> {
+        async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
+            &self,
+            name: N,
+            options: O,
+        ) -> Result<Lookup, LookupError> {
+            let name = name.into_name()?;
+            let options: LookupOptions = options.into();
+            let record_type = options.record_type;
             if let Some(lookup) = self.local_lookup(name.clone(), record_type).await {
                 return Ok(lookup);
             }
 
-            match GenericResolver::lookup(self.resolver.as_ref(), name.clone(), record_type).await {
+            match GenericResolver::lookup(self.resolver.as_ref(), name.clone(), options).await {
                 Ok(lookup) => {
                     let records = lookup.records().to_vec();
 
@@ -1231,7 +1308,7 @@ mod tests {
             .block_on(async {
                 let client = DnsClient::builder().build().await;
                 let lookup_ip = client
-                    .lookup("dns.alidns.com".parse().unwrap(), RecordType::A)
+                    .lookup("dns.alidns.com", RecordType::A)
                     .await
                     .unwrap();
                 assert!(lookup_ip
@@ -1413,6 +1490,29 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let client = DnsClient::builder().add_server(dns_url).build().await;
 
+            assert_google(&client).await;
+            assert_alidns(&client).await;
+        })
+    }
+
+    #[test]
+    fn test_nameserver_adguard_https_resolve() {
+        let dns_url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query").unwrap();
+
+        Runtime::new().unwrap().block_on(async {
+            let client = DnsClient::builder().add_server(dns_url).build().await;
+            assert_google(&client).await;
+            assert_alidns(&client).await;
+        })
+    }
+
+    #[test]
+    #[ignore = "not available now"]
+    fn test_nameserver_adguard_quic_resolve() {
+        let dns_url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
+
+        Runtime::new().unwrap().block_on(async {
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })

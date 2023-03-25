@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::{borrow::Borrow, net::IpAddr, pin::Pin, time::Duration};
 
-use crate::dns_client::NameServer;
+use crate::dns_client::{LookupOptions, NameServer};
 use crate::dns_conf::SpeedCheckModeList;
 use crate::infra::ipset::IpSet;
 use crate::{
@@ -83,9 +83,14 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             return Ok(lookup);
         }
 
+        let lookup_options = LookupOptions {
+            record_type: rtype,
+            client_subnet: ctx.cfg().edns_client_subnet().map(|subnet| subnet.into()),
+        };
+
         // skip nameserver rule
         if ctx.server_opts.no_rule_nameserver() {
-            return client.lookup(name.clone(), rtype).await;
+            return client.lookup(name.clone(), lookup_options).await;
         }
 
         let (group_name, name_server_group) = match self.get_name_server_group(ctx).await {
@@ -120,6 +125,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     ignore_ip: cfg.ignore_ip().clone(),
                     blacklist_ip: cfg.blacklist_ip().clone(),
                     whitelist_ip: cfg.whitelist_ip().clone(),
+                    lookup_options,
                 },
                 None => LookupIpOptions {
                     response_strategy: cfg.response_mode(),
@@ -128,6 +134,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     ignore_ip: cfg.ignore_ip().clone(),
                     blacklist_ip: cfg.blacklist_ip().clone(),
                     whitelist_ip: cfg.whitelist_ip().clone(),
+                    lookup_options,
                 },
             };
 
@@ -135,12 +142,12 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                 opts.response_strategy = ResponseMode::FastestIp;
             }
 
-            match lookup_ip(name_server_group.deref(), name.clone(), rtype, &opts).await {
+            match lookup_ip(name_server_group.deref(), name.clone(), &opts).await {
                 Ok(lookup_ip) => Ok(lookup_ip.into()),
                 Err(err) => Err(err),
             }
         } else {
-            name_server_group.lookup(name.clone(), rtype).await
+            name_server_group.lookup(name.clone(), lookup_options).await
         }
     }
 }
@@ -152,22 +159,45 @@ struct LookupIpOptions {
     ignore_ip: Arc<IpSet>,
     whitelist_ip: Arc<IpSet>,
     blacklist_ip: Arc<IpSet>,
+    lookup_options: LookupOptions,
+}
+
+impl Deref for LookupIpOptions {
+    type Target = LookupOptions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.lookup_options
+    }
+}
+
+impl From<LookupIpOptions> for LookupOptions {
+    fn from(value: LookupIpOptions) -> Self {
+        value.lookup_options
+    }
+}
+
+impl From<&LookupIpOptions> for LookupOptions {
+    fn from(value: &LookupIpOptions) -> Self {
+        value.lookup_options.clone()
+    }
 }
 
 async fn lookup_ip(
     server: &NameServerGroup,
     name: Name,
-    record_type: RecordType,
     options: &LookupIpOptions,
 ) -> Result<LookupIp, LookupError> {
     use crate::third_ext::FutureJoinAllExt;
     use futures_util::future::{select_all, select_ok};
 
-    assert!(matches!(record_type, RecordType::A | RecordType::AAAA));
+    assert!(matches!(
+        options.record_type,
+        RecordType::A | RecordType::AAAA
+    ));
 
     let mut tasks = server
         .iter()
-        .map(|ns| per_nameserver_lookup_ip(ns, name.clone(), record_type, options).boxed())
+        .map(|ns| per_nameserver_lookup_ip(ns, name.clone(), options).boxed())
         .collect::<Vec<_>>();
 
     if tasks.is_empty() {
@@ -363,12 +393,14 @@ async fn lookup_ip(
 async fn per_nameserver_lookup_ip(
     server: &NameServer,
     name: Name,
-    record_type: RecordType,
     options: &LookupIpOptions,
 ) -> Result<LookupIp, LookupError> {
-    assert!(matches!(record_type, RecordType::A | RecordType::AAAA));
+    assert!(matches!(
+        options.lookup_options.record_type,
+        RecordType::A | RecordType::AAAA
+    ));
 
-    let res = server.lookup(name.clone(), record_type).await;
+    let res = server.lookup(name.clone(), options).await;
 
     let ns_opts = server.options();
     let whitelist_on = ns_opts.whitelist_ip;
@@ -426,5 +458,91 @@ async fn per_nameserver_lookup_ip(
             Ok(Lookup::new_with_max_ttl(query, records.into()).into())
         }
         Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use trust_dns_proto::rr::rdata::opt::ClientSubnet;
+
+    use super::*;
+    use crate::{dns_conf::SmartDnsConfig, third_ext::FutureJoinAllExt};
+
+    #[test]
+    fn test_edns_client_subnet() {
+        async fn inner_test() -> bool {
+            // https://lite.ip2location.com/ip-address-ranges-by-country
+
+            let cfg = SmartDnsConfig::new()
+                .with("server https://223.5.5.5/dns-query")
+                .finalize();
+
+            let domain = "cdn.jsdelivr.net";
+
+            let client = cfg.create_dns_client().await;
+
+            let subnets = ["113.65.29.0/24", "103.225.87.0/24", "113.65.29.0/24"];
+
+            let results = subnets
+                .into_iter()
+                .map(|subnet| {
+                    client.lookup(
+                        domain,
+                        LookupOptions {
+                            record_type: RecordType::A,
+                            client_subnet: Some(ClientSubnet::from_str(subnet).unwrap()),
+                        },
+                    )
+                })
+                .join_all()
+                .await
+                .into_iter()
+                .flatten()
+                .map(|lookup| {
+                    let mut ips = lookup
+                        .iter()
+                        .flat_map(|r| r.to_ip_addr())
+                        .collect::<Vec<_>>();
+                    ips.sort();
+                    ips
+                })
+                .collect::<Vec<_>>();
+
+            let t1 = results[0].clone();
+            let t2 = results[1].clone();
+            let t3 = results[2].clone();
+            t1 == t3 && t1 != t2
+        }
+
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                use futures_util::future::select_all;
+                let mut success = false;
+                let mut tasks = (0..10)
+                    .into_iter()
+                    .map(|_| inner_test().boxed())
+                    .collect::<Vec<_>>();
+
+                loop {
+                    let (res, _idx, rest) = select_all(tasks).await;
+
+                    if res {
+                        success = res;
+                        break;
+                    }
+
+                    if rest.is_empty() {
+                        break;
+                    }
+
+                    tasks = rest;
+                }
+                assert!(success);
+            });
     }
 }
