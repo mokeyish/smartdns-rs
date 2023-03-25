@@ -885,11 +885,9 @@ fn build_message(
 }
 
 mod connection_provider {
-    use fast_socks5::client::Socks5Stream;
     use futures::Future;
     use std::io;
     use std::pin::Pin;
-    use tokio::net::TcpStream as TokioTcpStream;
     use tokio::net::UdpSocket as TokioUdpSocket;
     use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
 
@@ -898,6 +896,7 @@ mod connection_provider {
     use trust_dns_proto::TokioTime;
     use trust_dns_resolver::{name_server::RuntimeProvider, TokioHandle};
 
+    use crate::proxy;
     use crate::proxy::ProxyConfig;
 
     /// The Tokio Runtime for async execution
@@ -920,7 +919,7 @@ mod connection_provider {
         type Handle = TokioHandle;
         type Timer = TokioTime;
         type Udp = TokioUdpSocket;
-        type Tcp = AsyncIoTokioAsStd<TcpStream>;
+        type Tcp = AsyncIoTokioAsStd<proxy::TcpStream>;
 
         fn create_handle(&self) -> Self::Handle {
             self.handle.clone()
@@ -930,46 +929,12 @@ mod connection_provider {
             &self,
             server_addr: SocketAddr,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Tcp>>>> {
-            let proxy = self.proxy.clone();
+            let proxy_config = self.proxy.clone();
 
             Box::pin(async move {
-                match proxy {
-                    Some(config) => match config {
-                        ProxyConfig::Socks(socks) => {
-                            let target_addr = server_addr.ip().to_string();
-                            let target_port = server_addr.port();
-
-                            let socks5stream = if socks.username.is_some() {
-                                Socks5Stream::connect_with_password(
-                                    socks.server,
-                                    target_addr,
-                                    target_port,
-                                    socks.username.unwrap(),
-                                    socks.password.unwrap(),
-                                    Default::default(),
-                                )
-                                .await
-                            } else {
-                                Socks5Stream::connect(
-                                    socks.server,
-                                    target_addr,
-                                    target_port,
-                                    Default::default(),
-                                )
-                                .await
-                            };
-
-                            socks5stream
-                                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
-                                .map(TcpStream::Proxy)
-                                .map(AsyncIoTokioAsStd)
-                        }
-                    },
-                    None => TokioTcpStream::connect(server_addr)
-                        .await
-                        .map(TcpStream::Tokio)
-                        .map(AsyncIoTokioAsStd),
-                }
+                proxy::connect_tcp(server_addr, proxy_config.as_ref())
+                    .await
+                    .map(AsyncIoTokioAsStd)
             })
         }
 
@@ -979,57 +944,6 @@ mod connection_provider {
             _server_addr: SocketAddr,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Udp>>>> {
             Box::pin(tokio::net::UdpSocket::bind(local_addr))
-        }
-    }
-
-    pub enum TcpStream {
-        Tokio(TokioTcpStream),
-        Proxy(Socks5Stream<TokioTcpStream>),
-    }
-
-    impl tokio::io::AsyncRead for TcpStream {
-        fn poll_read(
-            self: Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> std::task::Poll<io::Result<()>> {
-            match self.get_mut() {
-                TcpStream::Tokio(s) => Pin::new(s).poll_read(cx, buf),
-                TcpStream::Proxy(s) => Pin::new(s).poll_read(cx, buf),
-            }
-        }
-    }
-
-    impl tokio::io::AsyncWrite for TcpStream {
-        fn poll_write(
-            self: Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &[u8],
-        ) -> std::task::Poll<Result<usize, io::Error>> {
-            match self.get_mut() {
-                TcpStream::Tokio(s) => Pin::new(s).poll_write(cx, buf),
-                TcpStream::Proxy(s) => Pin::new(s).poll_write(cx, buf),
-            }
-        }
-
-        fn poll_flush(
-            self: Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), io::Error>> {
-            match self.get_mut() {
-                TcpStream::Tokio(s) => Pin::new(s).poll_flush(cx),
-                TcpStream::Proxy(s) => Pin::new(s).poll_flush(cx),
-            }
-        }
-
-        fn poll_shutdown(
-            self: Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> std::task::Poll<Result<(), io::Error>> {
-            match self.get_mut() {
-                TcpStream::Tokio(s) => Pin::new(s).poll_shutdown(cx),
-                TcpStream::Proxy(s) => Pin::new(s).poll_shutdown(cx),
-            }
         }
     }
 }
