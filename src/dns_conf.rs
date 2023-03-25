@@ -1786,7 +1786,7 @@ mod parse {
                         }
                         "ca-file" => self.ca_file = Some(Path::new(options).to_owned()),
                         "ca-path" => self.ca_path = Some(Path::new(options).to_owned()),
-                        "server" | "server-tcp" | "server-tls" | "server-https" => {
+                        "server" | "server-tcp" | "server-tls" | "server-https" | "server-quic" => {
                             self.config_server(conf_name, options)
                         }
                         "nameserver" => self.config_nameserver(options),

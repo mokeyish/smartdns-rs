@@ -620,6 +620,20 @@ impl NameServer {
                     })),
                 })
                 .collect::<Vec<_>>(),
+            Quic => sock_addrs
+                .map(|addr| NameServerConfig {
+                    socket_addr: addr,
+                    protocol: Protocol::Quic,
+                    tls_dns_name: Some(tls_dns_name.clone()),
+                    trust_negative_responses: true,
+                    bind_addr: None,
+                    tls_config: Some(TlsClientConfig(if url.enable_sni() {
+                        tls_client_config_sni_on.clone()
+                    } else {
+                        tls_client_config_sni_off.clone()
+                    })),
+                })
+                .collect::<Vec<_>>(),
             Protocol::Tls => sock_addrs
                 .map(|addr| NameServerConfig {
                     socket_addr: addr,
@@ -1413,6 +1427,29 @@ mod tests {
         Runtime::new().unwrap().block_on(async {
             let client = DnsClient::builder().add_server(dns_url).build().await;
 
+            assert_google(&client).await;
+            assert_alidns(&client).await;
+        })
+    }
+
+    #[test]
+    fn test_nameserver_adguard_https_resolve() {
+        let dns_url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query").unwrap();
+
+        Runtime::new().unwrap().block_on(async {
+            let client = DnsClient::builder().add_server(dns_url).build().await;
+            assert_google(&client).await;
+            assert_alidns(&client).await;
+        })
+    }
+
+    #[test]
+    #[ignore = "not available now"]
+    fn test_nameserver_adguard_quic_resolve() {
+        let dns_url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
+
+        Runtime::new().unwrap().block_on(async {
+            let client = DnsClient::builder().add_server(dns_url).build().await;
             assert_google(&client).await;
             assert_alidns(&client).await;
         })

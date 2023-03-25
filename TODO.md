@@ -156,6 +156,10 @@ The functions that have been completed are not guaranteed to be completely probl
 
   Upstream HTTPS DNS server
 
+- [ ] `server-quic`
+
+   Upstream QUIC DNS server
+
 - [x] `proxy-server`
 
   proxy server
