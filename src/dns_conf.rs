@@ -14,7 +14,7 @@ use trust_dns_proto::rr::Name;
 
 use crate::dns::RecordType;
 use crate::dns_rule::{CNameRule, DomainRule, DomainRuleMap, DomainRuleTreeNode, ResponseMode};
-use crate::dns_url::DnsUrl;
+use crate::dns_url::{DnsUrl, DnsUrlParamExt};
 use crate::infra::file_mode::FileMode;
 use crate::infra::ipset::IpSet;
 use crate::log::{debug, error, info, warn};
@@ -1118,9 +1118,6 @@ pub struct NameServerInfo {
     /// use proxy to connect to server.
     pub proxy: Option<String>,
 
-    /// TLS SNI
-    pub host_name: Option<String>,
-
     /// set as bootstrap dns server
     pub bootstrap_dns: bool,
 
@@ -1133,38 +1130,49 @@ impl FromStr for NameServerInfo {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut parts = parse::split_options(s, ' ');
-        let mut server = None;
-        let mut exclude_default_group = false;
-        let mut group = None;
-        let mut blacklist_ip = false;
-        let mut whitelist_ip = false;
-        let mut check_edns = false;
-        let mut proxy = None;
-        let mut host_name = None;
-        let mut bootstrap_dns = false;
 
-        while let Some(part) = parts.next() {
-            if part.is_empty() {
-                continue;
-            }
-            if part.starts_with('-') {
-                match part {
-                    "-exclude-default-group" => exclude_default_group = true,
-                    "-blacklist-ip" => blacklist_ip = true,
-                    "-whitelist-ip" => whitelist_ip = true,
-                    "-check-edns" => check_edns = true,
-                    "-bootstrap-dns" => bootstrap_dns = true,
-                    "-group" => group = Some(parts.next().expect("group name").to_string()),
-                    "-proxy" => proxy = Some(parts.next().expect("proxy name").to_string()),
-                    "-host-name" => host_name = Some(parts.next().expect("proxy name").to_string()),
-                    _ => warn!("unknown server options {}", part),
+        if let Some(Ok(mut url)) = parts.next().map(DnsUrl::from_str) {
+            let mut exclude_default_group = false;
+            let mut group = None;
+            let mut blacklist_ip = false;
+            let mut whitelist_ip = false;
+            let mut check_edns = false;
+            let mut proxy = None;
+            let mut bootstrap_dns = false;
+
+            while let Some(part) = parts.next() {
+                if part.is_empty() {
+                    continue;
                 }
-            } else {
-                server = Some(part);
+                if part.starts_with('-') {
+                    match part {
+                        "-exclude-default-group" => exclude_default_group = true,
+                        "-blacklist-ip" => blacklist_ip = true,
+                        "-whitelist-ip" => whitelist_ip = true,
+                        "-check-edns" => check_edns = true,
+                        "-bootstrap-dns" => bootstrap_dns = true,
+                        "-group" => group = Some(parts.next().expect("group name").to_string()),
+                        "-proxy" => proxy = Some(parts.next().expect("proxy name").to_string()),
+                        "-host-name" | "-host-name:" => {
+                            if let Some(host_name) =
+                                Some(parts.next().expect("host name").to_string())
+                            {
+                                if host_name == "-" {
+                                    url.set_sni_off(true);
+                                } else {
+                                    url.set_host_name(&host_name);
+                                }
+                            }
+                        }
+                        "-no-check-certificate" => {
+                            url.set_ssl_verify(false);
+                        }
+                        _ => warn!("unknown server options {}", part),
+                    }
+                } else {
+                    warn!("ignore: {}", part);
+                }
             }
-        }
-
-        if let Some(Ok(url)) = server.map(DnsUrl::from_str) {
             Ok(Self {
                 url,
                 group,
@@ -1174,7 +1182,6 @@ impl FromStr for NameServerInfo {
                 bootstrap_dns,
                 check_edns,
                 proxy,
-                host_name,
                 resolve_group: None,
             })
         } else {
@@ -1194,7 +1201,6 @@ impl From<DnsUrl> for NameServerInfo {
             bootstrap_dns: false,
             check_edns: false,
             proxy: None,
-            host_name: None,
             resolve_group: None,
         }
     }
@@ -1622,7 +1628,7 @@ mod parse {
         }
 
         pub fn with(mut self, config: &str) -> Self {
-            self.config_item(config);
+            self.config(config);
             self
         }
 
@@ -1642,7 +1648,7 @@ mod parse {
                 let file = File::open(path)?;
                 let reader = BufReader::new(file);
                 for line in reader.lines() {
-                    self.config_item(line?.as_str());
+                    self.config(line?.as_str());
                 }
             } else {
                 warn!("configuration file {:?} does not exist", path);
@@ -1651,7 +1657,7 @@ mod parse {
             Ok(())
         }
 
-        fn config_item(&mut self, conf_line: &str) {
+        fn config(&mut self, conf_line: &str) {
             let mut conf_line = conf_line.trim_start();
 
             if let Some(line) = preline(conf_line) {
@@ -1804,9 +1810,20 @@ mod parse {
 
         #[inline]
         fn config_server(&mut self, typ: &str, options: &str) {
+            let options = options.trim_start();
             let server_options = match typ {
-                "server-tcp" => Some(["tcp://", options.trim_start()].concat()),
-                "server-tls" => Some(["tls://", options.trim_start()].concat()),
+                "server-tcp" if !options.starts_with("tcp://") => {
+                    Some(["tcp://", options].concat())
+                }
+                "server-tls" if !options.starts_with("tls://") => {
+                    Some(["tls://", options.trim_start()].concat())
+                }
+                "server-https" if !options.starts_with("https://") => {
+                    Some(["https://", options.trim_start()].concat())
+                }
+                "server-quic" if !options.starts_with("quic://") => {
+                    Some(["quic://", options.trim_start()].concat())
+                }
                 _ => None,
             };
 
@@ -2110,7 +2127,7 @@ mod parse {
         fn test_config_bind_with_device_flags() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("bind-https 0.0.0.0:443@eth2 -no-rule-addr");
+            cfg.config("bind-https 0.0.0.0:443@eth2 -no-rule-addr");
 
             let bind = cfg.binds_https.get(0).unwrap();
 
@@ -2124,7 +2141,7 @@ mod parse {
         fn test_config_bind_https() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item(
+            cfg.config(
                 "bind-https 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key",
             );
 
@@ -2153,7 +2170,7 @@ mod parse {
         fn test_config_server_0() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item(
+            cfg.config(
                 "server-https https://223.5.5.5/dns-query  -group bootstrap -exclude-default-group",
             );
 
@@ -2173,7 +2190,7 @@ mod parse {
             let mut cfg = SmartDnsConfig::new();
             assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
 
-            cfg.config_item("server-https https://223.5.5.5/dns-query");
+            cfg.config("server-https https://223.5.5.5/dns-query");
 
             assert_eq!(cfg.servers.len(), 1);
 
@@ -2190,7 +2207,7 @@ mod parse {
             let mut cfg = SmartDnsConfig::new();
             assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
 
-            cfg.config_item(
+            cfg.config(
                 "server-https https://223.5.5.5/dns-query  -bootstrap-dns -exclude-default-group",
             );
 
@@ -2207,10 +2224,32 @@ mod parse {
         }
 
         #[test]
+        fn test_config_tls_server() {
+            let mut cfg = SmartDnsConfig::new();
+            assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
+
+            cfg.config(
+                "server-tls 45.90.28.0 -host-name: dns.nextdns.io -tls-host-verify: dns.nextdns.io",
+            );
+
+            let servers = cfg.servers.get("default").unwrap();
+
+            assert_eq!(servers.len(), 1);
+
+            let server = servers.first().unwrap();
+
+            assert!(!server.exclude_default_group);
+            assert_eq!(server.url.proto(), &Protocol::Tls);
+            assert_eq!(server.url.to_string(), "tls://dns.nextdns.io");
+            assert_eq!(server.url.addrs(), &["45.90.28.0:853".parse().unwrap()]);
+            assert_eq!(server.url.domain(), Some("dns.nextdns.io"));
+        }
+
+        #[test]
         fn test_config_address_soa() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("address /test.example.com/#");
+            cfg.config("address /test.example.com/#");
 
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
@@ -2226,7 +2265,7 @@ mod parse {
         fn test_config_address_soa_v4() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("address /test.example.com/#4");
+            cfg.config("address /test.example.com/#4");
 
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
@@ -2242,7 +2281,7 @@ mod parse {
         fn test_config_address_soa_v6() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("address /test.example.com/#6");
+            cfg.config("address /test.example.com/#6");
 
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
@@ -2258,7 +2297,7 @@ mod parse {
         fn test_config_address_ignore() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("address /test.example.com/-");
+            cfg.config("address /test.example.com/-");
 
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
@@ -2274,7 +2313,7 @@ mod parse {
         fn test_config_address_ignore_v4() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("address /test.example.com/-4");
+            cfg.config("address /test.example.com/-4");
 
             let domain_addr_rule = cfg.address_rules.last().unwrap();
 
@@ -2290,7 +2329,7 @@ mod parse {
         fn test_config_address_ignore_v6() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("address /test.example.com/-6");
+            cfg.config("address /test.example.com/-6");
 
             let domain_addr_rule = cfg.address_rules.first().unwrap();
 
@@ -2306,7 +2345,7 @@ mod parse {
         fn test_config_nameserver() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("nameserver /doh.pub/bootstrap");
+            cfg.config("nameserver /doh.pub/bootstrap");
 
             let nameserver_rule = cfg.forward_rules.first().unwrap();
 
@@ -2322,7 +2361,7 @@ mod parse {
         fn test_config_domain_rule() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("domain-rule /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
+            cfg.config("domain-rule /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
             let domain_rule = cfg.domain_rules.first().unwrap();
 
@@ -2343,7 +2382,7 @@ mod parse {
         fn test_config_domain_rule_2() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("domain-rules /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
+            cfg.config("domain-rules /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
             let domain_rule = cfg.domain_rules.first().unwrap();
 
@@ -2364,16 +2403,16 @@ mod parse {
         fn test_parse_config_log_file_mode() {
             let mut cfg = SmartDnsConfig::new();
 
-            cfg.config_item("log-file-mode 644");
+            cfg.config("log-file-mode 644");
             assert_eq!(cfg.log_file_mode, Some(0o644u32.into()));
-            cfg.config_item("log-file-mode 0o755");
+            cfg.config("log-file-mode 0o755");
             assert_eq!(cfg.log_file_mode, Some(0o755u32.into()));
         }
 
         #[test]
         fn test_parse_config_speed_check_mode() {
             let mut cfg = SmartDnsConfig::new();
-            cfg.config_item("speed-check-mode ping,tcp:123");
+            cfg.config("speed-check-mode ping,tcp:123");
 
             assert_eq!(cfg.speed_check_mode.len(), 2);
 
@@ -2387,7 +2426,7 @@ mod parse {
         #[test]
         fn test_parse_config_speed_check_mode_https_omit_port() {
             let mut cfg = SmartDnsConfig::new();
-            cfg.config_item("speed-check-mode http,https");
+            cfg.config("speed-check-mode http,https");
 
             assert_eq!(cfg.speed_check_mode.len(), 2);
 
@@ -2405,7 +2444,7 @@ mod parse {
         fn test_parse_config_audit_size_1() {
             use byte_unit::n_mb_bytes;
             let mut cfg = SmartDnsConfig::new();
-            cfg.config_item("audit-size 80mb");
+            cfg.config("audit-size 80mb");
             assert_eq!(cfg.audit_size, Some(n_mb_bytes(80) as u64));
         }
 
@@ -2413,7 +2452,7 @@ mod parse {
         fn test_parse_config_audit_size_2() {
             use byte_unit::n_gb_bytes;
             let mut cfg = SmartDnsConfig::new();
-            cfg.config_item("audit-size 30 gb");
+            cfg.config("audit-size 30 gb");
             assert_eq!(cfg.audit_size, Some(n_gb_bytes(30) as u64));
         }
 
@@ -2432,7 +2471,7 @@ mod parse {
         #[test]
         fn test_parse_config_proxy_server() {
             let mut cfg = SmartDnsConfig::new();
-            cfg.config_item("proxy-server socks5://127.0.0.1:1080 -n abc");
+            cfg.config("proxy-server socks5://127.0.0.1:1080 -n abc");
 
             assert_eq!(
                 cfg.proxy_servers.get("abc").map(|s| s.to_string()),

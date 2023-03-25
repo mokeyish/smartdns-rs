@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::net::SocketAddr;
 use std::string::ToString;
@@ -19,9 +20,9 @@ pub struct DnsUrl {
     host: Host,
     port: Option<u16>,
     path: Option<String>,
-
     addrs: Vec<SocketAddr>,
-    enable_sni: Option<bool>,
+
+    params: BTreeMap<String, String>,
 }
 
 impl DnsUrl {
@@ -64,10 +65,6 @@ impl DnsUrl {
         }
     }
 
-    pub fn enable_sni(&self) -> bool {
-        self.enable_sni.unwrap_or(true)
-    }
-
     pub fn set_ip_addrs(&mut self, addrs: Vec<IpAddr>) {
         self.addrs = addrs
             .into_iter()
@@ -77,10 +74,6 @@ impl DnsUrl {
 
     pub fn set_host_name(&mut self, name: &str) {
         self.host = Host::Domain(name.to_string())
-    }
-
-    pub fn set_sni_verify(&mut self, verify: bool) {
-        self.enable_sni = Some(verify)
     }
 }
 
@@ -98,7 +91,7 @@ impl PartialEq for DnsUrl {
             && self.port == other.port
             && self.path == other.path
             && self.addrs == other.addrs
-            && self.enable_sni == other.enable_sni
+            && self.params() == other.params()
     }
 }
 
@@ -109,7 +102,7 @@ impl Hash for DnsUrl {
         self.port.hash(state);
         self.path.hash(state);
         self.addrs.hash(state);
-        self.enable_sni.hash(state);
+        self.params.hash(state);
     }
 }
 
@@ -163,13 +156,11 @@ impl FromStr for DnsUrl {
             Host::Ipv6(ip) => vec![SocketAddr::new(IpAddr::V6(ip), addr_port)],
         };
 
-        let enable_sni = url.query_pairs().into_iter().find_map(|q| {
-            if q.0 == "enable_sni" {
-                bool::from_str(q.1.to_string().as_str()).ok()
-            } else {
-                None
-            }
-        });
+        let params = url
+            .query_pairs()
+            .into_iter()
+            .map(|(n, v)| (n.into_owned(), v.into_owned()))
+            .collect::<BTreeMap<_, _>>();
 
         Ok(Self {
             proto,
@@ -181,32 +172,51 @@ impl FromStr for DnsUrl {
                 Some(url.path().to_string())
             },
             addrs,
-            enable_sni,
+            params,
         })
     }
 }
 
 impl ToString for DnsUrl {
     fn to_string(&self) -> String {
-        if self.is_default_port() {
-            match self.proto {
-                Protocol::Udp => format!("udp://{}", self.host),
-                Protocol::Tcp => format!("tcp://{}", self.host),
-                Protocol::Tls => format!("tls://{}", self.host),
-                Protocol::Https => format!("https://{}{}", self.host, self.path()),
-                Protocol::Quic => format!("quic://{}", self.host),
-                _ => todo!(),
-            }
-        } else {
-            match self.proto {
-                Protocol::Udp => format!("udp://{}:{}", self.host, self.port()),
-                Protocol::Tcp => format!("tcp://{}:{}", self.host, self.port()),
-                Protocol::Tls => format!("tls://{}:{}", self.host, self.port()),
-                Protocol::Https => format!("https://{}:{}{}", self.host, self.port(), self.path()),
-                Protocol::Quic => format!("quic://{}:{}", self.host, self.port()),
-                _ => todo!(),
+        let mut out = String::new();
+
+        // schema
+        out += match self.proto {
+            Protocol::Udp => "udp://",
+            Protocol::Tcp => "tcp://",
+            Protocol::Tls => "tls://",
+            Protocol::Https => "https://",
+            Protocol::Quic => "quic://",
+            _ => todo!(),
+        };
+
+        // host
+        out += &self.host().to_string();
+
+        // port
+
+        if !self.is_default_port() {
+            out.push(':');
+            out += &self.port().to_string();
+        }
+
+        // path
+        if matches!(self.proto, Protocol::Https) {
+            out += self.path();
+        }
+
+        // query
+        if !self.params.is_empty() {
+            for (i, (n, v)) in self.params.iter().enumerate() {
+                out.push(if i == 0 { '?' } else { '&' });
+                out.push_str(n);
+                out.push('=');
+                out.push_str(v);
             }
         }
+
+        out
     }
 }
 
@@ -254,6 +264,63 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
         _ => todo!(),
     }
 }
+
+pub trait DnsUrlParam {
+    fn params(&self) -> &BTreeMap<String, String>;
+    fn get_param<T: Default + FromStr>(&self, name: &str) -> Option<T>;
+
+    fn get_param_or_default<T: Default + FromStr>(&self, name: &str) -> T {
+        self.get_param(name).unwrap_or_default()
+    }
+
+    fn set_param<T: ToString>(&mut self, name: &str, value: T);
+}
+
+impl DnsUrlParam for DnsUrl {
+    fn params(&self) -> &BTreeMap<String, String> {
+        &self.params
+    }
+
+    fn get_param<T: Default + FromStr>(&self, name: &str) -> Option<T> {
+        self.params
+            .get(name)
+            .map(|v| T::from_str(v).unwrap_or_default())
+    }
+
+    fn set_param<T: ToString>(&mut self, name: &str, value: T) {
+        *(self.params.entry(name.to_string()).or_default()) = value.to_string()
+    }
+}
+
+pub trait DnsUrlParamExt: DnsUrlParam {
+    fn set_sni_on(&mut self, value: bool) {
+        self.set_param("sni", value)
+    }
+    fn set_sni_off(&mut self, value: bool) {
+        self.set_param("sni", !value)
+    }
+
+    fn sni_on(&self) -> bool {
+        !self.sni_off()
+    }
+
+    fn sni_off(&self) -> bool {
+        self.get_param::<bool>("sni")
+            .map(|v| !v)
+            .or_else(|| self.get_param::<bool>("enable_sni").map(|v| !v))
+            .unwrap_or(false)
+    }
+
+    fn ssl_verify(&self) -> bool {
+        self.get_param("ssl_verify").unwrap_or(true)
+    }
+
+    fn set_ssl_verify(&mut self, verify: bool) {
+        self.set_param("ssl_verify", verify)
+    }
+}
+
+impl DnsUrlParamExt for DnsUrl {}
 
 #[cfg(test)]
 mod tests {
@@ -400,6 +467,13 @@ mod tests {
     }
 
     #[test]
+    fn test_url_params_equal() {
+        let url1 = DnsUrl::from_str("https://dns.adguard-dns.com?a=1&b=2&c=3").unwrap();
+        let url2 = DnsUrl::from_str("https://dns.adguard-dns.com?b=2&a=1&c=3").unwrap();
+        assert_eq!(url1, url2);
+    }
+
+    #[test]
     fn test_parse_misc_01() {
         let url = DnsUrl::from_str("127.0.0.1:1053").unwrap();
         assert_eq!(url.proto, Protocol::Udp);
@@ -424,14 +498,14 @@ mod tests {
     #[test]
     fn test_parse_enable_sni_false() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
-        assert_eq!(url.enable_sni(), false);
+        assert_eq!(url.sni_off(), true);
         assert!(url.addrs().is_empty());
     }
 
     #[test]
     fn test_parse_enable_sni_true() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
-        assert_eq!(url.enable_sni(), false);
+        assert_eq!(url.sni_off(), true);
         assert!(url.addrs().is_empty());
     }
 }

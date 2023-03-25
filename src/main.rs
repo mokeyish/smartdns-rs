@@ -32,6 +32,7 @@ mod infra;
 mod log;
 mod preset_ns;
 mod proxy;
+mod rustls;
 mod service;
 mod third_ext;
 mod trust_dns;
