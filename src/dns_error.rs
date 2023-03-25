@@ -35,6 +35,11 @@ impl LookupError {
         matches!(self, Self::ResponseCode(resc) if resc.eq(&ResponseCode::NXDomain))
     }
 
+    #[inline]
+    pub fn is_soa(&self) -> bool {
+        self.as_soa().is_some()
+    }
+
     pub fn as_soa(&self) -> Option<Lookup> {
         if let Self::ResolveError(err) = self {
             if let ResolveErrorKind::NoRecordsFound {
