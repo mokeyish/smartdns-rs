@@ -1284,7 +1284,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                     "-a" | "-address" => {
                         address = parts
                             .next()
-                            .map(IpAddr::from_str)
+                            .map(DomainAddress::from_str)
                             .map(|r| r.ok())
                             .unwrap_or_default()
                     }
@@ -1303,10 +1303,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                 name: domain,
                 value: DomainRule {
                     speed_check_mode: speed_check_mode.into(),
-                    address: address.map(|addr| match addr {
-                        IpAddr::V4(ip) => DomainAddress::IPv4(ip),
-                        IpAddr::V6(ip) => DomainAddress::IPv6(ip),
-                    }),
+                    address,
                     cname,
                     response_mode: None,
                     nameserver,
@@ -1470,7 +1467,7 @@ mod parse {
     use std::{collections::hash_map::Entry, ffi::OsStr, net::AddrParseError};
 
     impl SmartDnsConfig {
-        pub(super) fn finalize(mut self) -> Arc<Self> {
+        pub fn finalize(mut self) -> Arc<Self> {
             if self.binds.is_empty()
                 && self.binds_tcp.is_empty()
                 && self.binds_https.is_empty()
@@ -2046,7 +2043,10 @@ mod parse {
                 if sharp_idx > 1
                     && matches!(line.chars().nth(sharp_idx - 1), Some(c) if c.is_whitespace()) =>
             {
-                line = &line[0..sharp_idx];
+                let preserve = line[0..sharp_idx].trim_end();
+                if !preserve.ends_with("-a") && !preserve.ends_with("-address") {
+                    line = preserve;
+                }
             }
             _ => (),
         };

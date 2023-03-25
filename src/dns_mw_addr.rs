@@ -118,3 +118,51 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<RData> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::{
+        dns_conf::{DomainAddress, SmartDnsConfig},
+        dns_mw::*,
+    };
+
+    #[test]
+    fn test_address_rule_soa_v6() {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let cfg = SmartDnsConfig::new()
+                    .with("domain-rule /google.com/ -address #6")
+                    .finalize();
+
+                assert_eq!(
+                    cfg.find_domain_rule(&"google.com".parse().unwrap())
+                        .unwrap()
+                        .address,
+                    Some(DomainAddress::SOAv6)
+                );
+
+                let mock = DnsMockMiddleware::mock(AddressMiddleware)
+                    .with_a_record("google.com", "8.8.8.8".parse().unwrap())
+                    .with_aaaa_record("google.com", "2001:4860:4860::8888".parse().unwrap())
+                    .build(cfg);
+
+                assert!(matches!(
+                    mock.lookup_rdata("google.com", RecordType::AAAA)
+                        .await
+                        .unwrap()[0],
+                    RData::SOA(_)
+                ));
+                assert_eq!(
+                    mock.lookup_rdata("google.com", RecordType::A)
+                        .await
+                        .unwrap()[0],
+                    RData::A("8.8.8.8".parse().unwrap())
+                );
+            });
+    }
+}
