@@ -43,7 +43,7 @@ quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched
 trust-dns-proto = { git = "https://github.com/mokeyish/trust-dns.git", rev = "fca1eff"}
 trust-dns-resolver = { git = "https://github.com/mokeyish/trust-dns.git", rev = "fca1eff"}
 trust-dns-server = { git = "https://github.com/mokeyish/trust-dns.git", rev = "fca1eff"}
-rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
+# rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 
@@ -78,6 +78,7 @@ trust-dns-server = { version = "0.22.0", features = ["resolver"]}
 # ssl
 webpki-roots = "0.22.1"
 rustls = { version = "0.20.0", features = ["dangerous_configuration"]}
+rustls-pemfile = "1.0.2"
 rustls-native-certs = "0.6.2"
 
 lru = { version = "0.10", default-features = false}

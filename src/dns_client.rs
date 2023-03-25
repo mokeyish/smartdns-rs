@@ -1,18 +1,19 @@
 use std::{
     collections::{HashMap, HashSet},
-    ops::{Deref, DerefMut},
+    ops::Deref,
     path::PathBuf,
     slice::Iter,
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use rustls::ClientConfig;
 use tokio::sync::RwLock;
 use trust_dns_proto::rr::rdata::opt::{ClientSubnet, EdnsOption};
 
 use crate::{
+    dns_url::DnsUrlParamExt,
     proxy::ProxyConfig,
+    rustls::TlsClientConfigBundle,
     trust_dns::proto::{
         error::ProtoResult,
         op::{Edns, Message, MessageType, OpCode, Query},
@@ -90,7 +91,7 @@ impl DnsClientBuilder {
             proxies,
         } = self;
 
-        let tls_client_config = Self::create_tls_client_config_pair(ca_path, ca_file);
+        let tls_client_config = TlsClientConfigBundle::new(ca_path, ca_file);
 
         bootstrap::set_resolver(
             async {
@@ -195,7 +196,7 @@ impl DnsClientBuilder {
 
     async fn create_name_server_group(
         infos: &[NameServerInfo],
-        tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
+        tls_client_config: TlsClientConfigBundle,
         proxies: &HashMap<String, ProxyConfig>,
     ) -> NameServerGroup {
         let mut servers = vec![];
@@ -204,7 +205,7 @@ impl DnsClientBuilder {
 
         for info in infos {
             let url = info.url.clone();
-            let mut verified_url = match TryInto::<VerifiedDnsUrl>::try_into(url) {
+            let verified_url = match TryInto::<VerifiedDnsUrl>::try_into(url) {
                 Ok(url) => url,
                 Err(mut url) => {
                     if let Some(host) = url.domain() {
@@ -220,15 +221,6 @@ impl DnsClientBuilder {
                     }
                 }
             };
-
-            // tls sni
-            if let Some(n) = info.host_name.as_deref() {
-                if n != "-" {
-                    verified_url.set_host_name(n)
-                } else {
-                    verified_url.set_sni_verify(false)
-                }
-            }
 
             let nameserver_opts = NameServerOpts::new(
                 info.blacklist_ip,
@@ -261,81 +253,6 @@ impl DnsClientBuilder {
             servers,
         }
     }
-
-    fn create_tls_client_config_pair(
-        ca_path: Option<PathBuf>,
-        ca_file: Option<PathBuf>,
-    ) -> (Arc<ClientConfig>, Arc<ClientConfig>) {
-        let config = Self::create_tls_client_config(
-            [ca_path, ca_file]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-
-        let mut config_sni_disable = config.clone();
-        config_sni_disable.enable_sni = false;
-
-        (Arc::new(config), Arc::new(config_sni_disable))
-    }
-
-    fn create_tls_client_config(paths: &[PathBuf]) -> ClientConfig {
-        use rustls::{OwnedTrustAnchor, RootCertStore};
-
-        const ALPN_H2: &[u8] = b"h2";
-
-        let mut root_store = RootCertStore::empty();
-        root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-            OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
-            )
-        }));
-
-        let certs = {
-            let certs1 = rustls_native_certs::load_native_certs().unwrap_or_else(|err| {
-                warn!("load native certs failed.{}", err);
-                Default::default()
-            });
-
-            let certs2 = paths
-                .iter()
-                .filter_map(|path| {
-                    match rustls_native_certs::load_certs_from_path(path.as_path()) {
-                        Ok(certs) => Some(certs),
-                        Err(err) => {
-                            warn!("load certs from path failed.{}", err);
-                            None
-                        }
-                    }
-                })
-                .flatten();
-
-            certs1.into_iter().chain(certs2)
-        };
-
-        for cert in certs {
-            root_store
-                .add(&rustls::Certificate(cert.0))
-                .unwrap_or_else(|err| {
-                    warn!("load certs from path failed.{}", err);
-                })
-        }
-
-        let mut client_config = ClientConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_safe_default_protocol_versions()
-            .unwrap()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        client_config.alpn_protocols.push(ALPN_H2.to_vec());
-
-        client_config
-    }
 }
 
 pub struct DnsClient {
@@ -343,7 +260,7 @@ pub struct DnsClient {
     #[allow(clippy::type_complexity)]
     servers:
         HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
-    tls_client_config: (Arc<ClientConfig>, Arc<ClientConfig>),
+    tls_client_config: TlsClientConfigBundle,
     proxies: Arc<HashMap<String, ProxyConfig>>,
 }
 
@@ -581,10 +498,7 @@ impl NameServer {
 
     fn create_config_from_url(
         url: &VerifiedDnsUrl,
-        (tls_client_config_sni_on, tls_client_config_sni_off): (
-            Arc<ClientConfig>,
-            Arc<ClientConfig>,
-        ),
+        tls_client_config: TlsClientConfigBundle,
     ) -> Vec<NameServerConfig> {
         let host = url.domain();
 
@@ -594,6 +508,22 @@ impl NameServer {
 
         use trust_dns_resolver::config::Protocol::*;
         let sock_addrs = url.addrs().iter().cloned();
+
+        let tls_config = |url: &VerifiedDnsUrl| {
+            if url.proto().is_encrypted() {
+                let config = if !url.ssl_verify() {
+                    tls_client_config.verify_off.clone()
+                } else if url.sni_off() {
+                    tls_client_config.sni_off.clone()
+                } else {
+                    tls_client_config.normal.clone()
+                };
+
+                Some(TlsClientConfig(config))
+            } else {
+                None
+            }
+        };
 
         let cfgs = match url.proto() {
             Udp => sock_addrs
@@ -623,11 +553,7 @@ impl NameServer {
                     tls_dns_name: Some(tls_dns_name.clone()),
                     trust_negative_responses: true,
                     bind_addr: None,
-                    tls_config: Some(TlsClientConfig(if url.enable_sni() {
-                        tls_client_config_sni_on.clone()
-                    } else {
-                        tls_client_config_sni_off.clone()
-                    })),
+                    tls_config: tls_config(url),
                 })
                 .collect::<Vec<_>>(),
             Quic => sock_addrs
@@ -637,11 +563,7 @@ impl NameServer {
                     tls_dns_name: Some(tls_dns_name.clone()),
                     trust_negative_responses: true,
                     bind_addr: None,
-                    tls_config: Some(TlsClientConfig(if url.enable_sni() {
-                        tls_client_config_sni_on.clone()
-                    } else {
-                        tls_client_config_sni_off.clone()
-                    })),
+                    tls_config: tls_config(url),
                 })
                 .collect::<Vec<_>>(),
             Protocol::Tls => sock_addrs
@@ -651,11 +573,7 @@ impl NameServer {
                     tls_dns_name: Some(tls_dns_name.clone()),
                     trust_negative_responses: true,
                     bind_addr: None,
-                    tls_config: Some(TlsClientConfig(if url.enable_sni() {
-                        tls_client_config_sni_on.clone()
-                    } else {
-                        tls_client_config_sni_off.clone()
-                    })),
+                    tls_config: tls_config(url),
                 })
                 .collect::<Vec<_>>(),
             _ => todo!(),
@@ -892,12 +810,6 @@ impl Deref for VerifiedDnsUrl {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl DerefMut for VerifiedDnsUrl {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
