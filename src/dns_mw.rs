@@ -2,7 +2,7 @@ use std::{borrow::Borrow, sync::Arc};
 
 use trust_dns_proto::{
     op::{Query, ResponseCode},
-    rr::{IntoName, RData, Record, RecordType},
+    rr::{rdata::SOA, IntoName, Record, RecordType},
 };
 
 use trust_dns_resolver::error::ResolveErrorKind;
@@ -81,7 +81,7 @@ impl MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, DnsError> for
         let soa = Record::from_rdata(
             req.query().name().to_owned().into(),
             ctx.cfg().rr_ttl().unwrap_or_default() as u32,
-            RData::default_soa(),
+            SOA::default_soa(),
         );
         Err(ResolveErrorKind::NoRecordsFound {
             query: req.query().original().to_owned().into(),
@@ -104,6 +104,7 @@ mod tests {
         collections::HashMap,
         net::{Ipv4Addr, Ipv6Addr},
     };
+    use trust_dns_proto::rr::RData;
     use trust_dns_resolver::lookup::Lookup;
 
     use super::*;
@@ -171,16 +172,16 @@ mod tests {
         }
 
         pub fn with_a_record<N: IntoName>(self, name: N, ip: Ipv4Addr) -> Self {
-            self.with_rdata(name, RData::A(ip))
+            self.with_rdata(name, RData::A(ip.into()))
         }
 
         pub fn with_aaaa_record<N: IntoName>(self, name: N, ip: Ipv6Addr) -> Self {
-            self.with_rdata(name, RData::AAAA(ip))
+            self.with_rdata(name, RData::AAAA(ip.into()))
         }
 
         pub fn with_rdata<N: IntoName>(mut self, name: N, rdata: RData) -> Self {
             let name = name.into_name().expect("");
-            let query = Query::query(name, rdata.to_record_type());
+            let query = Query::query(name, rdata.record_type());
             self.map
                 .insert(query.clone(), Ok(Lookup::from_rdata(query, rdata)));
             self
