@@ -1,3 +1,4 @@
+use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
@@ -74,9 +75,10 @@ impl DnsAuditMiddleware {
 
             while let Some(audit) = audit_rx.recv().await {
                 buf.push(audit);
-
                 if buf.len() == BUF_SIZE {
-                    record_audit_to_file(&mut audit_file, buf.as_slice());
+                    if let Err(err) = record_audit_to_file(&mut audit_file, buf.as_slice()) {
+                        warn!("log audit failed {}", err)
+                    }
                     buf.clear();
                 }
             }
@@ -102,28 +104,28 @@ pub struct DnsAuditRecord {
 
 impl DnsAuditRecord {
     fn fmt_result(&self) -> String {
-        self.result
-            .as_ref()
-            .map(|lookup| lookup.records().to_vec())
-            .unwrap_or_default();
-
         if let Ok(lookup) = self.result.as_ref() {
-            lookup
-                .records()
-                .iter()
-                .map(|record| {
-                    format!(
-                        "{} {} {}",
-                        record
-                            .data()
-                            .map(|data| data.to_string())
-                            .unwrap_or_default(),
-                        record.ttl(),
-                        record.record_type()
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("|")
+            let mut out = String::new();
+
+            for (i, record) in lookup
+                .record_iter()
+                .filter(|r| r.data().is_some())
+                .enumerate()
+            {
+                let data = record.data().unwrap();
+
+                if i > 0 {
+                    out.push('|');
+                }
+
+                out.push_str(data.to_string().as_str());
+
+                out.push(' ');
+                out.push_str(record.ttl().to_string().as_str());
+                out.push(' ');
+                out.push_str(record.record_type().to_string().as_str());
+            }
+            out
         } else {
             "query failed".to_string()
         }
@@ -157,51 +159,55 @@ impl ToString for DnsAuditRecord {
     }
 }
 
-fn record_audit_to_file(audit_file: &mut MappedFile, audit_records: &[DnsAuditRecord]) {
+fn record_audit_to_file(
+    audit_file: &mut MappedFile,
+    audit_records: &[DnsAuditRecord],
+) -> io::Result<()> {
     if matches!(audit_file.extension(), Some(ext) if ext == "csv") {
         // write as csv
 
         if audit_file.peamble().is_none() {
             let mut writer = csv::Writer::from_writer(vec![]);
-            writer
-                .write_record([
-                    "id",
-                    "timestamp",
-                    "client",
-                    "name",
-                    "type",
-                    "elapsed",
-                    "speed",
-                    "state",
-                    "result",
-                    "lookup_source",
-                ])
-                .unwrap();
+            writer.write_record([
+                "id",
+                "timestamp",
+                "client",
+                "name",
+                "type",
+                "elapsed",
+                "speed",
+                "state",
+                "result",
+                "lookup_source",
+            ])?;
 
-            audit_file.set_peamble(Some(writer.into_inner().unwrap().into_boxed_slice()))
+            audit_file.set_peamble(Some(
+                writer
+                    .into_inner()
+                    .expect("read csv peamble")
+                    .into_boxed_slice(),
+            ))
         }
 
         let mut writer = csv::Writer::from_writer(audit_file);
 
         for audit in audit_records {
-            writer
-                .write_record([
-                    audit.id.to_string().as_str(),
-                    audit.date.timestamp().to_string().as_str(),
-                    audit.client.as_str(),
-                    audit.query.name().to_string().as_str(),
-                    audit.query.query_type().to_string().as_str(),
-                    format!("{:?}", audit.elapsed).as_str(),
-                    format!("{:?}", audit.speed).as_str(),
-                    if audit.result.is_ok() {
-                        "success"
-                    } else {
-                        "failed"
-                    },
-                    audit.fmt_result().as_str(),
-                    format!("{:?}", audit.lookup_source).as_str(),
-                ])
-                .unwrap();
+            writer.write_record([
+                audit.id.to_string().as_str(),
+                audit.date.timestamp().to_string().as_str(),
+                audit.client.as_str(),
+                audit.query.name().to_string().as_str(),
+                audit.query.query_type().to_string().as_str(),
+                format!("{:?}", audit.elapsed).as_str(),
+                format!("{:?}", audit.speed).as_str(),
+                if audit.result.is_ok() {
+                    "success"
+                } else {
+                    "failed"
+                },
+                audit.fmt_result().as_str(),
+                format!("{:?}", audit.lookup_source).as_str(),
+            ])?;
         }
     } else {
         // write as nornmal log format.
@@ -211,6 +217,8 @@ fn record_audit_to_file(audit_file: &mut MappedFile, audit_records: &[DnsAuditRe
             }
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -298,7 +306,8 @@ mod tests {
         record_audit_to_file(
             &mut MappedFile::open(file, 102400, None, Default::default()),
             &[audit],
-        );
+        )
+        .unwrap();
 
         assert!(file.exists());
 
@@ -353,7 +362,8 @@ mod tests {
         record_audit_to_file(
             &mut MappedFile::open(file, 102400, None, Default::default()),
             &[audit1],
-        );
+        )
+        .unwrap();
 
         assert!(file.exists());
 
@@ -369,7 +379,8 @@ mod tests {
         record_audit_to_file(
             &mut MappedFile::open(file, 102400, None, Default::default()),
             &[audit2],
-        );
+        )
+        .unwrap();
 
         let mut s = String::new();
 
