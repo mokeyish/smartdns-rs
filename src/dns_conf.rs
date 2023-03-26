@@ -860,7 +860,7 @@ impl FromStr for BindServer {
             .unwrap_or_default()
             .unwrap_or_else(|| panic!("{} addr expect [::]:53 or 0.0.0.0:53", s));
 
-        let ssl_config = server_name.map(|server_name| SslConfig {
+        let ssl_config = Some(SslConfig {
             server_name,
             certificate: ssl_certificate,
             certificate_key: ssl_certificate_key,
@@ -894,7 +894,7 @@ impl BindServer {
 
 #[derive(Debug, Clone)]
 pub struct SslConfig {
-    pub server_name: String,
+    pub server_name: Option<String>,
     pub certificate: Option<PathBuf>,
     pub certificate_key: Option<PathBuf>,
 }
@@ -2155,7 +2155,7 @@ mod parse {
                 "0.0.0.0:4453".parse::<SocketAddr>().unwrap()
             );
 
-            assert_eq!(ssl_cfg.server_name, "dns.example.com".to_string());
+            assert_eq!(ssl_cfg.server_name, Some("dns.example.com".to_string()));
             assert_eq!(
                 ssl_cfg.certificate,
                 Some(Path::new("/etc/nginx/dns.example.com.crt").to_path_buf())

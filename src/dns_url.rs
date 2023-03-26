@@ -13,6 +13,7 @@ use url::{Host, Url};
 /// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => traditional dns server
 /// tcp://8.8.8.8:53                            => dns over tcp
 /// tls://8.8.8.8:853                           => DOT: dns over tls
+/// quic://8.8.8.8:853                          => DOT: dns over QUIC
 /// https://1.1.1.1/dns-query                   => DOH: dns over https
 #[derive(Debug, Clone, Eq)]
 pub struct DnsUrl {
@@ -257,7 +258,7 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
         Tcp => 53,
         Tls => 853,
         Https => 443,
-        Quic => 443,
+        Quic => 853,
         #[cfg(feature = "mdns")]
         #[cfg_attr(docsrs, doc(cfg(feature = "mdns")))]
         Mdns => 5353,
@@ -460,7 +461,7 @@ mod tests {
 
         assert_eq!(url.proto, Protocol::Quic);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.port(), 853);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "quic://dns.adguard-dns.com");
         assert!(url.addrs().is_empty());

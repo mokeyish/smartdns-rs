@@ -204,8 +204,7 @@ impl DefaultSOA for SOA {
 }
 
 impl DefaultSOA for RData {
-    #[inline]
     fn default_soa() -> Self {
-        RData::SOA(SOA::default_soa())
+        Self::SOA(SOA::default_soa())
     }
 }

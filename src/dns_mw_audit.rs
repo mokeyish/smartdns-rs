@@ -119,7 +119,7 @@ impl DnsAuditRecord {
                             .map(|data| data.to_string())
                             .unwrap_or_default(),
                         record.ttl(),
-                        record.rr_type()
+                        record.record_type()
                     )
                 })
                 .collect::<Vec<_>>()

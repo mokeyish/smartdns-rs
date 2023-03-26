@@ -369,10 +369,14 @@ fn serve_tls(
             .or(certificate_key)
             .expect("A certificate key file must be specified for binding TLS");
 
-        info!(
-            "loading cert for DNS over TLS named {} from {:?}",
-            ssl_config.server_name, certificate
-        );
+        if let Some(server_name) = ssl_config.server_name.as_deref() {
+            info!(
+                "loading cert for DNS over TLS named {} from {:?}",
+                server_name, certificate
+            );
+        } else {
+            info!("loading cert for DNS over TLS from {:?}", certificate);
+        }
 
         let certificate = read_cert(certificate).expect("error loading tls certificate file");
         let certificate_key =
@@ -432,12 +436,14 @@ fn serve_https(
             .or(certificate_key)
             .expect("A certificate key file must be specified for binding HTTPS");
 
-        info!(
-            "loading cert for DNS over HTTPS named {} from {:?}",
-            ssl_config.server_name, certificate
-        );
-
-        let server_name = ssl_config.server_name.as_str();
+        if let Some(server_name) = ssl_config.server_name.as_deref() {
+            info!(
+                "loading cert for DNS over HTTPS named {} from {:?}",
+                server_name, certificate
+            );
+        } else {
+            info!("loading cert for DNS over HTTPS from {:?}", certificate);
+        }
 
         let certificate = read_cert(certificate).expect("error loading tls certificate file");
         let certificate_key =
@@ -464,7 +470,7 @@ fn serve_https(
                 https_listener,
                 Duration::from_secs(tcp_idle_time),
                 (certificate.clone(), certificate_key.clone()),
-                server_name.to_string(),
+                ssl_config.server_name.clone(),
             )
             .expect("could not register HTTPS listener");
     }
@@ -499,12 +505,14 @@ fn serve_quic(
             .or(certificate_key)
             .expect("A certificate key file must be specified for binding QUIC");
 
-        info!(
-            "loading cert for DNS over QUIC named {} from {:?}",
-            ssl_config.server_name, certificate
-        );
-
-        let server_name = ssl_config.server_name.as_str();
+        if let Some(server_name) = ssl_config.server_name.as_deref() {
+            info!(
+                "loading cert for DNS over QUIC named {} from {:?}",
+                server_name, certificate
+            );
+        } else {
+            info!("loading cert for DNS over QUIC from {:?}", certificate);
+        }
 
         let certificate = read_cert(certificate).expect("error loading tls certificate file");
         let certificate_key =
@@ -530,7 +538,7 @@ fn serve_quic(
                 quic_listener,
                 Duration::from_secs(tcp_idle_time),
                 (certificate.clone(), certificate_key.clone()),
-                server_name.to_string(),
+                ssl_config.server_name.clone(),
             )
             .expect("could not register QUIC listener");
     }

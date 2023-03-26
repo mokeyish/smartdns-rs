@@ -57,8 +57,10 @@ impl LanClientStore {
                     _ => None,
                 }) {
                     match client_info.ip {
-                        IpAddr::V4(v) if record_type == RecordType::A => Some(RData::A(v)),
-                        IpAddr::V6(v) if record_type == RecordType::AAAA => Some(RData::AAAA(v)),
+                        IpAddr::V4(v) if record_type == RecordType::A => Some(RData::A(v.into())),
+                        IpAddr::V6(v) if record_type == RecordType::AAAA => {
+                            Some(RData::AAAA(v.into()))
+                        }
                         _ => Default::default(),
                     }
                 } else {

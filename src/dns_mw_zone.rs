@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 
+use trust_dns_proto::rr::rdata::PTR;
 use trust_dns_proto::rr::LowerName;
 use trust_dns_server::authority::{AuthorityObject, LookupOptions};
 
@@ -58,7 +59,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
         if rtype == RecordType::PTR && self.ptr_set.contains(name) {
             return Ok(Lookup::from_rdata(
                 req.query().original().to_owned(),
-                RData::PTR(ctx.cfg().server_name()),
+                RData::PTR(PTR(ctx.cfg().server_name())),
             ));
         };
 

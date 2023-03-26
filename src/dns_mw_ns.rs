@@ -75,7 +75,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                 lookup
                     .records()
                     .iter()
-                    .filter_map(|record| record.data().map(|data| data.to_ip_addr()))
+                    .filter_map(|record| record.data().map(|data| data.ip_addr()))
                     .flatten()
                     .collect::<Vec<_>>()
             );
@@ -273,8 +273,14 @@ async fn lookup_ip(
                             .records()
                             .iter()
                             .filter(|r| match r.data() {
-                                Some(RData::A(ip)) if out.destination() == IpAddr::V4(*ip) => true,
-                                Some(RData::AAAA(ip)) if out.destination() == IpAddr::V6(*ip) => {
+                                Some(RData::A(ip))
+                                    if out.destination() == IpAddr::V4(*ip.deref()) =>
+                                {
+                                    true
+                                }
+                                Some(RData::AAAA(ip))
+                                    if out.destination() == IpAddr::V6(*ip.deref()) =>
+                                {
                                     true
                                 }
                                 _ => false,
@@ -437,7 +443,7 @@ async fn per_nameserver_lookup_ip(
             let records = lookup
                 .records()
                 .iter()
-                .filter(|record| match record.data().map(|data| data.to_ip_addr()) {
+                .filter(|record| match record.data().map(|data| data.ip_addr()) {
                     Some(Some(ip)) => ip_filter(&ip),
                     _ => false,
                 })
@@ -501,10 +507,7 @@ mod tests {
                 .into_iter()
                 .flatten()
                 .map(|lookup| {
-                    let mut ips = lookup
-                        .iter()
-                        .flat_map(|r| r.to_ip_addr())
-                        .collect::<Vec<_>>();
+                    let mut ips = lookup.iter().flat_map(|r| r.ip_addr()).collect::<Vec<_>>();
                     ips.sort();
                     ips
                 })

@@ -101,8 +101,8 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<RData> {
 
         if let Some(address) = rule.address {
             match address {
-                IPv4(ipv4) if query_type == A => return Some(RData::A(ipv4)),
-                IPv6(ipv6) if query_type == AAAA => return Some(RData::AAAA(ipv6)),
+                IPv4(ipv4) if query_type == A => return Some(RData::A(ipv4.into())),
+                IPv6(ipv6) if query_type == AAAA => return Some(RData::AAAA(ipv6.into())),
                 SOA if !no_rule_soa => return Some(RData::default_soa()),
                 SOAv4 if !no_rule_soa && query_type == A => return Some(RData::default_soa()),
                 SOAv6 if !no_rule_soa && query_type == AAAA => return Some(RData::default_soa()),

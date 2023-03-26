@@ -50,7 +50,7 @@ impl LookupError {
             {
                 return Some(Lookup::new_with_max_ttl(
                     query.as_ref().to_owned(),
-                    vec![record.as_ref().to_owned()].into(),
+                    vec![record.as_ref().to_owned().into_record_of_rdata()].into(),
                 ));
             }
         }

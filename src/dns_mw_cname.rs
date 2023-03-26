@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use trust_dns_proto::rr::rdata::CNAME;
+
 use crate::dns::*;
 use crate::dns_rule::CNameRule;
 use crate::middleware::*;
@@ -37,7 +39,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddl
                     let records = vec![Record::from_rdata(
                         name,
                         local_ttl as u32,
-                        RData::CNAME(cname.clone()),
+                        RData::CNAME(CNAME(cname.clone())),
                     )];
 
                     Ok(Lookup::new_with_deadline(

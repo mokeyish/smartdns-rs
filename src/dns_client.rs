@@ -753,7 +753,7 @@ where
             if self.options().ndots > 4 {
                 finally_ip_addr = Some(record);
             } else {
-                let query = Query::query(name, ip_addr.to_record_type());
+                let query = Query::query(name, ip_addr.record_type());
                 let lookup = Lookup::new_with_max_ttl(query, Arc::from([record]));
                 return Ok(lookup.into());
             }
@@ -1076,7 +1076,7 @@ mod bootstrap {
                         record_type,
                         records
                             .iter()
-                            .flat_map(|r| r.data().map(|d| d.to_ip_addr()))
+                            .flat_map(|r| r.data().map(|d| d.ip_addr()))
                             .flatten()
                             .collect::<Vec<_>>()
                     );
@@ -1121,7 +1121,7 @@ mod tests {
         dns_url::DnsUrl,
         preset_ns::{ALIDNS_IPS, CLOUDFLARE_IPS},
     };
-    use std::net::Ipv4Addr;
+    use std::net::IpAddr;
     use std::str::FromStr;
     use tokio::runtime::{self, Runtime};
 
@@ -1139,7 +1139,7 @@ mod tests {
                     .unwrap();
                 assert!(lookup_ip
                     .into_iter()
-                    .any(|i| i.as_a() == Some(&"223.5.5.5".parse::<Ipv4Addr>().unwrap())));
+                    .any(|i| i.ip_addr() == Some("223.5.5.5".parse::<IpAddr>().unwrap())));
             });
     }
 
