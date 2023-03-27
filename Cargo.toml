@@ -40,9 +40,9 @@ dns-over-https-rustls = [
 [patch.crates-io]
 rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
 quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
-trust-dns-proto = { git = "https://github.com/mokeyish/trust-dns.git", rev = "98b8283"}
-trust-dns-resolver = { git = "https://github.com/mokeyish/trust-dns.git", rev = "98b8283"}
-trust-dns-server = { git = "https://github.com/mokeyish/trust-dns.git", rev = "98b8283"}
+trust-dns-proto = { git = "https://github.com/mokeyish/trust-dns.git", rev = "a27bbd1"}
+trust-dns-resolver = { git = "https://github.com/mokeyish/trust-dns.git", rev = "a27bbd1"}
+trust-dns-server = { git = "https://github.com/mokeyish/trust-dns.git", rev = "a27bbd1"}
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
