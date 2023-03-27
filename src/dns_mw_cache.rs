@@ -296,13 +296,13 @@ impl DomainPrefetcher {
                     let mut expired = vec![];
 
                     {
-                        let mut cache = cache.lock().await;
+                        let cache = cache.lock().await;
                         let len = cache.len();
                         if len == 0 {
                             continue;
                         }
 
-                        for (query, entry) in cache.iter_mut() {
+                        for (query, entry) in cache.iter() {
                             // only prefetch query type ip addr
                             if !query.query_type().is_ip_addr() {
                                 continue;
