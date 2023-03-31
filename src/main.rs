@@ -163,6 +163,7 @@ fn run_server(conf: Option<PathBuf>) {
         Some(log::init_global_default(
             cfg.log_file(),
             cfg.log_level(),
+            cfg.log_filter(),
             cfg.log_size(),
             cfg.log_num(),
             cfg.audit_file_mode().into(),

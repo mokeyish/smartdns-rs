@@ -218,8 +218,10 @@ pub struct SmartDnsConfig {
     log_size: Option<u64>,
     /// number of logs, 0 means disable log
     log_num: Option<u64>,
-    ///  log file mode
+    /// log file mode
     log_file_mode: Option<FileMode>,
+    // log filter
+    log_filter: Option<String>,
 
     /// dns audit
     ///
@@ -645,6 +647,11 @@ impl SmartDnsConfig {
     #[inline]
     pub fn log_file_mode(&self) -> u32 {
         self.log_file_mode.map(|m| *m).unwrap_or(0o640)
+    }
+
+    #[inline]
+    pub fn log_filter(&self) -> Option<&str> {
+        self.log_filter.as_deref()
     }
 
     #[inline]
@@ -1774,6 +1781,7 @@ mod parse {
                         }
                         "log-num" => self.log_num = options.parse().ok(),
                         "log-file-mode" => self.log_file_mode = options.parse().ok(),
+                        "log-filter" => self.log_filter = Some(options.to_string()),
                         "audit-enable" => self.audit_enable = Some(parse_bool(options)),
                         "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
                         "audit-size" => {
