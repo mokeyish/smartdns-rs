@@ -23,6 +23,7 @@ type MappedFile = crate::infra::mapped_file::MutexMappedFile;
 pub fn init_global_default<P: AsRef<Path>>(
     path: P,
     level: tracing::Level,
+    filter: Option<&str>,
     size: u64,
     num: u64,
     mode: Option<u32>,
@@ -47,7 +48,7 @@ pub fn init_global_default<P: AsRef<Path>>(
         // log hello
         {
             let writer = file.with_max_level(level);
-            let dispatch = make_dispatch(level, writer);
+            let dispatch = make_dispatch(level, filter, writer);
 
             let _guard = set_default(&dispatch);
             crate::hello_starting();
@@ -56,9 +57,13 @@ pub fn init_global_default<P: AsRef<Path>>(
         let file_writer =
             MappedFile::open(path.as_ref(), size, Some(num as usize), mode).with_max_level(level);
 
-        make_dispatch(level.max(console_level), file_writer.and(console_writer))
+        make_dispatch(
+            level.max(console_level),
+            filter,
+            file_writer.and(console_writer),
+        )
     } else {
-        make_dispatch(console_level, console_writer)
+        make_dispatch(console_level, filter, console_writer)
     };
 
     let guard = set_default(&dispatch);
@@ -70,12 +75,13 @@ pub fn init_global_default<P: AsRef<Path>>(
 pub fn default() -> DefaultGuard {
     let console_level = console_level();
     let console_writer = io::stdout.with_max_level(console_level);
-    set_default(&make_dispatch(console_level, console_writer))
+    set_default(&make_dispatch(console_level, None, console_writer))
 }
 
 #[inline]
 fn make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send + Sync>(
     level: tracing::Level,
+    filter: Option<&str>,
     writer: W,
 ) -> Dispatch {
     let layer = tracing_subscriber::fmt::layer()
@@ -85,7 +91,7 @@ fn make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send + Sync>(
     Dispatch::from(
         tracing_subscriber::registry()
             .with(layer)
-            .with(make_filter(level)),
+            .with(make_filter(level, filter)),
     )
 }
 
@@ -98,20 +104,19 @@ fn console_level() -> Level {
 }
 
 #[inline]
-fn make_filter(level: tracing::Level) -> EnvFilter {
+fn make_filter(level: tracing::Level, filter: Option<&str>) -> EnvFilter {
     EnvFilter::builder()
         .with_default_directive(tracing::Level::WARN.into())
-        .parse(all_smart_dns(level))
+        .parse(all_smart_dns(level, filter))
         .expect("failed to configure tracing/logging")
 }
 
 #[inline]
-fn all_smart_dns(level: impl ToString) -> String {
-    format!(
-        "named={level},smartdns={level},{env}",
-        level = level.to_string().to_lowercase(),
-        env = get_env()
-    )
+fn all_smart_dns(level: impl ToString, filter: Option<&str>) -> String {
+    filter
+        .unwrap_or("named={level},smartdns={level},{env}")
+        .replace("{level}", level.to_string().to_uppercase().as_str())
+        .replace("{env}", get_env().as_str())
 }
 
 #[inline]
