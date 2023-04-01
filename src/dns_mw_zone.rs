@@ -173,7 +173,6 @@ impl Catalog {
 
 #[cfg(test)]
 mod tests {
-    
 
     use crate::infra::ipset::IpSet;
 

@@ -478,14 +478,19 @@ mod tests {
 
     #[test]
     fn test_edns_client_subnet() {
-        async fn inner_test() -> bool {
+        async fn inner_test(i: usize) -> bool {
             // https://lite.ip2location.com/ip-address-ranges-by-country
 
-            let cfg = SmartDnsConfig::new()
-                .with("server https://223.5.5.5/dns-query")
-                .finalize();
+            let servers = [
+                "server https://120.53.53.53/dns-query",
+                "server https://223.5.5.5/dns-query",
+            ];
 
-            let domain = "cdn.jsdelivr.net";
+            let server = servers[i % servers.len()];
+
+            let cfg = SmartDnsConfig::new().with(server).finalize();
+
+            let domain = "www.bing.com";
 
             let client = cfg.create_dns_client().await;
 
@@ -516,7 +521,13 @@ mod tests {
             let t1 = results[0].clone();
             let t2 = results[1].clone();
             let t3 = results[2].clone();
-            t1 == t3 && t1 != t2
+            let success = t1 == t3 && t1 != t2;
+            if !success {
+                println!("{:?}", t1);
+                println!("{:?}", t2);
+                println!("{:?}", t3);
+            }
+            success
         }
 
         tokio::runtime::Builder::new_multi_thread()
@@ -528,7 +539,7 @@ mod tests {
                 let mut success = false;
                 let mut tasks = (0..10)
                     .into_iter()
-                    .map(|_| inner_test().boxed())
+                    .map(|i| inner_test(i).boxed())
                     .collect::<Vec<_>>();
 
                 loop {
