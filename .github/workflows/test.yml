@@ -43,3 +43,98 @@ jobs:
           use-cross: ${{ matrix.os == 'ubuntu-latest' }}
           command: test
           args: --features=disable_icmp_ping
+  cleanliness:
+    name: cleanliness ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@master
+      - name: Install Rust Toolchain Components
+        uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          target: ${{ matrix.target }}
+          override: true
+      - name: Clippy
+        run: cargo clippy
+      - name: Rustfmt
+        run: cargo fmt --all -- --check
+  compatibility:
+    name: compatibility ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: x86_64-pc-windows-gnu
+            os: windows-latest
+            archive: zip
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: zip
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: zip
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          # - target: arch64-unknown-linux-musl
+          #   archive: tar.gz tar.xz tar.zst
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          - target: arm-unknown-linux-musleabi
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          - target: arm-unknown-linux-musleabihf
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          # - target: mips-unknown-linux-musl
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: mips-unknown-linux-musl
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: mips64-unknown-linux-muslabi64
+          #   archive: tar.gz tar.xz tar.zst
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          # - target: x86_64-unknown-freebsd
+          #   os: ubuntu-latest
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: x86_64-unknown-netbsd
+          #   os: ubuntu-latest
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: wasm32-unknown-emscripten
+          #   archive: tar.gz tar.xz tar.zst
+    runs-on: ${{matrix.os}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@master
+      - name: Install Rust Toolchain Components
+        uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+      - name: Check
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.os == 'ubuntu-latest' }}
+          command: check
+          args: --workspace --tests --benches --examples --target ${{ matrix.target }}
+
+
+
