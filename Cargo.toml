@@ -46,6 +46,7 @@ trust-dns-server = { git = "https://github.com/mokeyish/trust-dns.git", rev = "1
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
+socket2 = { git = "https://github.com/mokeyish/socket2.git", rev = "80306e7"}
 
 [dependencies]
 cfg-if = "1"
@@ -60,7 +61,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"]}
 async-trait = "0.1.43"
 tokio = { version = "1.21", features = ["time", "rt", "signal", "macros", "parking_lot"] }
 tokio-rustls = "0.23.4"
-socket2 = { version = "0.5" }
+socket2 = { version = "0.5", features = ["all"]}
 
 # log
 tracing = "0.1"
