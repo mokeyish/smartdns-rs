@@ -46,6 +46,13 @@ impl std::ops::Add<IpNet> for &IpSet {
     }
 }
 
+impl std::ops::AddAssign<IpNet> for IpSet {
+    #[inline]
+    fn add_assign(&mut self, rhs: IpNet) {
+        self.0.push(rhs)
+    }
+}
+
 pub trait ToIpSet {
     fn to_ip_set(self) -> IpSet;
 }

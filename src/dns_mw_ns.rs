@@ -488,7 +488,7 @@ mod tests {
 
             let server = servers[i % servers.len()];
 
-            let cfg = SmartDnsConfig::new().with(server).finalize();
+            let cfg = SmartDnsConfig::builder().with(server).build();
 
             let domain = "www.bing.com";
 

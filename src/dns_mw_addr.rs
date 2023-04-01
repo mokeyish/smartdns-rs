@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use crate::dns::*;
 use crate::middleware::*;
 use crate::trust_dns::proto::rr::{RData, RecordType};
-use crate::trust_dns::resolver::LookupTtl;
+
+use crate::trust_dns::resolver::TtlClip;
 
 #[derive(Debug)]
 pub struct AddressMiddleware;
@@ -44,24 +46,41 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
         let res = next.run(ctx, req).await;
 
         match res {
-            Ok(mut lookup) => Ok({
+            Ok(lookup) => Ok({
+                let mut records = Cow::Borrowed(lookup.records());
+
                 if let Some(max_reply_ip_num) = ctx.cfg().max_reply_ip_num() {
                     let max_reply_ip_num = max_reply_ip_num as usize;
-                    if lookup.records().len() > max_reply_ip_num {
-                        let records = &lookup.records()[0..max_reply_ip_num];
-                        lookup = Lookup::new_with_deadline(
-                            lookup.query().clone(),
-                            records.to_vec().into(),
-                            lookup.valid_until(),
-                        )
+                    if max_reply_ip_num > 0 && records.len() > max_reply_ip_num {
+                        records.to_mut().truncate(max_reply_ip_num);
                     }
                 }
 
-                if let Some(rr_ttl_reply_max) = ctx.cfg().rr_ttl_reply_max() {
-                    lookup = lookup.with_max_ttl(rr_ttl_reply_max as u32)
+                let rr_ttl_min = ctx.cfg().rr_ttl_min().map(|i| i as u32);
+                let rr_ttl_max = ctx.cfg().rr_ttl_max().map(|i| i as u32);
+                let rr_ttl_reply_max = ctx.cfg().rr_ttl_reply_max().map(|i| i as u32);
+
+                if rr_ttl_min.is_some() || rr_ttl_max.is_some() || rr_ttl_reply_max.is_some() {
+                    for record in records.to_mut() {
+                        if let Some(rr_ttl_min) = rr_ttl_min {
+                            record.set_min_ttl(rr_ttl_min);
+                        }
+                        if let Some(rr_ttl_reply_max) = rr_ttl_reply_max {
+                            record.set_max_ttl(rr_ttl_reply_max);
+                        } else if let Some(rr_ttl_max) = rr_ttl_max {
+                            record.set_max_ttl(rr_ttl_max);
+                        }
+                    }
                 }
 
-                lookup
+                match records {
+                    Cow::Owned(records) => Lookup::new_with_deadline(
+                        lookup.query().clone(),
+                        records.to_vec().into(),
+                        lookup.valid_until(),
+                    ),
+                    Cow::Borrowed(_) => lookup,
+                }
             }),
             Err(err) => Err(err),
         }
@@ -126,43 +145,269 @@ mod tests {
     use crate::{
         dns_conf::{DomainAddress, SmartDnsConfig},
         dns_mw::*,
+        trust_dns::resolver::LookupTtl,
     };
 
-    #[test]
-    fn test_address_rule_soa_v6() {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let cfg = SmartDnsConfig::new()
-                    .with("domain-rule /google.com/ -address #6")
-                    .finalize();
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_address_rule_soa_v6() {
+        let cfg = SmartDnsConfig::builder()
+            .with("domain-rule /google.com/ -address #6")
+            .build();
 
-                assert_eq!(
-                    cfg.find_domain_rule(&"google.com".parse().unwrap())
-                        .unwrap()
-                        .address,
-                    Some(DomainAddress::SOAv6)
-                );
+        assert_eq!(
+            cfg.find_domain_rule(&"google.com".parse().unwrap())
+                .unwrap()
+                .address,
+            Some(DomainAddress::SOAv6)
+        );
 
-                let mock = DnsMockMiddleware::mock(AddressMiddleware)
-                    .with_a_record("google.com", "8.8.8.8".parse().unwrap())
-                    .with_aaaa_record("google.com", "2001:4860:4860::8888".parse().unwrap())
-                    .build(cfg);
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_a_record("google.com", "8.8.8.8".parse().unwrap())
+            .with_aaaa_record("google.com", "2001:4860:4860::8888".parse().unwrap())
+            .build(cfg);
 
-                assert!(matches!(
-                    mock.lookup_rdata("google.com", RecordType::AAAA)
-                        .await
-                        .unwrap()[0],
-                    RData::SOA(_)
-                ));
-                assert_eq!(
-                    mock.lookup_rdata("google.com", RecordType::A)
-                        .await
-                        .unwrap()[0],
-                    RData::A("8.8.8.8".parse().unwrap())
-                );
-            });
+        assert!(matches!(
+            mock.lookup_rdata("google.com", RecordType::AAAA)
+                .await
+                .unwrap()[0],
+            RData::SOA(_)
+        ));
+        assert_eq!(
+            mock.lookup_rdata("google.com", RecordType::A)
+                .await
+                .unwrap()[0],
+            RData::A("8.8.8.8".parse().unwrap())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_min() -> Result<(), DnsError> {
+        let cfg = SmartDnsConfig::builder().with("rr-ttl-min 50").build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                vec![
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::A("8.8.8.8".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.4".parse().unwrap()),
+                    ),
+                ],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        assert_eq!(lookup.min_ttl().unwrap(), 50);
+        assert!(lookup.max_ttl().unwrap() > 50);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_max() -> Result<(), DnsError> {
+        let cfg = SmartDnsConfig::builder().with("rr-ttl-max 50").build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                vec![
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::A("8.8.8.8".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.4".parse().unwrap()),
+                    ),
+                ],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        assert_eq!(lookup.max_ttl().unwrap(), 50);
+        assert!(lookup.min_ttl().unwrap() < 50);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_min_max() -> Result<(), DnsError> {
+        let cfg = SmartDnsConfig::builder()
+            .with("rr-ttl-max 66")
+            .with("rr-ttl-min 55")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                vec![
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::A("8.8.8.8".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.4".parse().unwrap()),
+                    ),
+                ],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        assert_eq!(lookup.max_ttl().unwrap(), 66);
+        assert_eq!(lookup.min_ttl().unwrap(), 55);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_max_reply() -> Result<(), DnsError> {
+        let cfg = SmartDnsConfig::builder()
+            .with("rr-ttl-max 66")
+            .with("rr-ttl-min 55")
+            .with("rr-ttl-reply-max 30")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                vec![
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::A("8.8.8.8".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.4".parse().unwrap()),
+                    ),
+                ],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        assert!(lookup.record_iter().all(|r| r.ttl() == 30));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_max_reply_ip_num() -> Result<(), DnsError> {
+        let cfg = SmartDnsConfig::builder()
+            .with("rr-ttl-max 66")
+            .with("rr-ttl-min 55")
+            .with("rr-ttl-reply-max 30")
+            .with("max-reply-ip-num 2")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                vec![
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::A("8.8.8.8".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.4".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.3".parse().unwrap()),
+                    ),
+                ],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        assert_eq!(lookup.records().len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_max_reply_ip_num_1() -> Result<(), DnsError> {
+        let cfg = SmartDnsConfig::builder()
+            .with("rr-ttl-max 66")
+            .with("rr-ttl-min 55")
+            .with("rr-ttl-reply-max 30")
+            .with("max-reply-ip-num 2")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                vec![Record::from_rdata(
+                    "dns.google".parse().unwrap(),
+                    96,
+                    RData::A("8.8.8.8".parse().unwrap()),
+                )],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        assert_eq!(lookup.records().len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_max_reply_ip_num_2() -> Result<(), DnsError> {
+        let cfg = SmartDnsConfig::builder()
+            .with("rr-ttl-max 66")
+            .with("rr-ttl-min 55")
+            .with("rr-ttl-reply-max 30")
+            .with("max-reply-ip-num 0")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                vec![
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::A("8.8.8.8".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.4".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.3".parse().unwrap()),
+                    ),
+                ],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        assert_eq!(lookup.records().len(), 3);
+
+        Ok(())
     }
 }

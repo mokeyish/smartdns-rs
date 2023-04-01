@@ -102,6 +102,7 @@ mod tests {
 
     use std::{
         collections::HashMap,
+        fmt::Debug,
         net::{Ipv4Addr, Ipv6Addr},
     };
     use trust_dns_proto::rr::RData;
@@ -165,25 +166,69 @@ mod tests {
             self
         }
 
-        pub fn build(self, cfg: Arc<SmartDnsConfig>) -> DnsMiddlewareHandler {
+        pub fn build<T: Into<Arc<SmartDnsConfig>>>(self, cfg: T) -> DnsMiddlewareHandler {
             let Self { map, builder } = self;
 
-            builder.with(DnsMockMiddleware { map }).build(cfg)
+            builder.with(DnsMockMiddleware { map }).build(cfg.into())
         }
 
         pub fn with_a_record<N: IntoName>(self, name: N, ip: Ipv4Addr) -> Self {
-            self.with_rdata(name, RData::A(ip.into()))
+            self.with_rdata(name, RData::A(ip.into()), 10 * 60)
+        }
+
+        pub fn with_a_record_and_ttl<N: IntoName>(self, name: N, ip: Ipv4Addr, ttl: u32) -> Self {
+            self.with_rdata(name, RData::A(ip.into()), ttl)
         }
 
         pub fn with_aaaa_record<N: IntoName>(self, name: N, ip: Ipv6Addr) -> Self {
-            self.with_rdata(name, RData::AAAA(ip.into()))
+            self.with_rdata(name, RData::AAAA(ip.into()), 10 * 60)
         }
 
-        pub fn with_rdata<N: IntoName>(mut self, name: N, rdata: RData) -> Self {
-            let name = name.into_name().expect("");
-            let query = Query::query(name, rdata.record_type());
+        pub fn with_aaaa_record_and_ttl<N: IntoName>(
+            self,
+            name: N,
+            ip: Ipv6Addr,
+            ttl: u32,
+        ) -> Self {
+            self.with_rdata(name, RData::AAAA(ip.into()), ttl)
+        }
+
+        pub fn with_rdata<N: IntoName>(self, name: N, rdata: RData, ttl: u32) -> Self {
+            let name = match name.into_name() {
+                Ok(name) => name,
+                Err(err) => panic!("invalid Name {}", err),
+            };
+
+            self.with_record(Record::from_rdata(name, ttl, rdata))
+        }
+
+        pub fn with_record(self, record: Record) -> Self {
+            self.with_multi_records(record.name().clone(), vec![record])
+        }
+
+        pub fn with_multi_records<Name: IntoName + Debug, Records: Into<Arc<[Record]>>>(
+            mut self,
+            name: Name,
+            records: Records,
+        ) -> Self {
+            let name = match name.into_name() {
+                Ok(name) => name,
+                Err(err) => panic!("invalid Name {}", err),
+            };
+
+            let records: Arc<[Record]> = records.into();
+
+            let query = Query::query(
+                name,
+                records
+                    .first()
+                    .expect("must at least one record")
+                    .record_type(),
+            );
+
             self.map
-                .insert(query.clone(), Ok(Lookup::from_rdata(query, rdata)));
+                .insert(query.clone(), Ok(Lookup::new_with_max_ttl(query, records)));
+
             self
         }
     }
@@ -200,41 +245,29 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_mock_middleware_ip() {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let mw = DnsMockMiddleware::builder()
-                    .with_a_record("qq.com", "1.5.6.7".parse().unwrap())
-                    .build(Default::default());
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_mock_middleware_ip() {
+        let mw = DnsMockMiddleware::builder()
+            .with_a_record("qq.com", "1.5.6.7".parse().unwrap())
+            .build(SmartDnsConfig::default());
 
-                let res = mw.lookup_rdata("qq.com", RecordType::A).await.unwrap();
+        let res = mw.lookup_rdata("qq.com", RecordType::A).await.unwrap();
 
-                assert_eq!(res, vec![RData::A("1.5.6.7".parse().unwrap())]);
-            });
+        assert_eq!(res, vec![RData::A("1.5.6.7".parse().unwrap())]);
     }
 
-    #[test]
-    fn test_mock_middleware_soa() {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let mw = DnsMockMiddleware::builder()
-                    .with_a_record("qq.com", "1.5.6.7".parse().unwrap())
-                    .build(Default::default());
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_mock_middleware_soa() {
+        let mw = DnsMockMiddleware::builder()
+            .with_a_record("qq.com", "1.5.6.7".parse().unwrap())
+            .build(SmartDnsConfig::default());
 
-                let res = mw.lookup_rdata("baidu.com", RecordType::A).await;
+        let res = mw.lookup_rdata("baidu.com", RecordType::A).await;
 
-                assert!(res.is_err());
+        assert!(res.is_err());
 
-                let err = res.unwrap_err();
+        let err = res.unwrap_err();
 
-                assert!(err.is_soa());
-            });
+        assert!(err.is_soa());
     }
 }

@@ -256,7 +256,7 @@ fn run_server(conf: Option<PathBuf>) {
     let mut server = ServerRegistry::new(middleware);
 
     // load udp the listeners
-    for bind in cfg.binds.iter() {
+    for bind in cfg.binds() {
         let _guard = runtime.enter();
         let udp_socket = bind_to(udp, bind.sock_addr, bind.device(), "UDP");
 
@@ -266,7 +266,7 @@ fn run_server(conf: Option<PathBuf>) {
     }
 
     // and TCP as necessary
-    for bind in cfg.binds_tcp.iter() {
+    for bind in cfg.binds_tcp() {
         let _guard = runtime.enter();
         let tcp_listener = bind_to(tcp, bind.sock_addr, bind.device(), "TCP");
 
@@ -278,7 +278,7 @@ fn run_server(conf: Option<PathBuf>) {
     #[cfg(feature = "dns-over-tls")]
     serve_tls(
         &mut server,
-        &cfg.binds_tls,
+        cfg.binds_tls(),
         &runtime,
         tcp_idle_time,
         cfg.bind_cert_file(),
@@ -287,7 +287,7 @@ fn run_server(conf: Option<PathBuf>) {
     #[cfg(feature = "dns-over-https")]
     serve_https(
         &mut server,
-        &cfg.binds_https,
+        cfg.binds_https(),
         &runtime,
         tcp_idle_time,
         cfg.bind_cert_file(),
@@ -296,7 +296,7 @@ fn run_server(conf: Option<PathBuf>) {
     #[cfg(feature = "dns-over-quic")]
     serve_quic(
         &mut server,
-        &cfg.binds_quic,
+        cfg.binds_quic(),
         &runtime,
         tcp_idle_time,
         cfg.bind_cert_file(),
