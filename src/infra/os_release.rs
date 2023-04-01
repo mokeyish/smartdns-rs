@@ -128,6 +128,11 @@ impl OsRelease {
         cfg!(target_os = "windows")
     }
 
+    #[inline]
+    pub fn is_android(&self) -> bool {
+        cfg!(target_os = "android")
+    }
+
     fn id_contains(&self, search: &str) -> bool {
         self.id.contains(search)
             || self
@@ -202,5 +207,8 @@ mod tests {
 
         #[cfg(target_os = "linux")]
         assert!(get().unwrap().is_linux());
+
+        #[cfg(target_os = "android")]
+        assert!(get().unwrap().is_android());
     }
 }
