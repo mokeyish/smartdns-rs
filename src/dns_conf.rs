@@ -20,115 +20,19 @@ use crate::infra::ipset::IpSet;
 use crate::log::{debug, error, info, warn};
 use crate::proxy::ProxyConfig;
 
+const DEFAULT_GROUP: &str = "default";
+
+pub type DomainSets = HashMap<String, HashSet<Name>>;
+pub type ForwardRules = Vec<ForwardRule>;
+pub type AddressRules = Vec<ConfigItem<DomainId, DomainAddress>>;
+pub type DomainRules = Vec<ConfigItem<DomainId, DomainRule>>;
+pub type CNameRules = Vec<ConfigItem<DomainId, CNameRule>>;
+
 #[derive(Default)]
 pub struct SmartDnsConfig {
-    /// dns server name, default is host name
-    ///
-    /// ```
-    /// server-name,
-    ///
-    /// example:
-    ///   server-name smartdns
-    /// ```
-    server_name: Option<Name>,
+    inner: InnerConfig,
 
-    /// The number of worker threads
-    num_workers: Option<usize>,
-
-    /// whether resolv local hostname to ip address
-    resolv_hostname: Option<bool>,
-
-    /// dns server run user
-    ///
-    /// ```
-    /// user [username]
-    ///
-    /// exmaple:
-    ///   user nobody
-    /// ```
-    user: Option<String>,
-
-    /// Local domain suffix appended to DHCP names and hosts file entries.
-    domain: Option<Name>,
-
-    /// Include another configuration options
-    ///
-    /// conf-file [file]
-    /// ```
-    /// example:
-    ///   conf-file blacklist-ip.conf
-    /// ```
-    conf_file: Option<PathBuf>,
-
-    /// dns server bind ip and port, default dns server port is 53, support binding multi ip and port
-    pub binds: Vec<BindServer>,
-    /// bind tcp server
-    pub binds_tcp: Vec<BindServer>,
-    /// bind tls server
-    pub binds_tls: Vec<BindServer>,
-    /// bind https server
-    pub binds_https: Vec<BindServer>,
-    /// bind quic server
-    pub binds_quic: Vec<BindServer>,
-
-    /// SSL Certificate file path
-    bind_cert_file: Option<PathBuf>,
-    /// SSL Certificate key file path
-    bind_cert_key_file: Option<PathBuf>,
-    /// SSL Certificate key file password
-    bind_cert_key_pass: Option<String>,
-
-    /// tcp connection idle timeout
-    ///
-    /// tcp-idle-time [second]
-    tcp_idle_time: Option<u64>,
-
-    /// dns cache size
-    ///
-    /// ```
-    /// cache-size [number]
-    ///   0: for no cache
-    /// ```
-    cache_size: Option<usize>,
-    /// enable persist cache when restart
-    cache_persist: Option<bool>,
-    /// cache persist file
-    cache_file: Option<PathBuf>,
-
-    /// prefetch domain
-    ///
-    /// ```
-    /// prefetch-domain [yes|no]
-    ///
-    /// example:
-    ///   prefetch-domain yes
-    /// ```
-    prefetch_domain: Option<bool>,
-
-    /// cache serve expired
-    ///
-    /// serve-expired [yes|no]
-    /// ```
-    /// example:
-    ///   serve-expired yes
-    /// ```
-    serve_expired: Option<bool>,
-    /// cache serve expired TTL
-    ///
-    /// serve-expired-ttl [num]
-    /// ```
-    /// example:
-    ///   serve-expired-ttl 0
-    /// ```
-    serve_expired_ttl: Option<u64>,
-    /// reply TTL value to use when replying with expired data
-    ///
-    /// serve-expired-reply-ttl [num]
-    /// ```
-    /// example:
-    ///   serve-expired-reply-ttl 30
-    /// ```
-    serve_expired_reply_ttl: Option<u64>,
+    domain_rule_map: DomainRuleMap,
 
     /// List of hosts that supply bogus NX domain results
     bogus_nxdomain: Arc<IpSet>,
@@ -141,171 +45,9 @@ pub struct SmartDnsConfig {
 
     /// List of IPs that will be ignored
     ignore_ip: Arc<IpSet>,
-
-    /// speed check mode
-    ///
-    /// speed-check-mode [ping|tcp:port|http:port|https:port|none|,]
-    /// ```ini
-    /// example:
-    ///   speed-check-mode ping,tcp:8080,http:80,https
-    ///   speed-check-mode tcp:443,ping
-    ///   speed-check-mode none
-    /// ```
-    speed_check_mode: SpeedCheckModeList,
-
-    /// force AAAA query return SOA
-    ///
-    /// force-AAAA-SOA [yes|no]
-    force_aaaa_soa: Option<bool>,
-
-    /// force specific qtype return soa
-    ///
-    /// force-qtype-SOA [qtypeid |...]
-    ///
-    /// qtypeid: https://en.wikipedia.org/wiki/List_of_DNS_record_types
-    /// ```ini
-    /// example:
-    ///   force-qtype-SOA 65 28
-    /// ```
-    force_qtype_soa: HashSet<RecordType>,
-
-    /// Enable IPV4, IPV6 dual stack IP optimization selection strategy
-    ///
-    /// dualstack-ip-selection [yes|no]
-    dualstack_ip_selection: Option<bool>,
-    /// dualstack-ip-selection-threshold [num] (0~1000)
-    dualstack_ip_selection_threshold: Option<u16>,
-    /// dualstack-ip-allow-force-AAAA [yes|no]
-    dualstack_ip_allow_force_aaaa: Option<bool>,
-
-    /// edns client subnet
-    ///
-    /// ```
-    /// example:
-    ///   edns-client-subnet [ip/subnet]
-    ///   edns-client-subnet 192.168.1.1/24
-    ///   edns-client-subnet 8::8/56
-    /// ```
-    edns_client_subnet: Option<IpNet>,
-
-    /// ttl for all resource record
-    rr_ttl: Option<u64>,
-    /// minimum ttl for resource record
-    rr_ttl_min: Option<u64>,
-    /// maximum ttl for resource record
-    rr_ttl_max: Option<u64>,
-    /// maximum reply ttl for resource record
-    rr_ttl_reply_max: Option<u64>,
-
-    /// ttl for local address and host (default: rr-ttl-min)
-    local_ttl: Option<u64>,
-
-    /// Maximum number of IPs returned to the client|8|number of IPs, 1~16
-    max_reply_ip_num: Option<u8>,
-
-    /// response mode
-    ///
-    /// response-mode [first-ping|fastest-ip|fastest-response]
-    response_mode: Option<ResponseMode>,
-
-    /// set log level
-    ///
-    /// log-level [level], level=fatal, error, warn, notice, info, debug
-    log_level: Option<String>,
-    /// file path of log file.
-    log_file: Option<PathBuf>,
-    /// size of each log file, support k,m,g
-    log_size: Option<u64>,
-    /// number of logs, 0 means disable log
-    log_num: Option<u64>,
-    /// log file mode
-    log_file_mode: Option<FileMode>,
-    // log filter
-    log_filter: Option<String>,
-
-    /// dns audit
-    ///
-    /// enable or disable audit.
-    audit_enable: Option<bool>,
-    /// audit file
-    ///
-    /// ```
-    /// example 1:
-    ///   audit-file /var/log/smartdns-audit.log
-    ///
-    /// example 2:
-    ///   audit-file /var/log/smartdns-audit.csv
-    /// ```
-    audit_file: Option<PathBuf>,
-    /// audit-size size of each audit file, support k,m,g
-    audit_size: Option<u64>,
-    /// number of audit files.
-    audit_num: Option<usize>,
-    /// audit file mode
-    audit_file_mode: Option<FileMode>,
-
-    /// Support reading dnsmasq dhcp file to resolve local hostname
-    dnsmasq_lease_file: Option<PathBuf>,
-
-    /// certificate file
-    ca_file: Option<PathBuf>,
-    /// certificate path
-    ca_path: Option<PathBuf>,
-
-    /// remote dns server list
-    servers: HashMap<String, Vec<NameServerInfo>>,
-
-    /// specific nameserver to domain
-    ///
-    /// nameserver /domain/[group|-]
-    ///
-    /// ```
-    /// example:
-    ///   nameserver /www.example.com/office, Set the domain name to use the appropriate server group.
-    ///   nameserver /www.example.com/-, ignore this domain
-    /// ```
-    forward_rules: Vec<ForwardRule>,
-
-    /// specific address to domain
-    ///
-    /// address /domain/[ip|-|-4|-6|#|#4|#6]
-    ///
-    /// ```
-    /// example:
-    ///   address /www.example.com/1.2.3.4, return ip 1.2.3.4 to client
-    ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
-    ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
-    /// ```
-    address_rules: AddressRules,
-
-    /// set domain rules
-    domain_rules: DomainRules,
-
-    cnames: CNameRules,
-
-    /// The proxy server for upstream querying.
-    proxy_servers: Arc<HashMap<String, ProxyConfig>>,
-
-    resolv_file: Option<String>,
-    domain_sets: HashMap<String, HashSet<Name>>,
-
-    domain_rule_map: DomainRuleMap,
 }
 
-pub type DomainSets = HashMap<String, HashSet<Name>>;
-pub type ForwardRules = Vec<ForwardRule>;
-pub type AddressRules = Vec<ConfigItem<DomainId, DomainAddress>>;
-pub type DomainRules = Vec<ConfigItem<DomainId, DomainRule>>;
-pub type CNameRules = Vec<ConfigItem<DomainId, CNameRule>>;
-
 impl SmartDnsConfig {
-    pub fn new() -> Self {
-        Self {
-            servers: HashMap::from([("default".to_string(), Default::default())]),
-            ..Default::default()
-        }
-    }
-
     pub fn load<P: AsRef<Path>>(path: Option<P>) -> Arc<Self> {
         if let Some(ref conf) = path {
             let path = conf.as_ref();
@@ -345,12 +87,19 @@ impl SmartDnsConfig {
     fn load_from_file<P: AsRef<Path>>(path: P) -> Arc<Self> {
         let path = path.as_ref();
 
-        let mut cfg = Self::new();
+        let mut builder = Self::builder();
         if !path.exists() {
             panic!("configuration file {:?} not exist.", path);
         }
-        cfg.load_file(path).expect("load conf file filed");
-        cfg.finalize()
+        builder.load_file(path).expect("load conf file filed");
+        builder.build().into()
+    }
+
+    pub fn builder() -> SmartDnsConfigBuilder {
+        SmartDnsConfigBuilder(InnerConfig {
+            servers: HashMap::from([(DEFAULT_GROUP.to_string(), Default::default())]),
+            ..Default::default()
+        })
     }
 }
 
@@ -359,7 +108,6 @@ impl SmartDnsConfig {
     pub fn summary(&self) {
         info!(r#"whoami 👉 {}"#, self.server_name());
 
-        const DEFAULT_GROUP: &str = "default";
         for (group, servers) in self.servers.iter() {
             if group == DEFAULT_GROUP {
                 continue;
@@ -412,6 +160,26 @@ impl SmartDnsConfig {
     #[inline]
     pub fn num_workers(&self) -> Option<usize> {
         self.num_workers
+    }
+    /// dns server bind ip and port, default dns server port is 53, support binding multi ip and port
+    pub fn binds(&self) -> &[BindServer] {
+        &self.inner.binds
+    }
+    /// bind tcp server
+    pub fn binds_tcp(&self) -> &[BindServer] {
+        &self.inner.binds_tcp
+    }
+    /// bind https server
+    pub fn binds_https(&self) -> &[BindServer] {
+        &self.inner.binds_https
+    }
+    /// bind tls server
+    pub fn binds_tls(&self) -> &[BindServer] {
+        &self.inner.binds_tls
+    }
+    /// bind quic server
+    pub fn binds_quic(&self) -> &[BindServer] {
+        &self.inner.binds_quic
     }
 
     /// SSL Certificate file path
@@ -737,6 +505,468 @@ impl SmartDnsConfig {
     pub fn find_domain_rule(&self, domain: &Name) -> Option<Arc<DomainRuleTreeNode>> {
         self.domain_rule_map.find(domain).cloned()
     }
+}
+
+impl std::ops::Deref for SmartDnsConfig {
+    type Target = InnerConfig;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+pub struct SmartDnsConfigBuilder(InnerConfig);
+
+impl SmartDnsConfigBuilder {
+    pub fn build(self) -> SmartDnsConfig {
+        let mut cfg = self.0;
+
+        if cfg.binds.is_empty()
+            && cfg.binds_tcp.is_empty()
+            && cfg.binds_https.is_empty()
+            && cfg.binds_tls.is_empty()
+            && cfg.binds_quic.is_empty()
+        {
+            cfg.binds.push(BindServer {
+                sock_addr: ("0.0.0.0", 53).to_socket_addrs().unwrap().next().unwrap(),
+                device: None,
+                ssl_config: None,
+                opts: Default::default(),
+            })
+        }
+
+        let bogus_nxdomain: Arc<IpSet> = cfg.bogus_nxdomain.compact().into();
+        let blacklist_ip: Arc<IpSet> = cfg.blacklist_ip.compact().into();
+        let whitelist_ip: Arc<IpSet> = cfg.whitelist_ip.compact().into();
+        let ignore_ip: Arc<IpSet> = cfg.ignore_ip.compact().into();
+
+        if !cfg.cnames.is_empty() {
+            cfg.cnames.dedup_by(|a, b| a.name == b.name);
+        }
+
+        let domain_rule_map = DomainRuleMap::create(
+            &cfg.domain_rules,
+            &cfg.address_rules,
+            &cfg.forward_rules,
+            &cfg.domain_sets,
+            &cfg.cnames,
+        );
+
+        // set nameserver group for bootstraping
+        for server in cfg.servers.values_mut().flatten() {
+            if server.url.addrs().is_empty() {
+                let host = server.url.host().to_string();
+                if let Ok(Some(rule)) =
+                    Name::from_str(host.as_str()).map(|domain| domain_rule_map.find(&domain))
+                {
+                    server.resolve_group = rule.get(|r| r.nameserver.clone());
+                }
+            }
+        }
+
+        // find device address
+        {
+            let f = |bind: &'_ &mut BindServer| bind.device.is_some();
+
+            let binds = [
+                cfg.binds.iter_mut().filter(f),
+                cfg.binds_tcp.iter_mut().filter(f),
+                cfg.binds_https.iter_mut().filter(f),
+                cfg.binds_tls.iter_mut().filter(f),
+                cfg.binds_quic.iter_mut().filter(f),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+            if !binds.is_empty() {
+                #[cfg(not(target_os = "android"))]
+                {
+                    use local_ip_address::list_afinet_netifas;
+                    match list_afinet_netifas() {
+                        Ok(network_interfaces) => {
+                            for bind in binds {
+                                let device = bind.device.as_deref().expect("bind device");
+
+                                let ips = network_interfaces
+                                    .iter()
+                                    .filter(|(dev, _ip)| dev == device)
+                                    .map(|(_, ip)| *ip)
+                                    .collect::<Vec<_>>();
+
+                                if ips.is_empty() {
+                                    warn!("network device {} not found.", device);
+                                }
+
+                                let ip = ips.into_iter().find(|ip| {
+                                    match bind.sock_addr {
+                                        SocketAddr::V4(_) => ip.is_ipv4(),
+                                        SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
+                                    }
+                                });
+
+                                match ip {
+                                    Some(ip) => bind.sock_addr.set_ip(ip),
+                                    None => {
+                                        warn!("no ip address on device {}", device)
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!("bind device failed, {}", err);
+                        }
+                    }
+                }
+
+                #[cfg(target_os = "android")]
+                warn!("currently, bind device {} not support for android.", device);
+            }
+        }
+
+        // dedup bind address
+        {
+            // priority: QUIC => UDP
+            let mut udp_addr = HashSet::new();
+            // priority: Https => TLS => TCP
+            let mut tcp_addr = HashSet::new();
+
+            fn dedup(addr_set: &mut HashSet<SocketAddr>, binds: &[BindServer]) -> Vec<usize> {
+                let mut remove_idx = vec![];
+                for (idx, bind) in binds.iter().enumerate().rev() {
+                    if !addr_set.insert(bind.sock_addr) {
+                        remove_idx.push(idx);
+                    }
+                }
+                remove_idx
+            }
+
+            // quic udp
+            for idx in dedup(&mut udp_addr, &cfg.binds_quic) {
+                let bind = cfg.binds_quic.remove(idx);
+                warn!("remove duplicated bind-quic {:?}", bind.sock_addr);
+            }
+
+            // udp
+            for idx in dedup(&mut udp_addr, &cfg.binds) {
+                let bind = cfg.binds.remove(idx);
+                warn!("remove duplicated bind-udp {:?}", bind.sock_addr);
+            }
+
+            // https tcp
+            for idx in dedup(&mut tcp_addr, &cfg.binds_https) {
+                let bind = cfg.binds_https.remove(idx);
+                warn!("remove duplicated bind-https {:?}", bind.sock_addr);
+            }
+            // tls tcp
+            for idx in dedup(&mut tcp_addr, &cfg.binds_tls) {
+                let bind = cfg.binds_tls.remove(idx);
+                warn!("remove duplicated bind-tls {:?}", bind.sock_addr);
+            }
+
+            // tcp
+            for idx in dedup(&mut tcp_addr, &cfg.binds_tcp) {
+                let bind = cfg.binds_tcp.remove(idx);
+                warn!("remove duplicated bind-tcp {:?}", bind.sock_addr);
+            }
+        }
+
+        SmartDnsConfig {
+            inner: cfg,
+            domain_rule_map,
+            bogus_nxdomain,
+            blacklist_ip,
+            whitelist_ip,
+            ignore_ip,
+        }
+    }
+}
+
+impl std::ops::Deref for SmartDnsConfigBuilder {
+    type Target = InnerConfig;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for SmartDnsConfigBuilder {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Default)]
+pub struct InnerConfig {
+    /// dns server name, default is host name
+    ///
+    /// ```
+    /// server-name,
+    ///
+    /// example:
+    ///   server-name smartdns
+    /// ```
+    server_name: Option<Name>,
+
+    /// The number of worker threads
+    num_workers: Option<usize>,
+
+    /// whether resolv local hostname to ip address
+    resolv_hostname: Option<bool>,
+
+    /// dns server run user
+    ///
+    /// ```
+    /// user [username]
+    ///
+    /// exmaple:
+    ///   user nobody
+    /// ```
+    user: Option<String>,
+
+    /// Local domain suffix appended to DHCP names and hosts file entries.
+    domain: Option<Name>,
+
+    /// Include another configuration options
+    ///
+    /// conf-file [file]
+    /// ```
+    /// example:
+    ///   conf-file blacklist-ip.conf
+    /// ```
+    conf_file: Option<PathBuf>,
+
+    /// dns server bind ip and port, default dns server port is 53, support binding multi ip and port
+    binds: Vec<BindServer>,
+    /// bind tcp server
+    binds_tcp: Vec<BindServer>,
+    /// bind tls server
+    binds_tls: Vec<BindServer>,
+    /// bind https server
+    binds_https: Vec<BindServer>,
+    /// bind quic server
+    binds_quic: Vec<BindServer>,
+
+    /// SSL Certificate file path
+    bind_cert_file: Option<PathBuf>,
+    /// SSL Certificate key file path
+    bind_cert_key_file: Option<PathBuf>,
+    /// SSL Certificate key file password
+    bind_cert_key_pass: Option<String>,
+
+    /// tcp connection idle timeout
+    ///
+    /// tcp-idle-time [second]
+    tcp_idle_time: Option<u64>,
+
+    /// dns cache size
+    ///
+    /// ```
+    /// cache-size [number]
+    ///   0: for no cache
+    /// ```
+    cache_size: Option<usize>,
+    /// enable persist cache when restart
+    cache_persist: Option<bool>,
+    /// cache persist file
+    cache_file: Option<PathBuf>,
+
+    /// prefetch domain
+    ///
+    /// ```
+    /// prefetch-domain [yes|no]
+    ///
+    /// example:
+    ///   prefetch-domain yes
+    /// ```
+    prefetch_domain: Option<bool>,
+
+    /// cache serve expired
+    ///
+    /// serve-expired [yes|no]
+    /// ```
+    /// example:
+    ///   serve-expired yes
+    /// ```
+    serve_expired: Option<bool>,
+    /// cache serve expired TTL
+    ///
+    /// serve-expired-ttl [num]
+    /// ```
+    /// example:
+    ///   serve-expired-ttl 0
+    /// ```
+    serve_expired_ttl: Option<u64>,
+    /// reply TTL value to use when replying with expired data
+    ///
+    /// serve-expired-reply-ttl [num]
+    /// ```
+    /// example:
+    ///   serve-expired-reply-ttl 30
+    /// ```
+    serve_expired_reply_ttl: Option<u64>,
+
+    /// List of hosts that supply bogus NX domain results
+    bogus_nxdomain: IpSet,
+
+    /// List of IPs that will be filtered when nameserver is configured -blacklist-ip parameter
+    blacklist_ip: IpSet,
+
+    /// List of IPs that will be accepted when nameserver is configured -whitelist-ip parameter
+    whitelist_ip: IpSet,
+
+    /// List of IPs that will be ignored
+    ignore_ip: IpSet,
+
+    /// speed check mode
+    ///
+    /// speed-check-mode [ping|tcp:port|http:port|https:port|none|,]
+    /// ```ini
+    /// example:
+    ///   speed-check-mode ping,tcp:8080,http:80,https
+    ///   speed-check-mode tcp:443,ping
+    ///   speed-check-mode none
+    /// ```
+    speed_check_mode: SpeedCheckModeList,
+
+    /// force AAAA query return SOA
+    ///
+    /// force-AAAA-SOA [yes|no]
+    force_aaaa_soa: Option<bool>,
+
+    /// force specific qtype return soa
+    ///
+    /// force-qtype-SOA [qtypeid |...]
+    ///
+    /// qtypeid: https://en.wikipedia.org/wiki/List_of_DNS_record_types
+    /// ```ini
+    /// example:
+    ///   force-qtype-SOA 65 28
+    /// ```
+    force_qtype_soa: HashSet<RecordType>,
+
+    /// Enable IPV4, IPV6 dual stack IP optimization selection strategy
+    ///
+    /// dualstack-ip-selection [yes|no]
+    dualstack_ip_selection: Option<bool>,
+    /// dualstack-ip-selection-threshold [num] (0~1000)
+    dualstack_ip_selection_threshold: Option<u16>,
+    /// dualstack-ip-allow-force-AAAA [yes|no]
+    dualstack_ip_allow_force_aaaa: Option<bool>,
+
+    /// edns client subnet
+    ///
+    /// ```
+    /// example:
+    ///   edns-client-subnet [ip/subnet]
+    ///   edns-client-subnet 192.168.1.1/24
+    ///   edns-client-subnet 8::8/56
+    /// ```
+    edns_client_subnet: Option<IpNet>,
+
+    /// ttl for all resource record
+    rr_ttl: Option<u64>,
+    /// minimum ttl for resource record
+    rr_ttl_min: Option<u64>,
+    /// maximum ttl for resource record
+    rr_ttl_max: Option<u64>,
+    /// maximum reply ttl for resource record
+    rr_ttl_reply_max: Option<u64>,
+
+    /// ttl for local address and host (default: rr-ttl-min)
+    local_ttl: Option<u64>,
+
+    /// Maximum number of IPs returned to the client|8|number of IPs, 1~16
+    max_reply_ip_num: Option<u8>,
+
+    /// response mode
+    ///
+    /// response-mode [first-ping|fastest-ip|fastest-response]
+    response_mode: Option<ResponseMode>,
+
+    /// set log level
+    ///
+    /// log-level [level], level=fatal, error, warn, notice, info, debug
+    log_level: Option<String>,
+    /// file path of log file.
+    log_file: Option<PathBuf>,
+    /// size of each log file, support k,m,g
+    log_size: Option<u64>,
+    /// number of logs, 0 means disable log
+    log_num: Option<u64>,
+    /// log file mode
+    log_file_mode: Option<FileMode>,
+    // log filter
+    log_filter: Option<String>,
+
+    /// dns audit
+    ///
+    /// enable or disable audit.
+    audit_enable: Option<bool>,
+    /// audit file
+    ///
+    /// ```
+    /// example 1:
+    ///   audit-file /var/log/smartdns-audit.log
+    ///
+    /// example 2:
+    ///   audit-file /var/log/smartdns-audit.csv
+    /// ```
+    audit_file: Option<PathBuf>,
+    /// audit-size size of each audit file, support k,m,g
+    audit_size: Option<u64>,
+    /// number of audit files.
+    audit_num: Option<usize>,
+    /// audit file mode
+    audit_file_mode: Option<FileMode>,
+
+    /// Support reading dnsmasq dhcp file to resolve local hostname
+    dnsmasq_lease_file: Option<PathBuf>,
+
+    /// certificate file
+    ca_file: Option<PathBuf>,
+    /// certificate path
+    ca_path: Option<PathBuf>,
+
+    /// remote dns server list
+    servers: HashMap<String, Vec<NameServerInfo>>,
+
+    /// specific nameserver to domain
+    ///
+    /// nameserver /domain/[group|-]
+    ///
+    /// ```
+    /// example:
+    ///   nameserver /www.example.com/office, Set the domain name to use the appropriate server group.
+    ///   nameserver /www.example.com/-, ignore this domain
+    /// ```
+    forward_rules: Vec<ForwardRule>,
+
+    /// specific address to domain
+    ///
+    /// address /domain/[ip|-|-4|-6|#|#4|#6]
+    ///
+    /// ```
+    /// example:
+    ///   address /www.example.com/1.2.3.4, return ip 1.2.3.4 to client
+    ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
+    ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
+    /// ```
+    address_rules: AddressRules,
+
+    /// set domain rules
+    domain_rules: DomainRules,
+
+    cnames: CNameRules,
+
+    /// The proxy server for upstream querying.
+    proxy_servers: Arc<HashMap<String, ProxyConfig>>,
+
+    resolv_file: Option<String>,
+    domain_sets: HashMap<String, HashSet<Name>>,
 }
 
 #[derive(Clone)]
@@ -1486,161 +1716,7 @@ mod parse {
     use super::*;
     use std::{collections::hash_map::Entry, ffi::OsStr, net::AddrParseError};
 
-    impl SmartDnsConfig {
-        pub fn finalize(mut self) -> Arc<Self> {
-            if self.binds.is_empty()
-                && self.binds_tcp.is_empty()
-                && self.binds_https.is_empty()
-                && self.binds_tls.is_empty()
-                && self.binds_quic.is_empty()
-            {
-                self.binds.push(BindServer {
-                    sock_addr: ("0.0.0.0", 53).to_socket_addrs().unwrap().next().unwrap(),
-                    device: None,
-                    ssl_config: None,
-                    opts: Default::default(),
-                })
-            }
-
-            self.bogus_nxdomain = self.bogus_nxdomain.compact().into();
-            self.blacklist_ip = self.blacklist_ip.compact().into();
-            self.whitelist_ip = self.whitelist_ip.compact().into();
-            self.ignore_ip = self.ignore_ip.compact().into();
-
-            self.cnames.dedup_by(|a, b| a.name == b.name);
-
-            let domain_rule_map = DomainRuleMap::create(
-                self.domain_rules(),
-                self.address_rules(),
-                self.forward_rules(),
-                self.domain_sets(),
-                &self.cnames,
-            );
-
-            // set nameserver group for bootstraping
-            for server in self.servers.values_mut().flatten() {
-                if server.url.addrs().is_empty() {
-                    let host = server.url.host().to_string();
-                    if let Ok(Some(rule)) =
-                        Name::from_str(host.as_str()).map(|domain| domain_rule_map.find(&domain))
-                    {
-                        server.resolve_group = rule.get(|r| r.nameserver.clone());
-                    }
-                }
-            }
-
-            // find device address
-            {
-                let f = |bind: &'_ &mut BindServer| bind.device.is_some();
-
-                let binds = [
-                    self.binds.iter_mut().filter(f),
-                    self.binds_tcp.iter_mut().filter(f),
-                    self.binds_https.iter_mut().filter(f),
-                    self.binds_tls.iter_mut().filter(f),
-                    self.binds_quic.iter_mut().filter(f),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-
-                if !binds.is_empty() {
-                    #[cfg(not(target_os = "android"))]
-                    {
-                        use local_ip_address::list_afinet_netifas;
-                        match list_afinet_netifas() {
-                            Ok(network_interfaces) => {
-                                for bind in binds {
-                                    let device = bind.device.as_deref().expect("bind device");
-
-                                    let ips = network_interfaces
-                                        .iter()
-                                        .filter(|(dev, _ip)| dev == device)
-                                        .map(|(_, ip)| *ip)
-                                        .collect::<Vec<_>>();
-
-                                    if ips.is_empty() {
-                                        warn!("network device {} not found.", device);
-                                    }
-
-                                    let ip = ips.into_iter().find(|ip| {
-                                        match bind.sock_addr {
-                                            SocketAddr::V4(_) => ip.is_ipv4(),
-                                            SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
-                                        }
-                                    });
-
-                                    match ip {
-                                        Some(ip) => bind.sock_addr.set_ip(ip),
-                                        None => {
-                                            warn!("no ip address on device {}", device)
-                                        }
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                warn!("bind device failed, {}", err);
-                            }
-                        }
-                    }
-
-                    #[cfg(target_os = "android")]
-                    warn!("currently, bind device {} not support for android.", device);
-                }
-            }
-
-            self.domain_rule_map = domain_rule_map;
-
-            // dedup bind address
-            {
-                // priority: QUIC => UDP
-                let mut udp_addr = HashSet::new();
-                // priority: Https => TLS => TCP
-                let mut tcp_addr = HashSet::new();
-
-                fn dedup(addr_set: &mut HashSet<SocketAddr>, binds: &[BindServer]) -> Vec<usize> {
-                    let mut remove_idx = vec![];
-                    for (idx, bind) in binds.iter().enumerate().rev() {
-                        if !addr_set.insert(bind.sock_addr) {
-                            remove_idx.push(idx);
-                        }
-                    }
-                    remove_idx
-                }
-
-                // quic udp
-                for idx in dedup(&mut udp_addr, &self.binds_quic) {
-                    let bind = self.binds_quic.remove(idx);
-                    warn!("remove duplicated bind-quic {:?}", bind.sock_addr);
-                }
-
-                // udp
-                for idx in dedup(&mut udp_addr, &self.binds) {
-                    let bind = self.binds.remove(idx);
-                    warn!("remove duplicated bind-udp {:?}", bind.sock_addr);
-                }
-
-                // https tcp
-                for idx in dedup(&mut tcp_addr, &self.binds_https) {
-                    let bind = self.binds_https.remove(idx);
-                    warn!("remove duplicated bind-https {:?}", bind.sock_addr);
-                }
-                // tls tcp
-                for idx in dedup(&mut tcp_addr, &self.binds_tls) {
-                    let bind = self.binds_tls.remove(idx);
-                    warn!("remove duplicated bind-tls {:?}", bind.sock_addr);
-                }
-
-                // tcp
-                for idx in dedup(&mut tcp_addr, &self.binds_tcp) {
-                    let bind = self.binds_tcp.remove(idx);
-                    warn!("remove duplicated bind-tcp {:?}", bind.sock_addr);
-                }
-            }
-
-            self.into()
-        }
-
+    impl SmartDnsConfigBuilder {
         pub fn with(mut self, config: &str) -> Self {
             self.config(config);
             self
@@ -1671,8 +1747,8 @@ mod parse {
             Ok(())
         }
 
-        fn config(&mut self, conf_line: &str) {
-            let mut conf_line = conf_line.trim_start();
+        pub fn config(&mut self, conf_item: &str) {
+            let mut conf_line = conf_item.trim_start();
 
             if let Some(line) = preline(conf_line) {
                 conf_line = line;
@@ -1737,22 +1813,22 @@ mod parse {
                         }
                         "bogus-nxdomain" => {
                             if let Ok(v) = options.parse::<IpNet>() {
-                                self.bogus_nxdomain = (self.bogus_nxdomain.as_ref() + v).into()
+                                self.bogus_nxdomain += v;
                             }
                         }
                         "blacklist-ip" => {
                             if let Ok(v) = options.parse::<IpNet>() {
-                                self.blacklist_ip = (self.blacklist_ip.as_ref() + v).into()
+                                self.blacklist_ip += v;
                             }
                         }
                         "whitelist-ip" => {
                             if let Ok(v) = options.parse::<IpNet>() {
-                                self.whitelist_ip = (self.whitelist_ip.as_ref() + v).into()
+                                self.whitelist_ip += v;
                             }
                         }
                         "ignore-ip" => {
                             if let Ok(v) = options.parse::<IpNet>() {
-                                self.ignore_ip = (self.ignore_ip.as_ref() + v).into()
+                                self.ignore_ip += v;
                             }
                         }
                         "speed-check-mode" => self.config_speed_check_mode(options),
@@ -1847,7 +1923,7 @@ mod parse {
             if let Ok(mut server) = NameServerInfo::from_str(server_options) {
                 if !server.exclude_default_group {
                     self.servers
-                        .get_mut("default")
+                        .get_mut(DEFAULT_GROUP)
                         .unwrap()
                         .push(server.clone());
                 }
@@ -2111,11 +2187,11 @@ mod parse {
 
         #[test]
         fn test_config_binds_dedup() {
-            let cfg = SmartDnsConfig::new()
+            let cfg = SmartDnsConfig::builder()
                 .with("bind-tcp 0.0.0.0:4453@eth1")
                 .with("bind-tls 0.0.0.0:4452@eth1")
                 .with("bind-https 0.0.0.0:4453@eth1")
-                .finalize();
+                .build();
 
             assert_eq!(cfg.binds_tcp.len(), 0);
             assert_eq!(cfg.binds_tls.len(), 1);
@@ -2124,10 +2200,10 @@ mod parse {
 
         #[test]
         fn test_config_bind_with_device() {
-            let cfg = SmartDnsConfig::new()
+            let cfg = SmartDnsConfig::builder()
                 .with("bind 0.0.0.0:4453@eth1")
                 .with("bind 0.0.0.0:4453@eth1")
-                .finalize();
+                .build();
 
             assert_eq!(cfg.binds.len(), 1);
 
@@ -2140,7 +2216,7 @@ mod parse {
 
         #[test]
         fn test_config_bind_with_device_flags() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("bind-https 0.0.0.0:443@eth2 -no-rule-addr");
 
@@ -2154,7 +2230,7 @@ mod parse {
 
         #[test]
         fn test_config_bind_https() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config(
                 "bind-https 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key",
@@ -2183,7 +2259,7 @@ mod parse {
 
         #[test]
         fn test_config_server_0() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config(
                 "server-https https://223.5.5.5/dns-query  -group bootstrap -exclude-default-group",
@@ -2202,14 +2278,14 @@ mod parse {
 
         #[test]
         fn test_config_server_1() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
 
             cfg.config("server-https https://223.5.5.5/dns-query");
 
             assert_eq!(cfg.servers.len(), 1);
 
-            let server = cfg.servers.get("default").unwrap().first().unwrap();
+            let server = cfg.servers.get(DEFAULT_GROUP).unwrap().first().unwrap();
 
             assert_eq!(server.url.proto(), &Protocol::Https);
             assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
@@ -2219,7 +2295,7 @@ mod parse {
 
         #[test]
         fn test_config_server_2() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
 
             cfg.config(
@@ -2240,14 +2316,14 @@ mod parse {
 
         #[test]
         fn test_config_tls_server() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
 
             cfg.config(
                 "server-tls 45.90.28.0 -host-name: dns.nextdns.io -tls-host-verify: dns.nextdns.io",
             );
 
-            let servers = cfg.servers.get("default").unwrap();
+            let servers = cfg.servers.get(DEFAULT_GROUP).unwrap();
 
             assert_eq!(servers.len(), 1);
 
@@ -2262,7 +2338,7 @@ mod parse {
 
         #[test]
         fn test_config_address_soa() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("address /test.example.com/#");
 
@@ -2278,7 +2354,7 @@ mod parse {
 
         #[test]
         fn test_config_address_soa_v4() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("address /test.example.com/#4");
 
@@ -2294,7 +2370,7 @@ mod parse {
 
         #[test]
         fn test_config_address_soa_v6() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("address /test.example.com/#6");
 
@@ -2310,7 +2386,7 @@ mod parse {
 
         #[test]
         fn test_config_address_ignore() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("address /test.example.com/-");
 
@@ -2326,7 +2402,7 @@ mod parse {
 
         #[test]
         fn test_config_address_ignore_v4() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("address /test.example.com/-4");
 
@@ -2342,7 +2418,7 @@ mod parse {
 
         #[test]
         fn test_config_address_ignore_v6() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("address /test.example.com/-6");
 
@@ -2358,7 +2434,7 @@ mod parse {
 
         #[test]
         fn test_config_nameserver() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("nameserver /doh.pub/bootstrap");
 
@@ -2374,7 +2450,7 @@ mod parse {
 
         #[test]
         fn test_config_domain_rule() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("domain-rule /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
@@ -2395,7 +2471,7 @@ mod parse {
 
         #[test]
         fn test_config_domain_rule_2() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("domain-rules /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
@@ -2416,7 +2492,7 @@ mod parse {
 
         #[test]
         fn test_parse_config_log_file_mode() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
 
             cfg.config("log-file-mode 644");
             assert_eq!(cfg.log_file_mode, Some(0o644u32.into()));
@@ -2426,7 +2502,7 @@ mod parse {
 
         #[test]
         fn test_parse_config_speed_check_mode() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             cfg.config("speed-check-mode ping,tcp:123");
 
             assert_eq!(cfg.speed_check_mode.len(), 2);
@@ -2440,7 +2516,7 @@ mod parse {
 
         #[test]
         fn test_parse_config_speed_check_mode_https_omit_port() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             cfg.config("speed-check-mode http,https");
 
             assert_eq!(cfg.speed_check_mode.len(), 2);
@@ -2458,7 +2534,7 @@ mod parse {
         #[test]
         fn test_parse_config_audit_size_1() {
             use byte_unit::n_mb_bytes;
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             cfg.config("audit-size 80mb");
             assert_eq!(cfg.audit_size, Some(n_mb_bytes(80) as u64));
         }
@@ -2466,7 +2542,7 @@ mod parse {
         #[test]
         fn test_parse_config_audit_size_2() {
             use byte_unit::n_gb_bytes;
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             cfg.config("audit-size 30 gb");
             assert_eq!(cfg.audit_size, Some(n_gb_bytes(30) as u64));
         }
@@ -2485,7 +2561,7 @@ mod parse {
 
         #[test]
         fn test_parse_config_proxy_server() {
-            let mut cfg = SmartDnsConfig::new();
+            let mut cfg = SmartDnsConfig::builder();
             cfg.config("proxy-server socks5://127.0.0.1:1080 -n abc");
 
             assert_eq!(
