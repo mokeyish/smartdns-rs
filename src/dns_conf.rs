@@ -621,7 +621,7 @@ impl SmartDnsConfigBuilder {
                 }
 
                 #[cfg(target_os = "android")]
-                warn!("currently, bind device {} not support for android.", device);
+                warn!("currently, binding device does not support for android.");
             }
         }
 
