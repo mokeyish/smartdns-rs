@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use cfg_if::cfg_if;
 use cli::*;
 use dns_conf::BindServer;
 use std::{io, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -312,7 +311,10 @@ fn run_server(conf: Option<PathBuf>) {
 
     info!("server starting up");
 
-    runtime.block_on(signal::terminate()).unwrap_or_default();
+    runtime.block_on(async move {
+        let _ = signal::terminate().await;
+        let _ = server.abort().await;
+    });
 
     runtime.shutdown_timeout(Duration::from_secs(5));
 
@@ -511,18 +513,14 @@ fn tcp(
     debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
     let tcp_listener = std::net::TcpListener::bind(sock_addr)?;
 
-    if let Some(device) = bind_device {
-        cfg_if! {
-            if #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))] {
-                let sock_ref = socket2::SockRef::from(&tcp_listener);
-                sock_ref.bind_device(Some(device.as_bytes()))?;
-            } else {
-                drop(device)
-            }
+    {
+        let sock_ref = socket2::SockRef::from(&tcp_listener);
+        sock_ref.set_nonblocking(true)?;
+        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+        if let Some(device) = bind_device {
+            sock_ref.bind_device(Some(device.as_bytes()))?;
         }
     }
-
-    tcp_listener.set_nonblocking(true)?;
 
     let tcp_listener = TcpListener::from_std(tcp_listener)?;
 
@@ -546,18 +544,15 @@ fn udp(sock_addr: SocketAddr, bind_device: Option<&str>, bind_type: &str) -> io:
     debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
     let udp_socket = std::net::UdpSocket::bind(sock_addr)?;
 
-    if let Some(device) = bind_device {
-        cfg_if! {
-            if #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))] {
-                let sock_ref = socket2::SockRef::from(&udp_socket);
-                sock_ref.bind_device(Some(device.as_bytes()))?;
-            } else {
-                drop(device)
-            }
+    {
+        let sock_ref = socket2::SockRef::from(&udp_socket);
+        sock_ref.set_nonblocking(true)?;
+
+        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+        if let Some(device) = bind_device {
+            sock_ref.bind_device(Some(device.as_bytes()))?;
         }
     }
-
-    udp_socket.set_nonblocking(true)?;
 
     let udp_socket = UdpSocket::from_std(udp_socket)?;
 

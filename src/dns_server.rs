@@ -1,5 +1,6 @@
 use cfg_if::cfg_if;
 use futures::Future;
+use futures_util::future::{abortable, Aborted};
 
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -11,6 +12,7 @@ use crate::{
     dns_conf::ServerOpts,
     dns_error::LookupError,
     log::{debug, error, info, warn},
+    third_ext::FutureJoinAllExt,
 };
 
 use trust_dns_proto::{
@@ -52,6 +54,19 @@ impl ServerRegistry {
                 server_opts: opts,
             })),
         }
+    }
+
+    pub async fn abort(self) -> Result<(), Aborted> {
+        let (server, abort_handle) = abortable(async move {
+            let _ = self
+                .servers
+                .into_values()
+                .map(|s| s.block_until_done())
+                .join_all()
+                .await;
+        });
+        abort_handle.abort();
+        server.await
     }
 }
 
