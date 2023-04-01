@@ -802,6 +802,13 @@ pub struct BindServer {
     pub opts: ServerOpts,
 }
 
+impl BindServer {
+    // bind network device.
+    pub fn device(&self) -> Option<&str> {
+        self.device.as_deref()
+    }
+}
+
 impl FromStr for BindServer {
     type Err = ();
 
