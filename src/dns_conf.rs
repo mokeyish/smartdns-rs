@@ -1516,37 +1516,41 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
 
             let mut dualstack_ip_selection = None;
 
-            let mut parts = parse::split_options(parts[1], ' ').peekable();
+            if parts.len() > 1 {
 
-            while let Some(part) = parts.next() {
-                match part {
-                    "-c" | "-speed-check-mode" => {
-                        while let Some(s) = parts.peek() {
-                            if s.starts_with('-') {
-                                break;
-                            }
+                let mut parts = parse::split_options(parts[1], ' ').peekable();
 
-                            if let Some(Ok(mode)) = parts.next().map(SpeedCheckMode::from_str) {
-                                speed_check_mode.push(mode);
+                while let Some(part) = parts.next() {
+                    match part {
+                        "-c" | "-speed-check-mode" => {
+                            while let Some(s) = parts.peek() {
+                                if s.starts_with('-') {
+                                    break;
+                                }
+    
+                                if let Some(Ok(mode)) = parts.next().map(SpeedCheckMode::from_str) {
+                                    speed_check_mode.push(mode);
+                                }
                             }
                         }
+                        "-a" | "-address" | "--address" => {
+                            address = parts
+                                .next()
+                                .map(DomainAddress::from_str)
+                                .map(|r| r.ok())
+                                .unwrap_or_default()
+                        }
+                        "-n" | "-nameserver" => nameserver = parts.next().map(|s| s.to_string()),
+                        "-d" | "-dualstack-ip-selection" => {
+                            dualstack_ip_selection = parts.next().map(parse::parse_bool)
+                        }
+                        "-p" | "-ipset" => warn!("ignore ipset: {:?}", parts.next()),
+                        "-t" | "-nftset" => warn!("ignore nftset: {:?}", parts.next()),
+                        "-cname" => cname = parts.next().map(|s| s.parse().ok()).unwrap_or_default(),
+                        opt => warn!("unknown option: {}", opt),
                     }
-                    "-a" | "-address" => {
-                        address = parts
-                            .next()
-                            .map(DomainAddress::from_str)
-                            .map(|r| r.ok())
-                            .unwrap_or_default()
-                    }
-                    "-n" | "-nameserver" => nameserver = parts.next().map(|s| s.to_string()),
-                    "-d" | "-dualstack-ip-selection" => {
-                        dualstack_ip_selection = parts.next().map(parse::parse_bool)
-                    }
-                    "-p" | "-ipset" => warn!("ignore ipset: {:?}", parts.next()),
-                    "-t" | "-nftset" => warn!("ignore nftset: {:?}", parts.next()),
-                    "-cname" => cname = parts.next().map(|s| s.parse().ok()).unwrap_or_default(),
-                    opt => warn!("unknown option: {}", opt),
                 }
+    
             }
 
             Ok(Self {
@@ -2148,7 +2152,7 @@ mod parse {
                     && matches!(line.chars().nth(sharp_idx - 1), Some(c) if c.is_whitespace()) =>
             {
                 let preserve = line[0..sharp_idx].trim_end();
-                if !preserve.ends_with("-a") && !preserve.ends_with("-address") {
+                if !preserve.ends_with("-a") && !preserve.ends_with("-address") && !preserve.ends_with("--address") {
                     line = preserve;
                 }
             }
@@ -2351,6 +2355,16 @@ mod parse {
 
             assert_eq!(domain_addr_rule.value, DomainAddress::SOA);
         }
+
+
+        #[test]
+        fn test_config_address_soa_1233113() {
+            let mut cfg = SmartDnsConfig::builder();
+            cfg.config("domain-set -name domain-forwarding-list -file tests/test_confs/block-list.txt");
+            cfg.config("domain-rules /domain-set:domain-forwarding-list/");
+            assert!(cfg.address_rules.last().is_none());
+        }
+
 
         #[test]
         fn test_config_address_soa_v4() {
