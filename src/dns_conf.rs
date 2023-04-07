@@ -2358,7 +2358,7 @@ mod parse {
 
 
         #[test]
-        fn test_config_domain-rules_without_args() {
+        fn test_config_domain_rules_without_args() {
             let mut cfg = SmartDnsConfig::builder();
             cfg.config("domain-set -name domain-forwarding-list -file tests/test_confs/block-list.txt");
             cfg.config("domain-rules /domain-set:domain-forwarding-list/");
