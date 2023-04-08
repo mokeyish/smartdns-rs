@@ -25,7 +25,11 @@ impl DnsZoneMiddleware {
         let catalog = Catalog::new();
 
         let server_net = {
+            #[cfg(not(target_os = "android"))]
             let mut ips = Vec::<IpAddr>::new();
+
+            #[cfg(target_os = "android")]
+            let ips = Vec::<IpAddr>::new();
 
             #[cfg(not(target_os = "android"))]
             {
