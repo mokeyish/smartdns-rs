@@ -48,7 +48,6 @@ trust-dns-server = { git = "https://github.com/mokeyish/trust-dns.git", rev = "1
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
-socket2 = { git = "https://github.com/mokeyish/socket2.git", rev = "80306e7"}
 
 [dependencies]
 cfg-if = "1"
