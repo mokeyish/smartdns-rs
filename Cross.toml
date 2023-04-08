@@ -2,3 +2,5 @@
 image = "ghcr.io/cross-rs/x86_64-apple-darwin-cross"
 [target.aarch64-apple-darwin]
 image = "ghcr.io/cross-rs/aarch64-apple-darwin-cross"
+[target.aarch64-linux-android]
+image = "ghcr.io/cross-rs/aarch64-linux-android:main"
