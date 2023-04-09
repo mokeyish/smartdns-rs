@@ -52,6 +52,10 @@ impl From<ServiceDefinition> for ServiceManager {
 
 impl ServiceManager {
     pub fn install(&self) -> io::Result<()> {
+        // try stopping an existing running service.
+        self.try_stop().unwrap_or_default();
+
+        // install files.
         self.definition.installer.install()?;
 
         if let Some(install) = self.definition.commands.install.as_ref() {
@@ -64,7 +68,7 @@ impl ServiceManager {
     }
 
     pub fn uninstall(&self, purge: bool) -> io::Result<()> {
-        self.stop().unwrap_or_default();
+        self.try_stop().unwrap_or_default();
 
         if let Some(uninstall) = self.definition.commands.uninstall.as_ref() {
             uninstall.spawn()?;
@@ -79,19 +83,23 @@ impl ServiceManager {
     pub fn start(&self) -> io::Result<()> {
         if !matches!(self.status(), Ok(ServiceStatus::Running(_))) {
             self.definition.commands.start.spawn()?;
+            info!("Successfully started service {}", self.definition.name);
+        } else {
+            info!("Service {} already started", self.definition.name);
         }
-
-        info!("Successfully started service {}", self.definition.name);
         Ok(())
     }
 
     pub fn stop(&self) -> io::Result<()> {
-        // Make sure the service is stopped.
+        self.try_stop()?;
+        info!("Successfully stopped service {}", self.definition.name);
+        Ok(())
+    }
+
+    pub fn try_stop(&self) -> io::Result<()> {
         if !matches!(self.status(), Ok(ServiceStatus::Dead(_))) {
             self.definition.commands.stop.spawn()?;
         }
-
-        info!("Successfully stopped service {}", self.definition.name);
         Ok(())
     }
 
@@ -102,7 +110,7 @@ impl ServiceManager {
                 info!("Successfully restarted service {}", self.definition.name);
             }
             None => {
-                self.stop().unwrap_or_default();
+                self.try_stop().unwrap_or_default();
                 std::thread::sleep(Duration::from_millis(500));
                 self.start()?;
             }
@@ -250,7 +258,9 @@ mod tests {
                 assert!(stdout.contains("Linux"));
             } else if #[cfg(target_os="macos")] {
                 assert!(stdout.contains("Darwin"));
-            }  else {
+            } else if #[cfg(target_os="android")] {
+                assert!(stdout.contains("Android"));
+            } else {
                 unimplemented!()
             }
         }

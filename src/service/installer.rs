@@ -383,11 +383,11 @@ impl Installer {
                     match strategy {
                         InstallStrategy::Backup => {
                             let mut path = dest_path.to_path_buf();
-                            path.append_extension("old");
+                            path.append_extension("bak");
                             fs::copy(dest_path.as_path(), path)?;
                         }
                         InstallStrategy::Preserve => {
-                            dest_path.append_extension("new");
+                            dest_path.append_extension("default");
                         }
                         InstallStrategy::Overide => (),
                     }
