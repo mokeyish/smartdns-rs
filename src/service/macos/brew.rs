@@ -35,8 +35,20 @@ pub fn create_service_definition() -> ServiceDefinition {
             args: vec!["services".into(), "restart".into(), SERVICE_NAME.into()],
         }),
         status: Some(ServiceCommand {
-            program: brew.into(),
-            args: vec!["services".into(), "info".into(), SERVICE_NAME.into()],
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    r#"
+                    O=$(brew services info {}) && echo "$O" | grep -q "Running: true" &&
+                    (echo "$O" && exit 0) || (echo "$O" && exit 1) 
+                    "#,
+                    SERVICE_NAME
+                )
+                .lines()
+                .collect::<String>()
+                .into(),
+            ],
         }),
     };
 

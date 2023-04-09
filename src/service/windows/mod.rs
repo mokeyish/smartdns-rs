@@ -80,9 +80,18 @@ pub(super) fn create_service_definition() -> ServiceDefinition {
         status: Some(ServiceCommand {
             program: "cmd.exe".into(),
             args: vec![
-                "/C".into(), 
-                ["sc query ", SERVICE_NAME," | findstr STATE.*:.*RUNNING > NUL && (sc query smartdns-rs && exit 0) || (sc query smartdns-rs && exit 1)"].concat().into()
-                ],
+                "/C".into(),
+                format!(
+                    r#"
+                    sc query {0} | findstr STATE.*:.*RUNNING > NUL
+                    && (sc query {0} && exit 0) ||  (sc query {0} && exit 1)    
+                    "#,
+                    SERVICE_NAME
+                )
+                .lines()
+                .collect::<String>()
+                .into(),
+            ],
         }),
     };
 

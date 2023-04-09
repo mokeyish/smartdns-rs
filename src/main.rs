@@ -138,7 +138,7 @@ impl Cli {
                             };
                             if let Some(out) = out {
                                 if let Ok(out) = String::from_utf8(out.stdout) {
-                                    info!("\n{}", out);
+                                    print!("{}", out);
                                 } else {
                                     warn!("get service status failed.");
                                 }
