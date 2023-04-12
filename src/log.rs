@@ -1,6 +1,5 @@
 use std::{env, fmt, io, path::Path};
 
-use time::OffsetDateTime;
 use tracing::{
     dispatcher::{set_default, set_global_default},
     subscriber::DefaultGuard,
@@ -137,19 +136,21 @@ where
         mut writer: format::Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
-        let now = OffsetDateTime::now_utc();
-        let now_secs = now.unix_timestamp();
+        let now = chrono::Local::now();
+        let now_msecs = now.timestamp_millis() % 1000;
+        let date = now.format("%Y-%m-%d %H:%M:%S");
 
         // Format values from the event's's metadata:
         let metadata = event.metadata();
 
         if metadata.level() == &tracing::Level::INFO {
-            write!(&mut writer, "{}:{}", now_secs, metadata.level())?;
+            write!(&mut writer, "{}.{}:{}", date, now_msecs, metadata.level())?;
         } else {
             write!(
                 &mut writer,
-                "{}:{}:{}",
-                now_secs,
+                "{}.{}:{}:{}",
+                date,
+                now_msecs,
                 metadata.level(),
                 metadata.target()
             )?;
