@@ -1,6 +1,9 @@
+use std::ffi::OsString;
+
+use clap::Parser;
 use clap::Subcommand;
 
-pub use clap::Parser;
+use crate::log::warn;
 
 /// Smart-DNS.
 ///
@@ -9,6 +12,38 @@ pub use clap::Parser;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+}
+
+impl Cli {
+    pub fn parse() -> Self {
+        match Self::try_parse() {
+            Ok(cli) => cli,
+            Err(e) => match CompatibleCli::try_parse() {
+                Ok(cli) => cli.into(),
+                Err(_) => {
+                    // Since this is more of a development-time error, we aren't doing as fancy of a quit
+                    // as `get_matches`
+                    e.exit()
+                }
+            },
+        }
+    }
+
+    /// Parse from iterator, exit on error
+    pub fn parse_from<I, T>(itr: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        let itr = itr.into_iter().collect::<Vec<_>>();
+        match Self::try_parse_from(itr.clone()) {
+            Ok(cli) => cli,
+            Err(e) => match CompatibleCli::try_parse_from(itr) {
+                Ok(cli) => cli.into(),
+                Err(_) => e.exit(),
+            },
+        }
+    }
 }
 
 #[derive(Subcommand, PartialEq, Eq, Debug)]
@@ -60,13 +95,55 @@ pub enum ServiceCommands {
     Status,
 }
 
+/// Cli Compatible with [](https://github.com/pymumu/smartdns)
+#[derive(Parser, Debug)]
+struct CompatibleCli {
+    /// Config file
+    #[arg(short = 'c', long)]
+    conf: Option<std::path::PathBuf>,
+
+    /// Pid file
+    #[arg(short = 'p', long)]
+    pid: Option<std::path::PathBuf>,
+
+    /// Run foreground.
+    #[arg(short = 'f', long)]
+    foreground: Option<bool>,
+
+    /// Verbose screen.
+    #[arg(short = 'x', long)]
+    verbose: bool,
+}
+
+impl From<CompatibleCli> for Cli {
+    fn from(
+        CompatibleCli {
+            conf,
+            pid,
+            verbose,
+            foreground,
+        }: CompatibleCli,
+    ) -> Self {
+        if !matches!(foreground, Some(true)) {
+            warn!("not support running as a daemon, run foreground instead.")
+        }
+        Self {
+            command: Commands::Run {
+                conf,
+                pid,
+                debug: verbose,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
 
     #[test]
-    fn test_cli_args_parse_start() {
+    fn test_cli_args_parse_run() {
         let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf"]);
         assert!(matches!(
             cli.command,
@@ -89,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_args_parse_start_debug_on() {
+    fn test_cli_args_parse_run_debug_on() {
         let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf", "-d"]);
         assert!(matches!(
             cli.command,
@@ -131,5 +208,51 @@ mod tests {
                 command: ServiceCommands::Uninstall { purge: false }
             }
         );
+    }
+
+    #[test]
+    fn test_cli_args_parse_compatible_run() {
+        let cli = Cli::parse_from(["smartdns", "-c", "/etc/smartdns.conf"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Run {
+                conf: Some(_),
+                pid: None,
+                debug: false
+            }
+        ));
+
+        let cli = Cli::parse_from(["smartdns", "--conf", "/etc/smartdns.conf"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Run {
+                conf: Some(_),
+                pid: None,
+                debug: false
+            }
+        ));
+    }
+
+    #[test]
+    fn test_cli_args_parse_compatible_run_2() {
+        let cli = Cli::parse_from(["smartdns", "-c", "/etc/smartdns.conf", "-x"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Run {
+                conf: Some(_),
+                pid: None,
+                debug: true
+            }
+        ));
+
+        let cli = Cli::parse_from(["smartdns", "--conf", "/etc/smartdns.conf"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Run {
+                conf: Some(_),
+                pid: None,
+                debug: false
+            }
+        ));
     }
 }
