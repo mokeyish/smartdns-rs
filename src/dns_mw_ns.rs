@@ -213,6 +213,9 @@ async fn lookup_ip(
                 use crate::infra::ping::{ping_fastest, PingAddr, PingOptions};
 
                 let ips = lookup_ip.iter().collect::<Vec<_>>();
+                if ips.is_empty() {
+                    return Ok((Default::default(), lookup_ip));
+                }
                 let ping_ops = PingOptions::default().with_timeout_secs(2);
 
                 let mut ping_tasks = vec![];
@@ -259,6 +262,10 @@ async fn lookup_ip(
                     };
 
                     ping_tasks.push(ping_fastest(ping_dests, ping_ops).boxed());
+                }
+
+                if ping_tasks.is_empty() {
+                    return Ok((Default::default(), lookup_ip));
                 }
 
                 let ping_res = select_ok(ping_tasks).await;
