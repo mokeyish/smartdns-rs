@@ -108,7 +108,7 @@ struct CompatibleCli {
 
     /// Run foreground.
     #[arg(short = 'f', long)]
-    foreground: Option<bool>,
+    foreground: bool,
 
     /// Verbose screen.
     #[arg(short = 'x', long)]
@@ -124,7 +124,7 @@ impl From<CompatibleCli> for Cli {
             foreground,
         }: CompatibleCli,
     ) -> Self {
-        if !matches!(foreground, Some(true)) {
+        if !foreground {
             warn!("not support running as a daemon, run foreground instead.")
         }
         Self {
@@ -246,6 +246,19 @@ mod tests {
         ));
 
         let cli = Cli::parse_from(["smartdns", "--conf", "/etc/smartdns.conf"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Run {
+                conf: Some(_),
+                pid: None,
+                debug: false
+            }
+        ));
+    }
+
+    #[test]
+    fn test_cli_args_parse_compatible_run_3() {
+        let cli = Cli::parse_from(["smartdns", "-f", "-c", "/etc/smartdns.conf"]);
         assert!(matches!(
             cli.command,
             Commands::Run {
