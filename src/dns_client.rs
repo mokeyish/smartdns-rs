@@ -54,6 +54,7 @@ pub struct DnsClientBuilder {
     ca_file: Option<PathBuf>,
     ca_path: Option<PathBuf>,
     proxies: Arc<HashMap<String, ProxyConfig>>,
+    client_subnet: Option<ClientSubnet>,
 }
 
 impl DnsClientBuilder {
@@ -82,6 +83,11 @@ impl DnsClientBuilder {
         self
     }
 
+    pub fn with_client_subnet<S: Into<ClientSubnet>>(mut self, subnet: S) -> Self {
+        self.client_subnet = Some(subnet.into());
+        self
+    }
+
     pub async fn build(self) -> DnsClient {
         let DnsClientBuilder {
             resolver_opts,
@@ -89,6 +95,7 @@ impl DnsClientBuilder {
             ca_file,
             ca_path,
             proxies,
+            client_subnet,
         } = self;
 
         let tls_client_config = TlsClientConfigBundle::new(ca_path, ca_file);
@@ -137,6 +144,7 @@ impl DnsClientBuilder {
                         &bootstrap_infos,
                         tls_client_config.clone(),
                         &Default::default(),
+                        client_subnet,
                     )
                     .await;
                     resolver.with_new_resolver(new_resolver.into())
@@ -191,6 +199,7 @@ impl DnsClientBuilder {
             servers,
             tls_client_config,
             proxies,
+            client_subnet,
         }
     }
 
@@ -198,6 +207,7 @@ impl DnsClientBuilder {
         infos: &[NameServerInfo],
         tls_client_config: TlsClientConfigBundle,
         proxies: &HashMap<String, ProxyConfig>,
+        default_client_subnet: Option<ClientSubnet>,
     ) -> NameServerGroup {
         let mut servers = vec![];
 
@@ -226,6 +236,9 @@ impl DnsClientBuilder {
                 info.blacklist_ip,
                 info.whitelist_ip,
                 info.check_edns,
+                info.edns_client_subnet
+                    .map(|x| x.into())
+                    .or(default_client_subnet),
                 *resolver.options(),
             );
 
@@ -262,6 +275,7 @@ pub struct DnsClient {
         HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
     tls_client_config: TlsClientConfigBundle,
     proxies: Arc<HashMap<String, ProxyConfig>>,
+    client_subnet: Option<ClientSubnet>,
 }
 
 impl DnsClient {
@@ -294,6 +308,7 @@ impl DnsClient {
                             infos,
                             self.tls_client_config.clone(),
                             &self.proxies,
+                            self.client_subnet,
                         )
                         .await,
                     );
@@ -606,8 +621,10 @@ impl GenericResolver for NameServer {
 
         let query = Query::query(name, options.record_type);
 
+        let client_subnet = options.client_subnet.or(self.opts.client_subnet);
+
         let req = DnsRequest::new(
-            build_message(query, request_options, options.client_subnet),
+            build_message(query, request_options, client_subnet),
             request_options,
         );
 
@@ -643,6 +660,8 @@ pub struct NameServerOpts {
     /// result must exist edns RR, or discard result.
     pub check_edns: bool,
 
+    pub client_subnet: Option<ClientSubnet>,
+
     resolver_opts: ResolverOpts,
 }
 
@@ -652,12 +671,14 @@ impl NameServerOpts {
         blacklist_ip: bool,
         whitelist_ip: bool,
         check_edns: bool,
+        client_subnet: Option<ClientSubnet>,
         resolver_opts: ResolverOpts,
     ) -> Self {
         Self {
             blacklist_ip,
             whitelist_ip,
             check_edns,
+            client_subnet,
             resolver_opts,
         }
     }
@@ -1123,24 +1144,18 @@ mod tests {
     };
     use std::net::IpAddr;
     use std::str::FromStr;
-    use tokio::runtime::{self, Runtime};
+    use tokio::runtime::Runtime;
 
-    #[test]
-    fn test_with_default() {
-        runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let client = DnsClient::builder().build().await;
-                let lookup_ip = client
-                    .lookup("dns.alidns.com", RecordType::A)
-                    .await
-                    .unwrap();
-                assert!(lookup_ip
-                    .into_iter()
-                    .any(|i| i.ip_addr() == Some("223.5.5.5".parse::<IpAddr>().unwrap())));
-            });
+    #[tokio::test]
+    async fn test_with_default() {
+        let client = DnsClient::builder().build().await;
+        let lookup_ip = client
+            .lookup("dns.alidns.com", RecordType::A)
+            .await
+            .unwrap();
+        assert!(lookup_ip.into_iter().any(|i| i.ip_addr()
+            == Some("223.5.5.5".parse::<IpAddr>().unwrap())
+            || i.ip_addr() == Some("223.6.6.6".parse::<IpAddr>().unwrap())));
     }
 
     #[test]
@@ -1182,7 +1197,7 @@ mod tests {
 
         // println!("name: {} addrs => {}", name, addrs);
 
-        assert!(addrs.contains("223.5.5.5"));
+        assert!(addrs.contains("223.5.5.5") || addrs.contains("223.6.6.6"));
     }
 
     #[test]

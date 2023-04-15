@@ -85,7 +85,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
         let lookup_options = LookupOptions {
             record_type: rtype,
-            client_subnet: ctx.cfg().edns_client_subnet().map(|subnet| subnet.into()),
+            client_subnet: None,
         };
 
         // skip nameserver rule

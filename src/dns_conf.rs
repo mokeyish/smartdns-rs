@@ -1367,6 +1367,16 @@ pub struct NameServerInfo {
 
     /// nameserver group for resolving.
     pub resolve_group: Option<String>,
+
+    /// edns client subnet
+    ///
+    /// ```
+    /// example:
+    ///   edns-client-subnet [ip/subnet]
+    ///   edns-client-subnet 192.168.1.1/24
+    ///   edns-client-subnet 8::8/56
+    /// ```
+    pub edns_client_subnet: Option<IpNet>,
 }
 
 impl FromStr for NameServerInfo {
@@ -1383,6 +1393,7 @@ impl FromStr for NameServerInfo {
             let mut check_edns = false;
             let mut proxy = None;
             let mut bootstrap_dns = false;
+            let mut edns_client_subnet = None;
 
             while let Some(part) = parts.next() {
                 if part.is_empty() {
@@ -1397,6 +1408,10 @@ impl FromStr for NameServerInfo {
                         "-bootstrap-dns" => bootstrap_dns = true,
                         "-group" => group = Some(parts.next().expect("group name").to_string()),
                         "-proxy" => proxy = Some(parts.next().expect("proxy name").to_string()),
+                        "-subnet" => {
+                            edns_client_subnet =
+                                parts.next().expect("edns client subnet").parse().ok()
+                        }
                         "-host-name" | "-host-name:" => {
                             if let Some(host_name) =
                                 Some(parts.next().expect("host name").to_string())
@@ -1427,6 +1442,7 @@ impl FromStr for NameServerInfo {
                 check_edns,
                 proxy,
                 resolve_group: None,
+                edns_client_subnet,
             })
         } else {
             Err(())
@@ -1446,6 +1462,7 @@ impl From<DnsUrl> for NameServerInfo {
             check_edns: false,
             proxy: None,
             resolve_group: None,
+            edns_client_subnet: None,
         }
     }
 }
@@ -2310,6 +2327,31 @@ mod parse {
 
             assert_eq!(server.url.proto(), &Protocol::Https);
             assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert!(server.exclude_default_group);
+            assert!(server.bootstrap_dns);
+        }
+
+        #[test]
+        fn test_config_server_with_client_subnet() {
+            let mut cfg = SmartDnsConfig::builder();
+            assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
+
+            cfg.config(
+                "server-https https://223.5.5.5/dns-query  -bootstrap-dns -exclude-default-group -subnet 192.168.0.0/16",
+            );
+
+            let servers = cfg.servers.get("bootstrap-dns").unwrap();
+
+            assert_eq!(servers.len(), 1);
+
+            let server = servers.first().unwrap();
+
+            assert_eq!(server.url.proto(), &Protocol::Https);
+            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(
+                server.edns_client_subnet,
+                Some("192.168.0.0/16".parse().unwrap())
+            );
             assert!(server.exclude_default_group);
             assert!(server.bootstrap_dns);
         }

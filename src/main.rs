@@ -589,6 +589,9 @@ impl SmartDnsConfig {
         if let Some(file) = ca_file {
             builder = builder.with_ca_path(file.to_owned());
         }
+        if let Some(subnet) = self.edns_client_subnet() {
+            builder = builder.with_client_subnet(subnet);
+        }
         builder = builder.with_proxies(proxies);
         builder.build().await
     }
