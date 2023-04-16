@@ -5,18 +5,18 @@
 
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=smartdns-rust
-PKG_VERSION:=0.4.1
+PKG_NAME:=smartdns-rs
+PKG_VERSION:=0.6.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/mokeyish/smartdns-rs.git
-PKG_SOURCE_VERSION:=9a4691e224c418d9474aa74a890a92d7d62f151d
-PKG_MIRROR_HASH:=abe9b00da257fa5f7607cc72d7f0798ed6ce5ab8c7b79599442adfe6172aa9e3
+PKG_SOURCE_VERSION:=c9695e6530b9494951894df05c1ac9bfaa02f083
+PKG_MIRROR_HASH:=b63d485b82d6f97aebdc3f9e1affe7b4e84e81d40c0c17ae9eb81c4b2a716c5d
 
 PKG_MAINTAINER:=Zxlhhyccc <zxlhhyccc@gmail.com>
-PKG_LICENSE:=MIT
+PKG_LICENSE:=GPL-3.0
 PKG_LICENSE_FILES:=LICENSE
 
 PKG_BUILD_PARALLEL:=1
@@ -26,8 +26,8 @@ PKG_BUILD_DEPENDS:=rust/host
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk
 
-define Package/smartdns-rust/Default
-  define Package/smartdns-rust
+define Package/smartdns-rs/Default
+  define Package/smartdns-rs
     SECTION:=net
     CATEGORY:=Network
     SUBMENU:=Web Servers/Proxies
@@ -36,11 +36,11 @@ define Package/smartdns-rust/Default
     DEPENDS:=$$(RUST_ARCH_DEPENDS)
   endef
 
-  define Package/smartdns-rust/description
+  define Package/smartdns-rs/description
   A cross platform local DNS server (Dnsmasq like) written in rust to obtain the fastest website IP for the best Internet experience, supports DoT, DoH.
   endef
 
-  define Package/smartdns-rust/install
+  define Package/smartdns-rs/install
 	$$(INSTALL_DIR) $$(1)/usr/sbin
 	$$(INSTALL_BIN) $$(PKG_INSTALL_DIR)/bin/smartdns $$(1)/usr/sbin/
 
@@ -49,17 +49,17 @@ define Package/smartdns-rust/Default
   endef
 endef
 
-define smartdns-rust/templates
+define smartdns-rs/templates
   $(foreach smartdns,smartdns,
-    $(call Package/smartdns-rust/Default,smartdns)
+    $(call Package/smartdns-rs/Default,smartdns)
   )
 endef
-$(eval $(call smartdns-rust/templates))
+$(eval $(call smartdns-rs/templates))
 
 define Build/Compile
 	$(call Build/Compile/Cargo,, smartdns)
 endef
 
 $(foreach smartdns,smartdns, \
-  $(eval $(call BuildPackage,smartdns-rust)) \
+  $(eval $(call BuildPackage,smartdns-rs)) \
 )
