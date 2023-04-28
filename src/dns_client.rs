@@ -257,6 +257,7 @@ impl DnsClientBuilder {
                     name_server_config,
                     nameserver_opts.clone(),
                     proxy.clone(),
+                    info.so_mark,
                 ))
             }
         }
@@ -494,13 +495,18 @@ pub struct NameServer {
 }
 
 impl NameServer {
-    fn new(config: NameServerConfig, opts: NameServerOpts, proxy: Option<ProxyConfig>) -> Self {
+    fn new(
+        config: NameServerConfig,
+        opts: NameServerOpts,
+        proxy: Option<ProxyConfig>,
+        so_mark: Option<u32>,
+    ) -> Self {
         use trust_dns_resolver::name_server::NameServer as N;
 
         let inner = N::<TokioRuntimeProvider>::new(
             config,
             opts.resolver_opts,
-            TokioRuntimeProvider::new(proxy),
+            TokioRuntimeProvider::new(proxy, so_mark),
         );
 
         Self { opts, inner }
@@ -906,8 +912,12 @@ fn build_message(
 }
 
 mod connection_provider {
+    use super::*;
+
     use futures::Future;
+    use socket2::SockRef;
     use std::io;
+    use std::ops::Deref;
     use std::pin::Pin;
     use tokio::net::UdpSocket as TokioUdpSocket;
     use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
@@ -917,20 +927,21 @@ mod connection_provider {
     use trust_dns_proto::TokioTime;
     use trust_dns_resolver::{name_server::RuntimeProvider, TokioHandle};
 
-    use crate::proxy;
-    use crate::proxy::ProxyConfig;
+    use crate::proxy::{self, ProxyConfig};
 
     /// The Tokio Runtime for async execution
     #[derive(Clone)]
     pub struct TokioRuntimeProvider {
         proxy: Option<ProxyConfig>,
+        so_mark: Option<u32>,
         handle: TokioHandle,
     }
 
     impl TokioRuntimeProvider {
-        pub fn new(proxy: Option<ProxyConfig>) -> Self {
+        pub fn new(proxy: Option<ProxyConfig>, so_mark: Option<u32>) -> Self {
             Self {
                 proxy,
+                so_mark,
                 handle: TokioHandle::default(),
             }
         }
@@ -952,9 +963,26 @@ mod connection_provider {
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Tcp>>>> {
             let proxy_config = self.proxy.clone();
 
+            #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+            let so_mark = self.so_mark;
+
             Box::pin(async move {
                 proxy::connect_tcp(server_addr, proxy_config.as_ref())
                     .await
+                    .map(|tcp| {
+                        #[cfg(any(
+                            target_os = "android",
+                            target_os = "fuchsia",
+                            target_os = "linux"
+                        ))]
+                        if let Some(mark) = so_mark {
+                            let sock_ref = SockRef::from(tcp.deref());
+                            sock_ref.set_mark(mark).unwrap_or_else(|err| {
+                                warn!("set so_mark failed: {:?}", err);
+                            });
+                        }
+                        tcp
+                    })
                     .map(AsyncIoTokioAsStd)
             })
         }
@@ -1057,6 +1085,7 @@ mod bootstrap {
                 name_servers.push(super::NameServer::new(
                     config.clone(),
                     Default::default(),
+                    None,
                     None,
                 ));
             }

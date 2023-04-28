@@ -19,6 +19,7 @@ use crate::infra::file_mode::FileMode;
 use crate::infra::ipset::IpSet;
 use crate::log::{debug, error, info, warn};
 use crate::proxy::ProxyConfig;
+use crate::third_ext::FromStrOrHex;
 
 const DEFAULT_GROUP: &str = "default";
 
@@ -1383,6 +1384,9 @@ pub struct NameServerInfo {
     ///   edns-client-subnet 8::8/56
     /// ```
     pub edns_client_subnet: Option<IpNet>,
+
+    /// The value for the SO_MARK option on socket.
+    pub so_mark: Option<u32>,
 }
 
 impl FromStr for NameServerInfo {
@@ -1400,6 +1404,7 @@ impl FromStr for NameServerInfo {
             let mut proxy = None;
             let mut bootstrap_dns = false;
             let mut edns_client_subnet = None;
+            let mut mark = None;
 
             while let Some(part) = parts.next() {
                 if part.is_empty() {
@@ -1414,6 +1419,9 @@ impl FromStr for NameServerInfo {
                         "-whitelist-ip" | "--whitelist-ip" => whitelist_ip = true,
                         "-check-edns" | "--check-edns" => check_edns = true,
                         "-bootstrap-dns" | "--bootstrap-dns" => bootstrap_dns = true,
+                        "-set-mark" | "--set-mark" => {
+                            mark = u32::from_str_or_hex(parts.next().expect("mark")).ok();
+                        }
                         "-group" | "--group" => {
                             group = Some(parts.next().expect("group name").to_string())
                         }
@@ -1453,6 +1461,7 @@ impl FromStr for NameServerInfo {
                 bootstrap_dns,
                 check_edns,
                 proxy,
+                so_mark: mark,
                 resolve_group: None,
                 edns_client_subnet,
             })
@@ -1473,6 +1482,7 @@ impl From<DnsUrl> for NameServerInfo {
             bootstrap_dns: false,
             check_edns: false,
             proxy: None,
+            so_mark: None,
             resolve_group: None,
             edns_client_subnet: None,
         }
@@ -2375,6 +2385,42 @@ mod parse {
             );
             assert!(server.exclude_default_group);
             assert!(server.bootstrap_dns);
+        }
+
+        #[test]
+        fn test_config_server_with_mark_1() {
+            let mut cfg = SmartDnsConfig::builder();
+            assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
+
+            cfg.config("server-https https://223.5.5.5/dns-query -set-mark 255");
+
+            let servers = cfg.servers.get("default").unwrap();
+
+            assert_eq!(servers.len(), 1);
+
+            let server = servers.first().unwrap();
+
+            assert_eq!(server.url.proto(), &Protocol::Https);
+            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(server.so_mark, Some(255));
+        }
+
+        #[test]
+        fn test_config_server_with_mark_2() {
+            let mut cfg = SmartDnsConfig::builder();
+            assert_eq!(cfg.servers.values().map(|ss| ss.len()).sum::<usize>(), 0);
+
+            cfg.config("server-https https://223.5.5.5/dns-query -set-mark 0xff");
+
+            let servers = cfg.servers.get("default").unwrap();
+
+            assert_eq!(servers.len(), 1);
+
+            let server = servers.first().unwrap();
+
+            assert_eq!(server.url.proto(), &Protocol::Https);
+            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(server.so_mark, Some(255));
         }
 
         #[test]
