@@ -3,6 +3,7 @@ use std::{
     fmt::{Display, Write},
     io,
     net::{AddrParseError, SocketAddr},
+    ops::{Deref, DerefMut},
     pin::Pin,
     str::FromStr,
 };
@@ -91,6 +92,26 @@ fn from_http_err(err: async_http_proxy::HttpError) -> io::Error {
 pub enum TcpStream {
     Tokio(TokioTcpStream),
     Proxy(Socks5Stream<TokioTcpStream>),
+}
+
+impl Deref for TcpStream {
+    type Target = TokioTcpStream;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            TcpStream::Tokio(tcp) => tcp,
+            TcpStream::Proxy(proxy) => proxy.get_socket_ref(),
+        }
+    }
+}
+
+impl DerefMut for TcpStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            TcpStream::Tokio(tcp) => tcp,
+            TcpStream::Proxy(proxy) => proxy.get_socket_mut(),
+        }
+    }
 }
 
 impl tokio::io::AsyncRead for TcpStream {
