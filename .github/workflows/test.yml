@@ -123,6 +123,8 @@ jobs:
           # - target: wasm32-unknown-emscripten
           #   archive: tar.gz tar.xz tar.zst
     runs-on: ${{matrix.os}}
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
         uses: actions/checkout@master
