@@ -912,22 +912,16 @@ fn build_message(
 }
 
 mod connection_provider {
+
     use super::*;
+    use crate::proxy;
+
+    use std::{io, net::SocketAddr, pin::Pin};
 
     use futures::Future;
-    use socket2::SockRef;
-    use std::io;
-    use std::ops::Deref;
-    use std::pin::Pin;
     use tokio::net::UdpSocket as TokioUdpSocket;
-    use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
-
-    use std::net::SocketAddr;
-
-    use trust_dns_proto::TokioTime;
+    use trust_dns_proto::{iocompat::AsyncIoTokioAsStd, TokioTime};
     use trust_dns_resolver::{name_server::RuntimeProvider, TokioHandle};
-
-    use crate::proxy::{self, ProxyConfig};
 
     /// The Tokio Runtime for async execution
     #[derive(Clone)]
@@ -976,6 +970,7 @@ mod connection_provider {
                             target_os = "linux"
                         ))]
                         if let Some(mark) = so_mark {
+                            use socket2::SockRef;
                             let sock_ref = SockRef::from(tcp.deref());
                             sock_ref.set_mark(mark).unwrap_or_else(|err| {
                                 warn!("set so_mark failed: {:?}", err);
