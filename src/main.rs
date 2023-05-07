@@ -517,6 +517,10 @@ fn tcp(
         let sock_ref = socket2::SockRef::from(&tcp_listener);
         sock_ref.set_nonblocking(true)?;
         sock_ref.set_reuse_address(true)?;
+
+        #[cfg(target_os = "macos")]
+        sock_ref.set_reuse_port(true)?;
+
         #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
         if let Some(device) = bind_device {
             sock_ref.bind_device(Some(device.as_bytes()))?;
@@ -549,6 +553,9 @@ fn udp(sock_addr: SocketAddr, bind_device: Option<&str>, bind_type: &str) -> io:
         let sock_ref = socket2::SockRef::from(&udp_socket);
         sock_ref.set_nonblocking(true)?;
         sock_ref.set_reuse_address(true)?;
+
+        #[cfg(target_os = "macos")]
+        sock_ref.set_reuse_port(true)?;
 
         #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
         if let Some(device) = bind_device {

@@ -14,4 +14,6 @@ Cargo.lock
 **/*.rs.bk
 
 
+# web ui
 node_modules
+dist
