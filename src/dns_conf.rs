@@ -582,47 +582,41 @@ impl SmartDnsConfigBuilder {
             .collect::<Vec<_>>();
 
             if !binds.is_empty() {
-                #[cfg(not(target_os = "android"))]
-                {
-                    use local_ip_address::list_afinet_netifas;
-                    match list_afinet_netifas() {
-                        Ok(network_interfaces) => {
-                            for bind in binds {
-                                let device = bind.device.as_deref().expect("bind device");
+                use local_ip_address::list_afinet_netifas;
+                match list_afinet_netifas() {
+                    Ok(network_interfaces) => {
+                        for bind in binds {
+                            let device = bind.device.as_deref().expect("bind device");
 
-                                let ips = network_interfaces
-                                    .iter()
-                                    .filter(|(dev, _ip)| dev == device)
-                                    .map(|(_, ip)| *ip)
-                                    .collect::<Vec<_>>();
+                            let ips = network_interfaces
+                                .iter()
+                                .filter(|(dev, _ip)| dev == device)
+                                .map(|(_, ip)| *ip)
+                                .collect::<Vec<_>>();
 
-                                if ips.is_empty() {
-                                    warn!("network device {} not found.", device);
+                            if ips.is_empty() {
+                                warn!("network device {} not found.", device);
+                            }
+
+                            let ip = ips.into_iter().find(|ip| {
+                                match bind.sock_addr {
+                                    SocketAddr::V4(_) => ip.is_ipv4(),
+                                    SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
                                 }
+                            });
 
-                                let ip = ips.into_iter().find(|ip| {
-                                    match bind.sock_addr {
-                                        SocketAddr::V4(_) => ip.is_ipv4(),
-                                        SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
-                                    }
-                                });
-
-                                match ip {
-                                    Some(ip) => bind.sock_addr.set_ip(ip),
-                                    None => {
-                                        warn!("no ip address on device {}", device)
-                                    }
+                            match ip {
+                                Some(ip) => bind.sock_addr.set_ip(ip),
+                                None => {
+                                    warn!("no ip address on device {}", device)
                                 }
                             }
                         }
-                        Err(err) => {
-                            warn!("bind device failed, {}", err);
-                        }
+                    }
+                    Err(err) => {
+                        warn!("bind device failed, {}", err);
                     }
                 }
-
-                #[cfg(target_os = "android")]
-                warn!("currently, binding device does not support for android.");
             }
         }
 

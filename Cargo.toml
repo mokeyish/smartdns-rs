@@ -108,8 +108,6 @@ url = "2.3.1"
 # regex = "1"
 # rnp = "0.1"
 # boomphf = "0.5.9"
-
-[target.'cfg(not(any(target_os = "android")))'.dependencies]
 local-ip-address = "0.5.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
