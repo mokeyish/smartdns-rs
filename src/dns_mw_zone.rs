@@ -25,19 +25,12 @@ impl DnsZoneMiddleware {
         let catalog = Catalog::new();
 
         let server_net = {
-            #[cfg(not(target_os = "android"))]
+            use local_ip_address::list_afinet_netifas;
             let mut ips = Vec::<IpAddr>::new();
 
-            #[cfg(target_os = "android")]
-            let ips = Vec::<IpAddr>::new();
-
-            #[cfg(not(target_os = "android"))]
-            {
-                use local_ip_address::list_afinet_netifas;
-                if let Ok(network_interfaces) = list_afinet_netifas() {
-                    for (_, ip) in network_interfaces.iter() {
-                        ips.push(*ip);
-                    }
+            if let Ok(network_interfaces) = list_afinet_netifas() {
+                for (_, ip) in network_interfaces.iter() {
+                    ips.push(*ip);
                 }
             }
 
