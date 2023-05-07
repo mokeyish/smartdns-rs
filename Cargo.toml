@@ -97,7 +97,7 @@ ipnet = "2.7"
 which = "4.3.0"
 
 # process
-sysinfo = "0.27"
+sysinfo = "0.29"
 
 # proxy
 fast-socks5 = "0.8.1"
