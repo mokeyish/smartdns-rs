@@ -120,7 +120,7 @@ windows = { version = "0.43.0", features = [
   "Win32_System_Console",
   "Win32_Foundation",
 ] }
-windows-service = "0.5.0"
+windows-service = "0.6.0"
 
 
 [build-dependencies]
