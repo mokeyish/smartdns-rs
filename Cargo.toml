@@ -79,7 +79,7 @@ trust-dns-resolver = { version = "0.22.0", features = ["serde-config", "system-c
 trust-dns-server = { version = "0.22.0", features = ["resolver"]}
 
 # ssl
-webpki-roots = "0.22.1"
+webpki-roots = "0.23.0"
 rustls = { version = "0.20.0", features = ["dangerous_configuration"]}
 rustls-pemfile = "1.0.2"
 rustls-native-certs = "0.6.2"
