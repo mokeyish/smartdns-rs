@@ -17,3 +17,5 @@ Cargo.lock
 # web ui
 node_modules
 dist
+
+.idea/
