@@ -1,0 +1,14 @@
+version: "3"
+services:
+  dns:
+    image: smartdns-rs
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+        - "53:53"
+        - "53:53/udp"
+    volumes:
+      - ./smartdns.conf:/app/smartdns.conf
+    #environment:
+      #- PARAMS= # Pass additional flags to the smartdns binary
