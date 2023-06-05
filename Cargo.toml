@@ -40,11 +40,11 @@ dns-over-https-rustls = [
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [patch.crates-io]
-rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
-quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
-trust-dns-proto = { git = "https://github.com/mokeyish/trust-dns.git", rev = "1044ac9"}
-trust-dns-resolver = { git = "https://github.com/mokeyish/trust-dns.git", rev = "1044ac9"}
-trust-dns-server = { git = "https://github.com/mokeyish/trust-dns.git", rev = "1044ac9"}
+# rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
+# quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
+trust-dns-proto = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
+trust-dns-resolver = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
+trust-dns-server = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
@@ -60,8 +60,8 @@ futures = { version = "0.3.5", default-features = false, features = ["std"] }
 futures-intrusive = "0.5"
 futures-util = { version = "0.3", default-features = false, features = ["std"]}
 async-trait = "0.1.43"
-tokio = { version = "1.21", features = ["time", "rt", "signal", "macros", "parking_lot"] }
-tokio-rustls = "0.23.4"
+tokio = { version = "1.28", features = ["time", "rt", "signal", "macros", "parking_lot"] }
+tokio-rustls = "0.24.0"
 socket2 = { version = "0.5", features = ["all"]}
 
 # log
@@ -74,13 +74,13 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # trustdns
-trust-dns-proto = { version = "0.22.0"}
-trust-dns-resolver = { version = "0.22.0", features = ["serde-config", "system-config"]}
-trust-dns-server = { version = "0.22.0", features = ["resolver"]}
+trust-dns-proto = { version = "0.23.0-alpha.2"}
+trust-dns-resolver = { version = "0.23.0-alpha.2", features = ["serde-config", "system-config"]}
+trust-dns-server = { version = "0.23.0-alpha.2", features = ["resolver"]}
 
 # ssl
 webpki-roots = "0.23.0"
-rustls = { version = "0.20.0", features = ["dangerous_configuration"]}
+rustls = { version = "0.21.1", features = ["dangerous_configuration"]}
 rustls-pemfile = "1.0.2"
 rustls-native-certs = "0.6.2"
 
