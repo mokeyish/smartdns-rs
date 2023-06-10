@@ -583,13 +583,13 @@ fn hello_starting() {
 
 impl SmartDnsConfig {
     pub async fn create_dns_client(&self) -> DnsClient {
-        let servers = self.servers().clone();
+        let servers = self.servers();
         let ca_path = self.ca_path();
         let ca_file = self.ca_file();
         let proxies = self.proxies().clone();
 
         let mut builder = DnsClient::builder();
-        builder = builder.add_servers(servers.values().flat_map(|s| s.clone()).collect::<Vec<_>>());
+        builder = builder.add_servers(servers.to_vec());
         if let Some(path) = ca_path {
             builder = builder.with_ca_path(path.to_owned());
         }
