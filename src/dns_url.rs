@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_parse_udp_ipv6() {
-        for ip in CLOUDFLARE_IPS.iter().map(|ip| DnsUrl::from(ip)) {
+        for ip in CLOUDFLARE_IPS.iter().map(DnsUrl::from) {
             assert!(ip.proto.is_datagram());
         }
     }
@@ -499,14 +499,14 @@ mod tests {
     #[test]
     fn test_parse_enable_sni_false() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
-        assert_eq!(url.sni_off(), true);
+        assert!(url.sni_off());
         assert!(url.addrs().is_empty());
     }
 
     #[test]
     fn test_parse_enable_sni_true() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
-        assert_eq!(url.sni_off(), true);
+        assert!(url.sni_off());
         assert!(url.addrs().is_empty());
     }
 }

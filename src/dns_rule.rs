@@ -277,14 +277,14 @@ mod tests {
             &Default::default(),
         );
 
-        let rule1 = map.find(&Name::from_str("z.a.b.c.www.example.com").unwrap().into());
+        let rule1 = map.find(&Name::from_str("z.a.b.c.www.example.com").unwrap());
         assert!(rule1.is_some());
         assert_eq!(
             rule1.map(|o| o.name()),
             Some(&Name::from_str("a.b.c.www.example.com").unwrap())
         );
 
-        let rule2 = map.find(&Name::from_str("www.example.com").unwrap().into());
+        let rule2 = map.find(&Name::from_str("www.example.com").unwrap());
 
         assert_eq!(
             rule2.map(|o| o.name()),

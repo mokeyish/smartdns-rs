@@ -544,10 +544,7 @@ mod tests {
             .block_on(async {
                 use futures_util::future::select_all;
                 let mut success = false;
-                let mut tasks = (0..10)
-                    .into_iter()
-                    .map(|i| inner_test(i).boxed())
-                    .collect::<Vec<_>>();
+                let mut tasks = (0..10).map(|i| inner_test(i).boxed()).collect::<Vec<_>>();
 
                 loop {
                     let (res, _idx, rest) = select_all(tasks).await;

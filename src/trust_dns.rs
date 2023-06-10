@@ -145,23 +145,20 @@ mod tests {
 
         use crate::trust_dns::resolver::TokioAsyncResolver;
 
-        let resolver = Arc::new(
-            TokioAsyncResolver::new(
-                ResolverConfig::from_parts(
-                    None,
-                    vec![],
-                    NameServerConfigGroup::from_ips_https(
-                        &["223.5.5.5".parse().unwrap()],
-                        443,
-                        "223.5.5.5".to_string(),
-                        true,
-                    ),
+        let resolver = Arc::new(TokioAsyncResolver::new(
+            ResolverConfig::from_parts(
+                None,
+                vec![],
+                NameServerConfigGroup::from_ips_https(
+                    &["223.5.5.5".parse().unwrap()],
+                    443,
+                    "223.5.5.5".to_string(),
+                    true,
                 ),
-                ResolverOpts::default(),
-                TokioRuntimeProvider::new(),
-            )
-            .unwrap(),
-        );
+            ),
+            ResolverOpts::default(),
+            TokioRuntimeProvider::new(),
+        ));
 
         use std::thread;
 
