@@ -165,7 +165,7 @@ This software wouldn't have been possible without:
 
 ## License
 
-This software contains codes from [Trust-DNS](https://github.com/bluejekyll/trust-dns), which is licensed under either of
+This software contains codes from [https://github.com/bluejekyll/trust-dns](https://github.com/bluejekyll/trust-dns), which is licensed under either of
 
 - Apache License, Version 2.0, (LICENSE-APACHE or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
 - MIT license (LICENSE-MIT or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
