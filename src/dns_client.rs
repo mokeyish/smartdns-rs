@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    net::{IpAddr, SocketAddr},
     ops::Deref,
     path::PathBuf,
     slice::Iter,
@@ -98,7 +99,7 @@ impl DnsClientBuilder {
             client_subnet,
         } = self;
 
-        let tls_client_config = TlsClientConfigBundle::new(ca_path, ca_file);
+        let factory = NameServerFactory::new(TlsClientConfigBundle::new(ca_path, ca_file));
 
         bootstrap::set_resolver(
             async {
@@ -106,7 +107,7 @@ impl DnsClientBuilder {
                     .iter()
                     .filter(|info| {
                         info.bootstrap_dns && {
-                            if info.url.addrs().is_empty() {
+                            if info.url.ip().is_none() {
                                 warn!("bootstrap-dns must use ip addess, {:?}", info.url.host());
                                 false
                             } else {
@@ -120,7 +121,7 @@ impl DnsClientBuilder {
                 if bootstrap_infos.is_empty() {
                     bootstrap_infos = server_infos
                         .iter()
-                        .filter(|info| !info.url.addrs().is_empty())
+                        .filter(|info| info.url.ip().is_some() && info.proxy.is_none())
                         .cloned()
                         .collect::<Vec<_>>()
                 }
@@ -140,13 +141,13 @@ impl DnsClientBuilder {
                 let resolver = BootstrapResolver::from_system_conf();
 
                 let resolver: Arc<BootstrapResolver> = if !bootstrap_infos.is_empty() {
-                    let new_resolver = Self::create_name_server_group(
-                        &bootstrap_infos,
-                        tls_client_config.clone(),
-                        &Default::default(),
-                        client_subnet,
-                    )
-                    .await;
+                    let new_resolver = factory
+                        .create_name_server_group(
+                            &bootstrap_infos,
+                            &Default::default(),
+                            client_subnet,
+                        )
+                        .await;
                     resolver.with_new_resolver(new_resolver.into())
                 } else {
                     resolver
@@ -158,32 +159,39 @@ impl DnsClientBuilder {
         )
         .await;
 
-        let name_server_info_groups =
-            server_infos
-                .into_iter()
-                .fold(HashMap::new(), |mut map, info| {
-                    let name = info
-                        .group
-                        .as_deref()
-                        .map(NameServerGroupName::from)
-                        .unwrap_or(NameServerGroupName::Default);
-                    if name != NameServerGroupName::Default
-                        && !info.exclude_default_group
-                        && map
-                            .entry(NameServerGroupName::Default)
-                            .or_insert_with(HashSet::new)
-                            .insert(info.clone())
-                    {
-                        debug!("append {} to default group.", info.url.to_string());
-                    }
+        let server_groups = server_infos.iter().fold(HashMap::new(), |mut map, info| {
+            let mut group_names = info
+                .group
+                .iter()
+                .map(|s| s.deref())
+                .map(NameServerGroupName::from)
+                .collect::<Vec<_>>();
 
-                    map.entry(name).or_insert_with(HashSet::new).insert(info);
-                    map
-                });
+            if group_names.is_empty() {
+                group_names.push(NameServerGroupName::Default);
+            }
 
-        let mut servers = HashMap::with_capacity(name_server_info_groups.len());
+            for name in group_names {
+                if name != NameServerGroupName::Default
+                    && !info.exclude_default_group
+                    && map
+                        .entry(NameServerGroupName::Default)
+                        .or_insert_with(HashSet::new)
+                        .insert(info.clone())
+                {
+                    debug!("append {} to default group.", info.url.to_string());
+                }
 
-        for (group_name, group) in name_server_info_groups {
+                map.entry(name)
+                    .or_insert_with(HashSet::new)
+                    .insert(info.clone());
+            }
+            map
+        });
+
+        let mut servers = HashMap::with_capacity(server_groups.len());
+
+        for (group_name, group) in server_groups {
             let group = group.into_iter().collect::<Vec<_>>();
             let resolver = Default::default();
             debug!(
@@ -197,74 +205,9 @@ impl DnsClientBuilder {
         DnsClient {
             resolver_opts,
             servers,
-            tls_client_config,
+            factory,
             proxies,
             client_subnet,
-        }
-    }
-
-    async fn create_name_server_group(
-        infos: &[NameServerInfo],
-        tls_client_config: TlsClientConfigBundle,
-        proxies: &HashMap<String, ProxyConfig>,
-        default_client_subnet: Option<ClientSubnet>,
-    ) -> NameServerGroup {
-        let mut servers = vec![];
-
-        let resolver = bootstrap::resolver().await;
-
-        for info in infos {
-            let url = info.url.clone();
-            let verified_url = match TryInto::<VerifiedDnsUrl>::try_into(url) {
-                Ok(url) => url,
-                Err(mut url) => {
-                    if let Some(host) = url.domain() {
-                        let ips = match resolver.lookup_ip(host).await {
-                            Ok(lookup_ip) => lookup_ip.into_iter().collect::<Vec<_>>(),
-                            Err(_) => vec![],
-                        };
-                        url.set_ip_addrs(ips);
-                    }
-                    match TryInto::<VerifiedDnsUrl>::try_into(url) {
-                        Ok(url) => url,
-                        _ => continue,
-                    }
-                }
-            };
-
-            let nameserver_opts = NameServerOpts::new(
-                info.blacklist_ip,
-                info.whitelist_ip,
-                info.check_edns,
-                info.edns_client_subnet
-                    .map(|x| x.into())
-                    .or(default_client_subnet),
-                *resolver.options(),
-            );
-
-            let name_server_configs =
-                NameServer::create_config_from_url(&verified_url, tls_client_config.clone());
-
-            let proxy = info
-                .proxy
-                .as_deref()
-                .map(|n| proxies.get(n))
-                .unwrap_or_default()
-                .cloned();
-
-            for name_server_config in name_server_configs {
-                servers.push(NameServer::new(
-                    name_server_config,
-                    nameserver_opts.clone(),
-                    proxy.clone(),
-                    info.so_mark,
-                ))
-            }
-        }
-
-        NameServerGroup {
-            resolver_opts: resolver.options().to_owned(),
-            servers,
         }
     }
 }
@@ -274,7 +217,7 @@ pub struct DnsClient {
     #[allow(clippy::type_complexity)]
     servers:
         HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
-    tls_client_config: TlsClientConfigBundle,
+    factory: NameServerFactory,
     proxies: Arc<HashMap<String, ProxyConfig>>,
     client_subnet: Option<ClientSubnet>,
 }
@@ -305,13 +248,9 @@ impl DnsClient {
 
                     debug!("initialize name server {:?}", name);
                     let ns = Arc::new(
-                        DnsClientBuilder::create_name_server_group(
-                            infos,
-                            self.tls_client_config.clone(),
-                            &self.proxies,
-                            self.client_subnet,
-                        )
-                        .await,
+                        self.factory
+                            .create_name_server_group(infos, &self.proxies, self.client_subnet)
+                            .await,
                     );
                     entry_lock.write().await.replace(ns.clone());
                     Some(ns)
@@ -435,12 +374,12 @@ impl Default for NameServerGroupName {
 #[derive(Default)]
 pub struct NameServerGroup {
     resolver_opts: ResolverOpts,
-    servers: Vec<NameServer>,
+    servers: Vec<Arc<NameServer>>,
 }
 
 impl NameServerGroup {
     #[inline]
-    pub fn iter(&self) -> Iter<NameServer> {
+    pub fn iter(&self) -> Iter<Arc<NameServer>> {
         self.servers.iter()
     }
 
@@ -471,7 +410,7 @@ impl GenericResolver for NameServerGroup {
         let mut tasks = self
             .servers
             .iter()
-            .map(|ns| GenericResolver::lookup(ns, name.clone(), options.clone()))
+            .map(|ns| GenericResolver::lookup(ns.as_ref(), name.clone(), options.clone()))
             .collect::<Vec<_>>();
 
         loop {
@@ -485,6 +424,192 @@ impl GenericResolver for NameServerGroup {
                 return res;
             }
             tasks = rest;
+        }
+    }
+}
+
+pub struct NameServerFactory {
+    tls_client_config: TlsClientConfigBundle,
+    cache: RwLock<HashMap<String, Arc<NameServer>>>,
+}
+
+impl NameServerFactory {
+    pub fn new(tls_client_config: TlsClientConfigBundle) -> Self {
+        Self {
+            tls_client_config,
+            cache: Default::default(),
+        }
+    }
+
+    pub async fn create(
+        &self,
+        url: &VerifiedDnsUrl,
+        proxy: Option<ProxyConfig>,
+        so_mark: Option<u32>,
+        resolver_opts: NameServerOpts,
+    ) -> Arc<NameServer> {
+        use trust_dns_resolver::name_server::NameServer as N;
+
+        let key = format!(
+            "{}{:?}{}",
+            url.to_string(),
+            proxy.as_ref().map(|s| s.to_string()),
+            so_mark.unwrap_or_default()
+        );
+
+        if let Some(ns) = self.cache.read().await.get(&key) {
+            return ns.clone();
+        }
+
+        let config = Self::create_config_from_url(url, self.tls_client_config.clone());
+
+        let inner = N::<TokioRuntimeProvider>::new(
+            config,
+            resolver_opts.deref().to_owned(),
+            TokioRuntimeProvider::new(proxy, so_mark),
+        );
+
+        let ns = Arc::new(NameServer {
+            opts: resolver_opts,
+            inner,
+        });
+        self.cache.write().await.insert(key, ns.clone());
+        ns
+    }
+
+    fn create_config_from_url(
+        url: &VerifiedDnsUrl,
+        tls_client_config: TlsClientConfigBundle,
+    ) -> NameServerConfig {
+        use trust_dns_resolver::config::Protocol::*;
+
+        let addr = url.addr();
+
+        let tls_dns_name = Some(url.host().to_string());
+
+        let tls_config = if url.proto().is_encrypted() {
+            let config = if !url.ssl_verify() {
+                tls_client_config.verify_off
+            } else if url.sni_off() {
+                tls_client_config.sni_off
+            } else {
+                tls_client_config.normal
+            };
+
+            Some(TlsClientConfig(config))
+        } else {
+            None
+        };
+
+        match url.proto() {
+            Udp => NameServerConfig {
+                socket_addr: addr,
+                protocol: Protocol::Udp,
+                tls_dns_name: None,
+                tls_config: None,
+                trust_negative_responses: true,
+                bind_addr: None,
+            },
+            Tcp => NameServerConfig {
+                socket_addr: addr,
+                protocol: Protocol::Tcp,
+                tls_dns_name: None,
+                tls_config: None,
+                trust_negative_responses: true,
+                bind_addr: None,
+            },
+            Https => NameServerConfig {
+                socket_addr: addr,
+                protocol: Protocol::Https,
+                tls_dns_name,
+                trust_negative_responses: true,
+                bind_addr: None,
+                tls_config,
+            },
+            Quic => NameServerConfig {
+                socket_addr: addr,
+                protocol: Protocol::Quic,
+                tls_dns_name,
+                trust_negative_responses: true,
+                bind_addr: None,
+                tls_config,
+            },
+            Protocol::Tls => NameServerConfig {
+                socket_addr: addr,
+                protocol: Protocol::Tls,
+                tls_dns_name,
+                trust_negative_responses: true,
+                bind_addr: None,
+                tls_config,
+            },
+            _ => todo!(),
+        }
+    }
+
+    async fn create_name_server_group(
+        &self,
+        infos: &[NameServerInfo],
+        proxies: &HashMap<String, ProxyConfig>,
+        default_client_subnet: Option<ClientSubnet>,
+    ) -> NameServerGroup {
+        let mut servers = vec![];
+
+        let resolver = bootstrap::resolver().await;
+
+        for info in infos {
+            let url = info.url.clone();
+            let verified_urls = match TryInto::<VerifiedDnsUrl>::try_into(url) {
+                Ok(url) => vec![url],
+                Err(url) => {
+                    if let Some(domain) = url.domain() {
+                        match resolver.lookup_ip(domain).await {
+                            Ok(lookup_ip) => lookup_ip
+                                .into_iter()
+                                .map_while(|ip| {
+                                    let mut url = url.clone();
+                                    url.set_ip(ip);
+                                    TryInto::<VerifiedDnsUrl>::try_into(url).ok()
+                                })
+                                .collect::<Vec<_>>(),
+                            Err(err) => {
+                                warn!("lookup ip: {domain} failed, {err}");
+                                vec![]
+                            }
+                        }
+                    } else {
+                        vec![]
+                    }
+                }
+            };
+
+            let nameserver_opts = NameServerOpts::new(
+                info.blacklist_ip,
+                info.whitelist_ip,
+                info.check_edns,
+                info.edns_client_subnet
+                    .map(|x| x.into())
+                    .or(default_client_subnet),
+                *resolver.options(),
+            );
+
+            let proxy = info
+                .proxy
+                .as_deref()
+                .map(|n| proxies.get(n))
+                .unwrap_or_default()
+                .cloned();
+
+            for url in verified_urls {
+                servers.push(
+                    self.create(&url, proxy.clone(), info.so_mark, nameserver_opts.clone())
+                        .await,
+                )
+            }
+        }
+
+        NameServerGroup {
+            resolver_opts: resolver.options().to_owned(),
+            servers,
         }
     }
 }
@@ -515,91 +640,6 @@ impl NameServer {
     #[inline]
     pub fn options(&self) -> &NameServerOpts {
         &self.opts
-    }
-
-    fn create_config_from_url(
-        url: &VerifiedDnsUrl,
-        tls_client_config: TlsClientConfigBundle,
-    ) -> Vec<NameServerConfig> {
-        let host = url.domain();
-
-        let tls_dns_name = host
-            .map(|h| h.to_string())
-            .unwrap_or_else(|| url.host().to_string());
-
-        use trust_dns_resolver::config::Protocol::*;
-        let sock_addrs = url.addrs().iter().cloned();
-
-        let tls_config = |url: &VerifiedDnsUrl| {
-            if url.proto().is_encrypted() {
-                let config = if !url.ssl_verify() {
-                    tls_client_config.verify_off.clone()
-                } else if url.sni_off() {
-                    tls_client_config.sni_off.clone()
-                } else {
-                    tls_client_config.normal.clone()
-                };
-
-                Some(TlsClientConfig(config))
-            } else {
-                None
-            }
-        };
-
-        let cfgs = match url.proto() {
-            Udp => sock_addrs
-                .map(|addr| NameServerConfig {
-                    socket_addr: addr,
-                    protocol: Protocol::Udp,
-                    tls_dns_name: None,
-                    tls_config: None,
-                    trust_negative_responses: true,
-                    bind_addr: None,
-                })
-                .collect::<Vec<_>>(),
-            Tcp => sock_addrs
-                .map(|addr| NameServerConfig {
-                    socket_addr: addr,
-                    protocol: Protocol::Tcp,
-                    tls_dns_name: None,
-                    tls_config: None,
-                    trust_negative_responses: true,
-                    bind_addr: None,
-                })
-                .collect::<Vec<_>>(),
-            Https => sock_addrs
-                .map(|addr| NameServerConfig {
-                    socket_addr: addr,
-                    protocol: Protocol::Https,
-                    tls_dns_name: Some(tls_dns_name.clone()),
-                    trust_negative_responses: true,
-                    bind_addr: None,
-                    tls_config: tls_config(url),
-                })
-                .collect::<Vec<_>>(),
-            Quic => sock_addrs
-                .map(|addr| NameServerConfig {
-                    socket_addr: addr,
-                    protocol: Protocol::Quic,
-                    tls_dns_name: Some(tls_dns_name.clone()),
-                    trust_negative_responses: true,
-                    bind_addr: None,
-                    tls_config: tls_config(url),
-                })
-                .collect::<Vec<_>>(),
-            Protocol::Tls => sock_addrs
-                .map(|addr| NameServerConfig {
-                    socket_addr: addr,
-                    protocol: Protocol::Tls,
-                    tls_dns_name: Some(tls_dns_name.clone()),
-                    trust_negative_responses: true,
-                    bind_addr: None,
-                    tls_config: tls_config(url),
-                })
-                .collect::<Vec<_>>(),
-            _ => todo!(),
-        };
-        cfgs
     }
 }
 
@@ -832,6 +872,18 @@ where
 
 pub struct VerifiedDnsUrl(DnsUrl);
 
+impl VerifiedDnsUrl {
+    pub fn ip(&self) -> IpAddr {
+        self.0.ip().expect("VerifiedDnsUrl must have ip.")
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.0
+            .addr()
+            .expect("VerifiedDnsUrl must have socket address.")
+    }
+}
+
 impl Deref for VerifiedDnsUrl {
     type Target = DnsUrl;
 
@@ -844,7 +896,7 @@ impl std::convert::TryFrom<DnsUrl> for VerifiedDnsUrl {
     type Error = DnsUrl;
 
     fn try_from(value: DnsUrl) -> Result<Self, Self::Error> {
-        if value.addrs().is_empty() {
+        if value.ip().is_none() {
             return Err(value);
         }
         Ok(Self(value))
@@ -1074,12 +1126,12 @@ mod bootstrap {
             let mut name_servers = vec![];
 
             for config in resolv_config.name_servers() {
-                name_servers.push(super::NameServer::new(
+                name_servers.push(Arc::new(super::NameServer::new(
                     config.clone(),
                     Default::default(),
                     None,
                     None,
-                ));
+                )));
             }
 
             Self::new(Arc::new(NameServerGroup {
@@ -1165,7 +1217,6 @@ mod tests {
     };
     use std::net::IpAddr;
     use std::str::FromStr;
-    use tokio::runtime::Runtime;
 
     #[tokio::test]
     async fn test_with_default() {
@@ -1221,157 +1272,126 @@ mod tests {
         assert!(addrs.contains("223.5.5.5") || addrs.contains("223.6.6.6"));
     }
 
-    #[test]
-    fn test_nameserver_google_tls_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_google_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dns.google?enable_sni=false").unwrap();
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_cloudflare_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_cloudflare_resolve() {
         // todo:// support alias.
         let dns_urls = CLOUDFLARE_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
 
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_servers(dns_urls).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_servers(dns_urls).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_cloudflare_https_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_cloudflare_https_resolve() {
         let dns_url = DnsUrl::from_str("https://cloudflare-dns.com/dns-query").unwrap();
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore = "reason"]
-    fn test_nameserver_cloudflare_tls_resolve() {
+    async fn test_nameserver_cloudflare_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dns.cloudflare.com?enable_sni=false").unwrap();
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_quad9_tls_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_quad9_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dns.quad9.net?enable_sni=false").unwrap();
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_quad9_dns_url_https_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_quad9_dns_url_https_resolve() {
         let dns_url = DnsUrl::from_str("https://dns.quad9.net/dns-query").unwrap();
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_alidns_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_alidns_resolve() {
         // todo:// support alias.
         let dns_urls = ALIDNS_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
 
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_servers(dns_urls).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_servers(dns_urls).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_alidns_dns_url_https_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_alidns_dns_url_https_resolve() {
         let dns_url = DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap();
 
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_alidns_dns_url_tls_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_alidns_dns_url_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dns.alidns.com").unwrap();
-
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_alidns_https_tls_name_with_ip_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_alidns_https_tls_name_with_ip_resolve() {
         let dns_url = DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap();
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_dnspod_https_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_dnspod_https_resolve() {
         let dns_url = DnsUrl::from_str("https://doh.pub/dns-query").unwrap();
 
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_dnspod_tls_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_dnspod_tls_resolve() {
         let dns_url = DnsUrl::from_str("tls://dot.pub").unwrap();
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
+        let client = DnsClient::builder().add_server(dns_url).build().await;
 
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
-    fn test_nameserver_adguard_https_resolve() {
+    #[tokio::test]
+    async fn test_nameserver_adguard_https_resolve() {
         let dns_url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query").unwrap();
 
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore = "not available now"]
-    fn test_nameserver_adguard_quic_resolve() {
+    async fn test_nameserver_adguard_quic_resolve() {
         let dns_url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
-
-        Runtime::new().unwrap().block_on(async {
-            let client = DnsClient::builder().add_server(dns_url).build().await;
-            assert_google(&client).await;
-            assert_alidns(&client).await;
-        })
+        let client = DnsClient::builder().add_server(dns_url).build().await;
+        assert_google(&client).await;
+        assert_alidns(&client).await;
     }
 
     // #[test]

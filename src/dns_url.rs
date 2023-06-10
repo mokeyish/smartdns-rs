@@ -21,20 +21,17 @@ pub struct DnsUrl {
     host: Host,
     port: Option<u16>,
     path: Option<String>,
-    addrs: Vec<SocketAddr>,
-
+    ip: Option<IpAddr>,
     params: BTreeMap<String, String>,
 }
 
 impl DnsUrl {
-    pub fn addrs(&self) -> &[SocketAddr] {
-        self.addrs.as_slice()
-    }
-
+    #[inline]
     pub fn proto(&self) -> &Protocol {
         &self.proto
     }
 
+    #[inline]
     pub fn host(&self) -> &Host {
         &self.host
     }
@@ -58,22 +55,39 @@ impl DnsUrl {
         }
     }
 
+    pub fn ip(&self) -> Option<IpAddr> {
+        self.ip
+            .or_else(|| match self.host() {
+                Host::Domain(_) => None,
+                Host::Ipv4(ip) => Some(ip.to_owned().into()),
+                Host::Ipv6(ip) => Some(ip.to_owned().into()),
+            })
+            .or_else(|| self.get_param::<IpAddr>("ip"))
+    }
+
     pub fn domain(&self) -> Option<&str> {
-        if let Host::Domain(domain) = &self.host {
+        if let Host::Domain(domain) = self.host() {
             Some(domain.as_str())
         } else {
-            None
+            self.params.get("host").map(|s| s.as_str())
         }
     }
 
-    pub fn set_ip_addrs(&mut self, addrs: Vec<IpAddr>) {
-        self.addrs = addrs
-            .into_iter()
-            .map(|ip| SocketAddr::new(ip, self.port()))
-            .collect();
+    #[inline]
+    pub fn addr(&self) -> Option<SocketAddr> {
+        self.ip().map(|ip| SocketAddr::new(ip, self.port()))
     }
 
-    pub fn set_host_name(&mut self, name: &str) {
+    pub fn set_ip(&mut self, ip: IpAddr) {
+        self.ip = Some(ip)
+    }
+
+    pub fn set_host(&mut self, name: &str) {
+        match self.host() {
+            Host::Ipv4(ip) => self.set_ip((*ip).into()),
+            Host::Ipv6(ip) => self.set_ip((*ip).into()),
+            _ => (),
+        }
         self.host = Host::Domain(name.to_string())
     }
 }
@@ -91,7 +105,7 @@ impl PartialEq for DnsUrl {
             && self.host == other.host
             && self.port == other.port
             && self.path == other.path
-            && self.addrs == other.addrs
+            && self.ip == other.ip
             && self.params() == other.params()
     }
 }
@@ -102,7 +116,7 @@ impl Hash for DnsUrl {
         self.host.hash(state);
         self.port.hash(state);
         self.path.hash(state);
-        self.addrs.hash(state);
+        self.ip.hash(state);
         self.params.hash(state);
     }
 }
@@ -138,24 +152,14 @@ impl FromStr for DnsUrl {
 
         let mut host = host.unwrap().to_owned();
 
-        let addr_port = port.unwrap_or_else(|| dns_proto_default_port(&proto));
-
-        let addrs = match host {
-            Host::Domain(ref domain) => {
-                if let Ok(ip) = IpAddr::from_str(domain) {
-                    host = match ip {
-                        IpAddr::V4(ip) => Host::Ipv4(ip),
-                        IpAddr::V6(ip) => Host::Ipv6(ip),
-                    };
-
-                    vec![SocketAddr::new(ip, addr_port)]
-                } else {
-                    vec![]
-                }
+        if let Host::Domain(ref domain) = host {
+            if let Ok(ip) = IpAddr::from_str(domain) {
+                host = match ip {
+                    IpAddr::V4(ip) => Host::Ipv4(ip),
+                    IpAddr::V6(ip) => Host::Ipv6(ip),
+                };
             }
-            Host::Ipv4(ip) => vec![SocketAddr::new(IpAddr::V4(ip), addr_port)],
-            Host::Ipv6(ip) => vec![SocketAddr::new(IpAddr::V6(ip), addr_port)],
-        };
+        }
 
         let params = url
             .query_pairs()
@@ -172,7 +176,7 @@ impl FromStr for DnsUrl {
             } else {
                 Some(url.path().to_string())
             },
-            addrs,
+            ip: None,
             params,
         })
     }
@@ -268,7 +272,7 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
 
 pub trait DnsUrlParam {
     fn params(&self) -> &BTreeMap<String, String>;
-    fn get_param<T: Default + FromStr>(&self, name: &str) -> Option<T>;
+    fn get_param<T: FromStr>(&self, name: &str) -> Option<T>;
 
     fn get_param_or_default<T: Default + FromStr>(&self, name: &str) -> T {
         self.get_param(name).unwrap_or_default()
@@ -282,10 +286,11 @@ impl DnsUrlParam for DnsUrl {
         &self.params
     }
 
-    fn get_param<T: Default + FromStr>(&self, name: &str) -> Option<T> {
+    fn get_param<T: FromStr>(&self, name: &str) -> Option<T> {
         self.params
             .get(name)
-            .map(|v| T::from_str(v).unwrap_or_default())
+            .map(|v| T::from_str(v).ok())
+            .unwrap_or_default()
     }
 
     fn set_param<T: ToString>(&mut self, name: &str, value: T) {
@@ -338,7 +343,7 @@ mod tests {
         assert_eq!(url.port(), 53);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://8.8.8.8");
-        assert!(!url.addrs().is_empty());
+        assert!(url.ip().is_some());
     }
 
     #[test]
@@ -349,7 +354,7 @@ mod tests {
         assert_eq!(url.port(), 53);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://8.8.8.8");
-        assert!(!url.addrs().is_empty());
+        assert!(url.ip().is_some());
     }
 
     #[test]
@@ -360,7 +365,7 @@ mod tests {
         assert_eq!(url.port(), 8053);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://1.1.1.1:8053");
-        assert!(!url.addrs().is_empty());
+        assert!(url.ip().is_some());
     }
 
     #[test]
@@ -413,12 +418,13 @@ mod tests {
     #[test]
     fn test_parse_tls_3() {
         let mut url = DnsUrl::from_str("tls://8.8.8.8:953").unwrap();
-        url.set_host_name("dns.google");
+        url.set_host("dns.google");
         assert_eq!(url.proto, Protocol::Tls);
         assert_eq!(url.host.to_string(), "dns.google");
         assert_eq!(url.port(), 953);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "tls://dns.google:953");
+        assert_eq!(url.ip(), "8.8.8.8".parse().ok())
     }
 
     #[test]
@@ -429,7 +435,7 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
-        assert!(url.addrs().is_empty());
+        assert!(url.ip().is_none());
     }
 
     #[test]
@@ -440,7 +446,7 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query1");
         assert_eq!(url.to_string(), "https://dns.google/dns-query1");
-        assert!(url.addrs().is_empty());
+        assert!(url.ip().is_none());
     }
 
     #[test]
@@ -452,7 +458,7 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
-        assert!(url.addrs().is_empty());
+        assert!(url.ip().is_none());
     }
 
     #[test]
@@ -464,7 +470,7 @@ mod tests {
         assert_eq!(url.port(), 853);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "quic://dns.adguard-dns.com");
-        assert!(url.addrs().is_empty());
+        assert!(url.ip().is_none());
     }
 
     #[test]
@@ -482,7 +488,7 @@ mod tests {
         assert_eq!(url.port(), 1053);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://127.0.0.1:1053");
-        assert!(!url.addrs().is_empty());
+        assert!(url.ip().is_some());
     }
 
     #[test]
@@ -493,20 +499,26 @@ mod tests {
         assert_eq!(url.port(), 53);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "udp://[240e:1f:1::1]");
-        assert!(!url.addrs().is_empty());
+        assert!(url.ip().is_some());
     }
 
     #[test]
     fn test_parse_enable_sni_false() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
         assert!(url.sni_off());
-        assert!(url.addrs().is_empty());
+        assert!(url.ip().is_none());
     }
 
     #[test]
     fn test_parse_enable_sni_true() {
         let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
         assert!(url.sni_off());
-        assert!(url.addrs().is_empty());
+        assert!(url.ip().is_none());
+    }
+
+    #[test]
+    fn test_parse_params_ip() {
+        let url = DnsUrl::from_str("tls://cloudflare-dns.com?ip=1.1.1.1").unwrap();
+        assert_eq!(url.ip(), Some("1.1.1.1".parse().unwrap()));
     }
 }
