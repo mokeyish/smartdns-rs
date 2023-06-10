@@ -815,7 +815,7 @@ mod tests {
         let name: Name = name.parse().unwrap();
         let ttl = Duration::from_secs(ttl);
         let query = Query::query(name.clone(), rr_type);
-        let records = vec![Record::with(name.clone(), rr_type, ttl.as_secs() as u32)];
+        let records = vec![Record::with(name, rr_type, ttl.as_secs() as u32)];
         let valid_until = Instant::now() + ttl;
         Lookup::new_with_deadline(query, records.into(), valid_until)
     }

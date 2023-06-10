@@ -959,25 +959,22 @@ mod connection_provider {
 
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             let so_mark = self.so_mark;
+            let so_mark = move |tcp: proxy::TcpStream| {
+                #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+                if let Some(mark) = so_mark {
+                    use socket2::SockRef;
+                    let sock_ref = SockRef::from(tcp.deref());
+                    sock_ref.set_mark(mark).unwrap_or_else(|err| {
+                        warn!("set so_mark failed: {:?}", err);
+                    });
+                }
+                tcp
+            };
 
             Box::pin(async move {
                 proxy::connect_tcp(server_addr, proxy_config.as_ref())
                     .await
-                    .map(|tcp| {
-                        #[cfg(any(
-                            target_os = "android",
-                            target_os = "fuchsia",
-                            target_os = "linux"
-                        ))]
-                        if let Some(mark) = so_mark {
-                            use socket2::SockRef;
-                            let sock_ref = SockRef::from(tcp.deref());
-                            sock_ref.set_mark(mark).unwrap_or_else(|err| {
-                                warn!("set so_mark failed: {:?}", err);
-                            });
-                        }
-                        tcp
-                    })
+                    .map(so_mark)
                     .map(AsyncIoTokioAsStd)
             })
         }
@@ -1237,10 +1234,7 @@ mod tests {
     #[test]
     fn test_nameserver_cloudflare_resolve() {
         // todo:// support alias.
-        let dns_urls = CLOUDFLARE_IPS
-            .iter()
-            .map(|ip| DnsUrl::from(ip))
-            .collect::<Vec<_>>();
+        let dns_urls = CLOUDFLARE_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
 
         Runtime::new().unwrap().block_on(async {
             let client = DnsClient::builder().add_servers(dns_urls).build().await;
@@ -1293,10 +1287,7 @@ mod tests {
     #[test]
     fn test_nameserver_alidns_resolve() {
         // todo:// support alias.
-        let dns_urls = ALIDNS_IPS
-            .iter()
-            .map(|ip| DnsUrl::from(ip))
-            .collect::<Vec<_>>();
+        let dns_urls = ALIDNS_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
 
         Runtime::new().unwrap().block_on(async {
             let client = DnsClient::builder().add_servers(dns_urls).build().await;

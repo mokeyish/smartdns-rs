@@ -2280,7 +2280,7 @@ mod parse {
 
             assert!(!cfg.binds_https.is_empty());
 
-            let bind = cfg.binds_https.iter().next().unwrap();
+            let bind = cfg.binds_https.first().unwrap();
             let ssl_cfg = bind.ssl_config.as_ref().unwrap();
 
             assert_eq!(
@@ -2555,7 +2555,7 @@ mod parse {
 
             assert_eq!(
                 nameserver_rule.domain,
-                DomainId::from_str("doh.pub").unwrap().into()
+                DomainId::from_str("doh.pub").unwrap()
             );
 
             assert_eq!(nameserver_rule.nameserver, "bootstrap");
@@ -2571,7 +2571,7 @@ mod parse {
 
             assert_eq!(
                 domain_rule.name,
-                DomainId::Domain(Name::from_str("doh.pub").unwrap().into())
+                DomainId::Domain(Name::from_str("doh.pub").unwrap())
             );
             assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
             assert_eq!(
@@ -2592,7 +2592,7 @@ mod parse {
 
             assert_eq!(
                 domain_rule.name,
-                DomainId::Domain(Name::from_str("doh.pub").unwrap().into())
+                DomainId::Domain(Name::from_str("doh.pub").unwrap())
             );
             assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
             assert_eq!(
@@ -2685,7 +2685,7 @@ mod parse {
             assert_eq!(cfg.server_name, "SmartDNS123".parse().ok());
             assert_eq!(
                 cfg.forward_rules.first().unwrap().domain,
-                DomainId::from_str("doh.pub").unwrap().into()
+                DomainId::from_str("doh.pub").unwrap()
             );
             assert_eq!(cfg.forward_rules.first().unwrap().nameserver, "bootstrap");
         }
