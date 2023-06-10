@@ -117,11 +117,13 @@ bind 127.0.0.1:53
 
 # Configure bootstrap-dns, if not configured, call the system_conf, 
 # it is recommended to configure, so that it will be encrypted.
-server https://223.5.5.5/dns-query  -bootstrap-dns -exclude-default-group
+server https://1.1.1.1/dns-query  -bootstrap-dns -exclude-default-group
+server https://8.8.8.8/dns-query  -bootstrap-dns -exclude-default-group
 
 # Configure default upstream server
-server https://dns.alidns.com/dns-query
-server https://doh.pub/dns-query
+server https://cloudflare-dns/dns-query
+server https://dns.quad9.net/dns-query
+server https://dns.google/dns-query
 
 # Configure the Office(Home) upstream server
 server 192.168.1.1 -exclude-default-group -group office
