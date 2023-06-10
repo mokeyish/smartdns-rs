@@ -42,9 +42,9 @@ dns-over-https-rustls = [
 [patch.crates-io]
 # rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
 # quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
-trust-dns-proto = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
-trust-dns-resolver = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
-trust-dns-server = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
+# trust-dns-proto = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
+# trust-dns-resolver = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
+# trust-dns-server = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
@@ -74,9 +74,9 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # trustdns
-trust-dns-proto = { version = "0.23.0-alpha.2"}
-trust-dns-resolver = { version = "0.23.0-alpha.2", features = ["serde-config", "system-config"]}
-trust-dns-server = { version = "0.23.0-alpha.2", features = ["resolver"]}
+trust-dns-proto = { version = "0.23.0-alpha"}
+trust-dns-resolver = { version = "0.23.0-alpha", features = ["serde-config", "system-config"]}
+trust-dns-server = { version = "0.23.0-alpha", features = ["resolver"]}
 
 # ssl
 webpki-roots = "0.23.0"
