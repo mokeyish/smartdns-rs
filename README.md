@@ -152,7 +152,7 @@ cd smartdns-rs
 cargo build --release
 
 # print help
-cargo build --release
+./target/release/smartdns --help
 
 # run
 sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
