@@ -1940,7 +1940,7 @@ mod parse {
                         "domain-set" => self
                             .config_domain_set(options)
                             .expect("load domain-set failed"),
-                        _ => warn!("unkonwn conf: {}", conf_name),
+                        _ => warn!("unknown conf: {}", conf_name),
                     }
                 }
                 _ => (),
