@@ -1557,6 +1557,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
             let mut nameserver = None;
 
             let mut dualstack_ip_selection = None;
+            let mut no_cache = None;
 
             if parts.len() > 1 {
                 let mut parts = parse::split_options(parts[1], ' ').peekable();
@@ -1592,6 +1593,9 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                         "-cname" | "--cname" => {
                             cname = parts.next().map(|s| s.parse().ok()).unwrap_or_default()
                         }
+                        "-no-cache" | "--no-cache" => {
+                            no_cache = Some(true);
+                        }
                         opt => warn!("unknown option: {}", opt),
                     }
                 }
@@ -1606,7 +1610,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                     response_mode: None,
                     nameserver,
                     dualstack_ip_selection,
-                    no_cache: None,
+                    no_cache,
                     no_serve_expired: None,
                     rr_ttl: None,
                     rr_ttl_min: None,

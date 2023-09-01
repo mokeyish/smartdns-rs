@@ -48,7 +48,7 @@ pub struct DnsMiddlewareBuilder {
 impl DnsMiddlewareBuilder {
     pub fn new() -> Self {
         Self {
-            builder: MiddlewareBuilder::new(DnsDefaultHandler::default()),
+            builder: MiddlewareBuilder::new(DnsDefaultHandler),
         }
     }
 

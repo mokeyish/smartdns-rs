@@ -32,13 +32,17 @@ pub struct DnsContext {
 impl DnsContext {
     pub fn new(name: &Name, cfg: Arc<SmartDnsConfig>, server_opts: ServerOpts) -> Self {
         let domain_rule = cfg.find_domain_rule(name);
+        let no_cache = domain_rule
+            .as_ref()
+            .and_then(|r| r.no_cache)
+            .unwrap_or_default();
         DnsContext {
             cfg,
             server_opts,
             domain_rule,
             fastest_speed: Default::default(),
             source: Default::default(),
-            no_cache: false,
+            no_cache,
             background: false,
         }
     }
