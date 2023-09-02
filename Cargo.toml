@@ -74,9 +74,9 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # trustdns
-trust-dns-proto = { version = "0.23.0-alpha"}
-trust-dns-resolver = { version = "0.23.0-alpha", features = ["serde-config", "system-config"]}
-trust-dns-server = { version = "0.23.0-alpha", features = ["resolver"]}
+trust-dns-proto = { version = "0.23"}
+trust-dns-resolver = { version = "0.23", features = ["serde-config", "system-config"]}
+trust-dns-server = { version = "0.23", features = ["resolver"]}
 
 # ssl
 webpki-roots = "0.25.2"
@@ -116,7 +116,7 @@ caps = "0.5.5"
 
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.48.0", features = [
+windows = { version = "0.51", features = [
   "Win32_System_Console",
   "Win32_Foundation",
 ] }

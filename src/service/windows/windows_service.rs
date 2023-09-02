@@ -16,12 +16,9 @@ fn service_main(args: Vec<OsString>) {
     unsafe {
         // Windows services don't start with a console, so we have to
         // allocate one in order to send ctrl-C to children.
-        if !windows::Win32::System::Console::AllocConsole().as_bool() {
-            error!(
-                "winapi AllocConsole failed with code {:?}",
-                windows::Win32::Foundation::GetLastError()
-            );
-        };
+        if let Err(err) = windows::Win32::System::Console::AllocConsole() {
+            error!("winapi AllocConsole failed with code {:?}", err);
+        }
     }
     let _ = run_service(args);
 }
@@ -41,11 +38,12 @@ fn run_service(_args: Vec<OsString>) -> Result<()> {
             // Handle stop
             ServiceControl::Stop => {
                 unsafe {
-                    windows::Win32::System::Console::GenerateConsoleCtrlEvent(
+                    if let Err(err) = windows::Win32::System::Console::GenerateConsoleCtrlEvent(
                         windows::Win32::System::Console::CTRL_C_EVENT,
                         0,
-                    )
-                    .as_bool();
+                    ) {
+                        error!("GenerateConsoleCtrlEvent failed {:?}", err);
+                    }
                 }
                 ServiceControlHandlerResult::NoError
             }
