@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn test_escape_trailing_backslash() {
         assert_eq!(
-            escape(Cow::Borrowed(OsStr::new(r#"\some\directory with\spaces\"#))),
+            escape(Cow::Borrowed(OsStr::new(r"\some\directory with\spaces\"))),
             OsStr::new(r#""\some\directory with\spaces\\""#)
         );
     }

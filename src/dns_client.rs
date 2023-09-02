@@ -139,8 +139,6 @@ impl DnsClientBuilder {
                     }
                 }
 
-                let resolver = BootstrapResolver::from_system_conf();
-
                 let resolver: Arc<BootstrapResolver> = if !bootstrap_infos.is_empty() {
                     let new_resolver = factory
                         .create_name_server_group(
@@ -149,11 +147,12 @@ impl DnsClientBuilder {
                             client_subnet,
                         )
                         .await;
-                    resolver.with_new_resolver(new_resolver.into())
+                    BootstrapResolver::new(new_resolver.into())
                 } else {
-                    resolver
+                    BootstrapResolver::from_system_conf()
                 }
                 .into();
+
                 resolver
             }
             .await,

@@ -19,6 +19,6 @@ pub trait FutureJoinAllExt<T: Future> {
 impl<T: Future, I: IntoIterator<Item = T>> FutureJoinAllExt<T> for I {
     #[inline]
     fn join_all(self) -> JoinAll<T> {
-        futures::future::join_all(self.into_iter())
+        futures::future::join_all(self)
     }
 }
