@@ -30,21 +30,28 @@ impl BackgroundQueryTask {
         }
     }
 
-    pub fn from_query(query: Query, cfg: Arc<SmartDnsConfig>, client: Arc<DnsMiddlewareHost>) -> Self {
+    pub fn from_query(
+        query: Query,
+        cfg: Arc<SmartDnsConfig>,
+        client: Arc<DnsMiddlewareHost>,
+    ) -> Self {
         let ctx = DnsContext::new(query.name(), cfg, Default::default());
         let req = query.into();
-        Self { ctx, req, client}
+        Self { ctx, req, client }
     }
 
     pub fn spawn(self) -> tokio::task::JoinHandle<(Self, Result<DnsResponse, DnsError>)> {
         tokio::spawn(async move {
-            let Self { mut ctx, req, client } = self;
+            let Self {
+                mut ctx,
+                req,
+                client,
+            } = self;
             let res = client.execute(&mut ctx, &req).await;
             (Self { ctx, req, client }, res)
         })
     }
 }
-
 
 pub struct DnsMiddlewareHandler {
     cfg: Arc<SmartDnsConfig>,

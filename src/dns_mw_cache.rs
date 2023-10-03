@@ -144,34 +144,38 @@ impl DnsCacheMiddleware {
                             let now = Instant::now();
 
                             let prefetch_notify = prefetch_notify.clone();
-                            let _ = bg_task.spawn().and_then(|(t, res)| async move {
-                                let query = t.req.query().original();
-                                if let Ok(lookup) = res {
-                                    let min_ttl = lookup
-                                        .records()
-                                        .iter()
-                                        .min_by_key(|r| r.ttl())
-                                        .map(|r| Duration::from_secs(u64::from(r.ttl())));
+                            let _ = bg_task
+                                .spawn()
+                                .and_then(|(t, res)| async move {
+                                    let query = t.req.query().original();
+                                    if let Ok(lookup) = res {
+                                        let min_ttl = lookup
+                                            .records()
+                                            .iter()
+                                            .min_by_key(|r| r.ttl())
+                                            .map(|r| Duration::from_secs(u64::from(r.ttl())));
 
-                                    debug!(
-                                        "Prefetch domain {} {}, elapsed {:?}, ttl {:?}",
-                                        name,
-                                        typ,
-                                        now.elapsed(),
-                                        min_ttl.unwrap_or_default()
-                                    );
+                                        debug!(
+                                            "Prefetch domain {} {}, elapsed {:?}, ttl {:?}",
+                                            name,
+                                            typ,
+                                            now.elapsed(),
+                                            min_ttl.unwrap_or_default()
+                                        );
 
-                                    if let Some(min_ttl) = min_ttl {
-                                        if let Some(entry) = cache.lock().await.peek_mut(query) {
-                                            entry.valid_until = Instant::now() + min_ttl;
-                                            entry.lookup = Ok(lookup);
-                                            prefetch_notify.notify_after(min_ttl).await;
+                                        if let Some(min_ttl) = min_ttl {
+                                            if let Some(entry) = cache.lock().await.peek_mut(query)
+                                            {
+                                                entry.valid_until = Instant::now() + min_ttl;
+                                                entry.lookup = Ok(lookup);
+                                                prefetch_notify.notify_after(min_ttl).await;
+                                            }
                                         }
                                     }
-                                }
-                                querying.lock().await.remove(query);
-                                Ok(())
-                            }).await;
+                                    querying.lock().await.remove(query);
+                                    Ok(())
+                                })
+                                .await;
                         }
                     }
                 }
@@ -370,7 +374,10 @@ impl DomainPrefetchingNotify {
             let tick = *(self.tick.read().await);
             let next_tick = now + duration;
             if tick > now && next_tick > tick {
-                debug!("Domain prefetch check will be performed in {:?}.", tick - now);
+                debug!(
+                    "Domain prefetch check will be performed in {:?}.",
+                    tick - now
+                );
                 return;
             }
 
@@ -508,10 +515,14 @@ impl DnsCache {
         let mut lookup = None;
 
         if is_cname_query {
-            let records = records.clone().into_iter().flat_map(|(_, r)| r).collect::<Vec<_>>();
+            let records = records
+                .clone()
+                .into_iter()
+                .flat_map(|(_, r)| r)
+                .collect::<Vec<_>>();
             lookup = Some(self.insert(original_query.clone(), records, now).await)
         }
-        
+
         for (query, records_and_ttl) in records {
             let is_query = original_query == query;
             let inserted = self.insert(query, records_and_ttl, now).await;
