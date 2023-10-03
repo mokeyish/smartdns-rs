@@ -236,7 +236,7 @@ fn run_server(conf: Option<PathBuf>) {
 
         // check if cache enabled.
         if cfg.cache_size() > 0 {
-            middleware_builder = middleware_builder.with(DnsCacheMiddleware::new());
+            middleware_builder = middleware_builder.with(DnsCacheMiddleware::new(&cfg));
         }
 
         middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);

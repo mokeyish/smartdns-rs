@@ -15,6 +15,37 @@ use crate::{
 
 pub type DnsMiddlewareHost = MiddlewareHost<DnsContext, DnsRequest, DnsResponse, DnsError>;
 
+pub struct BackgroundQueryTask {
+    pub ctx: DnsContext,
+    pub req: DnsRequest,
+    client: Arc<DnsMiddlewareHost>,
+}
+
+impl BackgroundQueryTask {
+    pub fn new(ctx: &DnsContext, req: &DnsRequest, client: Arc<DnsMiddlewareHost>) -> Self {
+        Self {
+            ctx: ctx.clone(),
+            req: req.clone(),
+            client,
+        }
+    }
+
+    pub fn from_query(query: Query, cfg: Arc<SmartDnsConfig>, client: Arc<DnsMiddlewareHost>) -> Self {
+        let ctx = DnsContext::new(query.name(), cfg, Default::default());
+        let req = query.into();
+        Self { ctx, req, client}
+    }
+
+    pub fn spawn(self) -> tokio::task::JoinHandle<(Self, Result<DnsResponse, DnsError>)> {
+        tokio::spawn(async move {
+            let Self { mut ctx, req, client } = self;
+            let res = client.execute(&mut ctx, &req).await;
+            (Self { ctx, req, client }, res)
+        })
+    }
+}
+
+
 pub struct DnsMiddlewareHandler {
     cfg: Arc<SmartDnsConfig>,
     host: DnsMiddlewareHost,
