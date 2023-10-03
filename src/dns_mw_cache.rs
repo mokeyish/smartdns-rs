@@ -154,7 +154,7 @@ impl DnsCacheMiddleware {
                                         .map(|r| Duration::from_secs(u64::from(r.ttl())));
 
                                     debug!(
-                                        "prefetch domain {} {}, elapsed {:?}, ttl {:?}",
+                                        "Prefetch domain {} {}, elapsed {:?}, ttl {:?}",
                                         name,
                                         typ,
                                         now.elapsed(),
@@ -171,7 +171,7 @@ impl DnsCacheMiddleware {
                                 }
                                 querying.lock().await.remove(query);
                                 Ok(())
-                            });
+                            }).await;
                         }
                     }
                 }
@@ -219,16 +219,14 @@ impl DnsCacheMiddleware {
                                 expired.push(query.to_owned());
                             }
                             debug!(
-                                "Domain prefetching check(total: {}), elapsed {:?}",
+                                "Domain prefetch check(total: {}), elapsed {:?}",
                                 len,
                                 now.elapsed()
                             );
                         }
 
-                        if !expired.is_empty() {
-                            if tx.send(expired).await.is_err() {
-                                error!("failed to send queries to prefetch domain!",);
-                            }
+                        if !expired.is_empty() && tx.send(expired).await.is_err() {
+                            error!("Failed to send queries to prefetch domain!",);
                         }
                     } else {
                         most_recent = Duration::ZERO;
@@ -331,7 +329,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
         let cached_res = self.cache.get(&query, Instant::now()).await;
 
         let bg_task = {
-            let cached_res = cached_res.as_ref().map(|c| c.1.clone().ok()).flatten();
+            let cached_res = cached_res.as_ref().and_then(|c| c.1.clone().ok());
             self.bg_fetch(ctx, req, cached_res).await
         };
 
@@ -351,16 +349,17 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
     }
 }
 
-
 struct DomainPrefetchingNotify {
     notity: Arc<Notify>,
-    tick: RwLock<Instant>
+    tick: RwLock<Instant>,
 }
-
 
 impl DomainPrefetchingNotify {
     pub fn new() -> Self {
-        Self { notity: Default::default(), tick: RwLock::new(Instant::now()) }
+        Self {
+            notity: Default::default(),
+            tick: RwLock::new(Instant::now()),
+        }
     }
 
     async fn notify_after(&self, duration: Duration) {
@@ -371,12 +370,12 @@ impl DomainPrefetchingNotify {
             let tick = *(self.tick.read().await);
             let next_tick = now + duration;
             if tick > now && next_tick > tick {
-                debug!("Domain prefetching check in {:?} seconds.", tick - now);
+                debug!("Domain prefetch check will be performed in {:?}.", tick - now);
                 return;
             }
 
             *self.tick.write().await.deref_mut() = next_tick;
-            debug!("Domain prefetching check in {:?} seconds.", duration);
+            debug!("Domain prefetch check will be performed in {:?}.", duration);
             let notify = self.notity.clone();
             tokio::spawn(async move {
                 sleep(duration).await;
@@ -393,8 +392,6 @@ impl Deref for DomainPrefetchingNotify {
         self.notity.as_ref()
     }
 }
-
-
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 /// Setting this to a value of 1 day, in seconds
@@ -485,6 +482,7 @@ impl DnsCache {
         records: impl Iterator<Item = Record>,
         now: Instant,
     ) -> Option<Lookup> {
+        let mut is_cname_query = false;
         // collect all records by name
         let records = records.fold(
             HashMap::<Query, Vec<(Record, u32)>>::new(),
@@ -493,6 +491,10 @@ impl DnsCache {
                 query.set_query_class(record.dns_class());
 
                 let ttl = record.ttl();
+
+                if original_query != query {
+                    is_cname_query = true;
+                }
 
                 map.entry(query)
                     .or_insert_with(Vec::default)
@@ -504,6 +506,12 @@ impl DnsCache {
 
         // now insert by record type and name
         let mut lookup = None;
+
+        if is_cname_query {
+            let records = records.clone().into_iter().flat_map(|(_, r)| r).collect::<Vec<_>>();
+            lookup = Some(self.insert(original_query.clone(), records, now).await)
+        }
+        
         for (query, records_and_ttl) in records {
             let is_query = original_query == query;
             let inserted = self.insert(query, records_and_ttl, now).await;
