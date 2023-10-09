@@ -48,6 +48,7 @@ dns-over-https-rustls = [
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
+ring = { git = "https://github.com/briansmith/ring.git", branch = "main" }
 
 [dependencies]
 cfg-if = "1"
@@ -77,6 +78,7 @@ tracing-subscriber = { version = "0.3", features = [
 trust-dns-proto = { version = "0.23"}
 trust-dns-resolver = { version = "0.23", features = ["serde-config", "system-config"]}
 trust-dns-server = { version = "0.23", features = ["resolver"]}
+
 
 # ssl
 webpki-roots = "0.25.2"
