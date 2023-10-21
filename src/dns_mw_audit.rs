@@ -10,9 +10,9 @@ use tokio::sync::mpsc::{self, Sender};
 
 use crate::dns::*;
 use crate::infra::mapped_file::MappedFile;
+use crate::libdns::proto::op::Query;
 use crate::log::warn;
 use crate::middleware::*;
-use crate::trust_dns::proto::op::Query;
 
 pub struct DnsAuditMiddleware {
     audit_sender: Sender<DnsAuditRecord>,
@@ -224,10 +224,10 @@ fn record_audit_to_file(
 #[cfg(test)]
 mod tests {
 
+    use crate::libdns::proto::op::Query;
+    use crate::libdns::proto::rr::{RData, RecordType};
     use std::io::Read;
     use std::str::FromStr;
-    use trust_dns_proto::op::Query;
-    use trust_dns_proto::rr::{RData, RecordType};
 
     use super::*;
 

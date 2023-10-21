@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use trust_dns_proto::op::ResponseCode;
+use crate::libdns::proto::op::ResponseCode;
 
 use crate::dns::*;
 

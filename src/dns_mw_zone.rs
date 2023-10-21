@@ -3,10 +3,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 use std::str::FromStr;
 
+use crate::libdns::proto::rr::rdata::PTR;
+use crate::libdns::proto::rr::LowerName;
+use crate::libdns::server::authority::{AuthorityObject, LookupOptions};
 use ipnet::IpNet;
-use trust_dns_proto::rr::rdata::PTR;
-use trust_dns_proto::rr::LowerName;
-use trust_dns_server::authority::{AuthorityObject, LookupOptions};
 
 use crate::dns::*;
 use crate::dns_conf::SmartDnsConfig;

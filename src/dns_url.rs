@@ -1,3 +1,4 @@
+use crate::libdns::resolver::config::Protocol;
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::net::SocketAddr;
@@ -6,7 +7,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
-use trust_dns_resolver::config::Protocol;
 use url::{Host, Url};
 
 /// alias: system、google、cloudflare、quad9

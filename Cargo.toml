@@ -29,12 +29,12 @@ disable_icmp_ping = []
 
 dns-over-tls = []
 dns-over-https = ["dns-over-https-rustls"]
-dns-over-quic = ["trust-dns-server/dns-over-quic"]
+dns-over-quic = ["hickory-server/dns-over-quic"]
 
 dns-over-https-rustls = [
-  "trust-dns-proto/dns-over-https-rustls",
-  "trust-dns-resolver/dns-over-https-rustls",
-  "trust-dns-server/dns-over-https-rustls",
+  "hickory-proto/dns-over-https-rustls",
+  "hickory-resolver/dns-over-https-rustls",
+  "hickory-server/dns-over-https-rustls",
 ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -42,9 +42,9 @@ dns-over-https-rustls = [
 [patch.crates-io]
 # rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
 # quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
-# trust-dns-proto = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
-# trust-dns-resolver = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
-# trust-dns-server = { git = "https://github.com/bluejekyll/trust-dns.git", rev = "41b6e33"}
+# hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
+# hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
+# hickory-server = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
@@ -76,10 +76,10 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 # tracing-appender = "0.2"
 
-# trustdns
-trust-dns-proto = { version = "0.23"}
-trust-dns-resolver = { version = "0.23", features = ["serde-config", "system-config"]}
-trust-dns-server = { version = "0.23", features = ["resolver"]}
+# hickory dns
+hickory-proto = { version = "0.24"}
+hickory-resolver = { version = "0.24", features = ["serde-config", "system-config"]}
+hickory-server = { version = "0.24", features = ["resolver"]}
 
 # ssl
 webpki-roots = "0.25.2"

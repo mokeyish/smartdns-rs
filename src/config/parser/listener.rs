@@ -235,7 +235,7 @@ fn parse_ssl_config<'b>(options: &Options<'b>) -> (Options<'b>, SslConfig) {
             _ => rest_options.push((*k, *v)),
         }
     }
-    
+
     (rest_options, config)
 }
 

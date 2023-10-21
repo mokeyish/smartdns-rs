@@ -7,12 +7,12 @@ use crate::dns_rule::DomainRuleTreeNode;
 
 use crate::dns_conf::{ServerOpts, SmartDnsConfig};
 
-pub use crate::trust_dns::proto::{
+pub use crate::libdns::proto::{
     op,
     rr::{self, rdata::SOA, Name, RData, Record, RecordType},
 };
 
-pub use trust_dns_resolver::{
+pub use crate::libdns::resolver::{
     config::{NameServerConfig, NameServerConfigGroup, Protocol},
     error::{ResolveError, ResolveErrorKind},
     lookup::Lookup,
@@ -92,11 +92,11 @@ mod request {
 
     use std::net::SocketAddr;
 
-    use trust_dns_proto::{
+    use crate::libdns::proto::{
         op::{LowerQuery, Query},
         rr::{Name, RecordType},
     };
-    use trust_dns_server::server::Protocol;
+    use crate::libdns::server::server::Protocol;
 
     use crate::dns_server::Request as OriginRequest;
 

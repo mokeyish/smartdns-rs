@@ -31,13 +31,13 @@ mod dns_url;
 mod dnsmasq;
 mod ffi;
 mod infra;
+mod libdns;
 mod log;
 mod preset_ns;
 mod proxy;
 mod rustls;
 mod service;
 mod third_ext;
-mod trust_dns;
 
 use dns_mw::DnsMiddlewareBuilder;
 use dns_mw_addr::AddressMiddleware;
@@ -362,7 +362,7 @@ fn serve_tls(
     certificate: Option<&std::path::Path>,
     certificate_key: Option<&std::path::Path>,
 ) {
-    use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
+    use crate::libdns::proto::rustls::tls_server::{read_cert, read_key};
 
     for bind in binds {
         if bind.ssl_config.is_none() {
@@ -418,7 +418,7 @@ fn serve_https(
     certificate: Option<&std::path::Path>,
     certificate_key: Option<&std::path::Path>,
 ) {
-    use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
+    use crate::libdns::proto::rustls::tls_server::{read_cert, read_key};
 
     for bind in binds {
         if bind.ssl_config.is_none() {
@@ -475,7 +475,7 @@ fn serve_quic(
     certificate: Option<&std::path::Path>,
     certificate_key: Option<&std::path::Path>,
 ) {
-    use trust_dns_proto::rustls::tls_server::{read_cert, read_key};
+    use crate::libdns::proto::rustls::tls_server::{read_cert, read_key};
 
     for bind in binds {
         if bind.ssl_config.is_none() {

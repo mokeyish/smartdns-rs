@@ -6,9 +6,9 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::libdns::proto::rr::Name;
 use cfg_if::cfg_if;
 use ipnet::IpNet;
-use trust_dns_proto::rr::Name;
 
 use crate::config::{
     Domain, DomainConfigItem, HttpsListener, IpConfig, Listener, ListenerAddress, NftsetConfig,
@@ -2164,7 +2164,7 @@ mod parse {
 
     #[cfg(test)]
     mod tests {
-        use trust_dns_resolver::config::Protocol;
+        use crate::libdns::resolver::config::Protocol;
 
         use crate::config::ListenerAddress;
 

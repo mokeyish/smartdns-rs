@@ -17,9 +17,9 @@ use crate::{
     middleware::*,
 };
 
+use crate::libdns::proto::op::ResponseCode;
+use crate::libdns::resolver::lookup_ip::LookupIp;
 use futures::{Future, FutureExt};
-use trust_dns_proto::op::ResponseCode;
-use trust_dns_resolver::lookup_ip::LookupIp;
 
 pub struct NameServerMiddleware {
     client: DnsClient,
@@ -478,7 +478,7 @@ async fn per_nameserver_lookup_ip(
 mod tests {
     use std::str::FromStr;
 
-    use trust_dns_proto::rr::rdata::opt::ClientSubnet;
+    use crate::libdns::proto::rr::rdata::opt::ClientSubnet;
 
     use super::*;
     use crate::{dns_conf::SmartDnsConfig, third_ext::FutureJoinAllExt};

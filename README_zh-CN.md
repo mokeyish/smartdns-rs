@@ -8,7 +8,7 @@
 
 [English](https://github.com/mokeyish/smartdns-rs/blob/main/README.md) | 中文
 
-SmartDNS-rs 🐋 一个是受 [C 语言版 smartdns](https://github.com/pymumu/smartdns)  启发而开发的，并与其配置兼容的运行在本地的跨平台 DNS 服务器，
+SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/smartdns)  启发而开发的，并与其配置兼容的运行在本地的跨平台 DNS 服务器，
 它接受来自本地客户端的 DNS 查询请求，然后从多个上游 DNS 服务器获取 DNS 查询结果，并将访问速度最快的结果返回给客户端，
 以此提高网络访问速度。 SmartDNS 同时支持指定特定域名 IP 地址，并高性匹配，可达到过滤广告的效果。
 
@@ -161,12 +161,12 @@ sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 
 这个软件的诞生,少不了它们:
 
-- [Trust-DNS](https://github.com/bluejekyll/trust-dns)
+- [Hickory DNS](https://github.com/hickory-dns/hickory-dns)
 - [SmartDNS](https://github.com/pymumu/smartdns)
 
 ## 开源声明
 
-本软件包含来自 [https://github.com/bluejekyll/trust-dns](https://github.com/bluejekyll/trust-dns) 的代码, 其许可是下列二选一
+本软件包含来自 [https://github.com/hickory-dns/hickory-dns](https://github.com/hickory-dns/hickory-dns) 的代码, 其许可是下列二选一
 
 - Apache License, Version 2.0, (LICENSE-APACHE or [](http://www.apache.org/licenses/LICENSE-2.0))
 - MIT license (LICENSE-MIT or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))

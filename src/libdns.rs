@@ -1,11 +1,11 @@
 pub mod proto {
-    pub use trust_dns_proto::*;
+    pub use hickory_proto::*;
 }
 
 pub mod resolver {
+    use hickory_resolver::lookup::Lookup;
+    pub use hickory_resolver::*;
     use proto::rr::Record;
-    use trust_dns_resolver::lookup::Lookup;
-    pub use trust_dns_resolver::*;
 
     pub trait TtlClip {
         fn set_max_ttl(&mut self, ttl: u32);
@@ -104,13 +104,17 @@ pub mod resolver {
     }
 }
 
+pub mod server {
+    pub use hickory_server::*;
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::libdns::proto::rr::IntoName;
+    use crate::libdns::proto::rr::TryParseIp;
+    use crate::libdns::resolver::name_server::GenericConnector;
+    use crate::libdns::resolver::{name_server::TokioRuntimeProvider, AsyncResolver};
     use std::{fmt::Display, io, net::SocketAddr, sync::Arc};
-    use trust_dns_proto::rr::IntoName;
-    use trust_dns_proto::rr::TryParseIp;
-    use trust_dns_resolver::name_server::GenericConnector;
-    use trust_dns_resolver::{name_server::TokioRuntimeProvider, AsyncResolver};
 
     async fn resolve<N: IntoName + Display + TryParseIp + 'static>(
         host: N,
@@ -140,10 +144,10 @@ mod tests {
 
     #[test]
     fn test_with_https_pure_ip_address() {
-        use crate::trust_dns::resolver::config::ResolverOpts;
-        use crate::trust_dns::resolver::config::{NameServerConfigGroup, ResolverConfig};
+        use crate::libdns::resolver::config::ResolverOpts;
+        use crate::libdns::resolver::config::{NameServerConfigGroup, ResolverConfig};
 
-        use crate::trust_dns::resolver::TokioAsyncResolver;
+        use crate::libdns::resolver::TokioAsyncResolver;
 
         let resolver = Arc::new(TokioAsyncResolver::new(
             ResolverConfig::from_parts(

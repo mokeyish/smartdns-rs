@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
-use trust_dns_proto::rr::Name;
+use crate::libdns::proto::rr::Name;
 
 use crate::{
     collections::DomainMap,
@@ -92,10 +92,7 @@ impl DomainRuleMap {
                     .unwrap_or_default(),
             };
             for name in names {
-                name_rule_map
-                    .entry(name)
-                    .or_default()
-                    .cname = Some(rule.value.clone())
+                name_rule_map.entry(name).or_default().cname = Some(rule.value.clone())
             }
         }
 

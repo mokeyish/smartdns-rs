@@ -15,12 +15,13 @@ use std::time::Instant;
 use crate::dns_conf::SmartDnsConfig;
 use crate::dns_mw::BackgroundQueryTask;
 use crate::dns_mw::DnsMiddlewareHost;
-use crate::trust_dns::resolver::LookupTtl;
+use crate::libdns::proto::error::ProtoResult;
+use crate::libdns::resolver::LookupTtl;
 use crate::{
     dns::*,
+    libdns::proto::op::Query,
     log::{debug, error, info},
     middleware::*,
-    trust_dns::proto::op::Query,
 };
 use futures_util::Future;
 use futures_util::TryFutureExt;
@@ -31,7 +32,6 @@ use tokio::{
     sync::{mpsc, Mutex, RwLock},
     task::JoinError,
 };
-use trust_dns_proto::error::ProtoResult;
 
 pub struct DnsCacheMiddleware {
     cfg: Arc<SmartDnsConfig>,
@@ -503,9 +503,7 @@ impl DnsCache {
                     is_cname_query = true;
                 }
 
-                map.entry(query)
-                    .or_default()
-                    .push((record, ttl));
+                map.entry(query).or_default().push((record, ttl));
 
                 map
             },
@@ -710,13 +708,13 @@ impl DnsCacheEntry {
 mod lookup {
     use std::time::Instant;
 
-    use trust_dns_proto::error::ProtoResult;
-    use trust_dns_proto::{
+    use crate::libdns::proto::error::ProtoResult;
+    use crate::libdns::proto::{
         op::Query,
         rr::Record,
         serialize::binary::{BinDecodable, BinDecoder, BinEncodable, BinEncoder},
     };
-    use trust_dns_resolver::lookup::Lookup;
+    use crate::libdns::resolver::lookup::Lookup;
 
     pub fn serialize(lookups: &[Lookup], writer: &mut impl std::io::Write) -> ProtoResult<()> {
         let mut buf = vec![];

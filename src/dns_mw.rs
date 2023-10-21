@@ -1,11 +1,11 @@
 use std::{borrow::Borrow, sync::Arc};
 
-use trust_dns_proto::{
+use crate::libdns::proto::{
     op::{Query, ResponseCode},
     rr::{rdata::SOA, IntoName, Record, RecordType},
 };
 
-use trust_dns_resolver::error::ResolveErrorKind;
+use crate::libdns::resolver::error::ResolveErrorKind;
 
 use crate::{
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
@@ -138,13 +138,13 @@ pub use tests::*;
 #[cfg(test)]
 mod tests {
 
+    use crate::libdns::proto::rr::RData;
+    use crate::libdns::resolver::lookup::Lookup;
     use std::{
         collections::HashMap,
         fmt::Debug,
         net::{Ipv4Addr, Ipv6Addr},
     };
-    use trust_dns_proto::rr::RData;
-    use trust_dns_resolver::lookup::Lookup;
 
     use super::*;
     use crate::infra::middleware::*;

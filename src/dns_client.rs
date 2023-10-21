@@ -8,14 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::libdns::proto::rr::rdata::opt::{ClientSubnet, EdnsOption};
 use tokio::sync::RwLock;
-use trust_dns_proto::rr::rdata::opt::{ClientSubnet, EdnsOption};
 
 use crate::{
     dns_url::DnsUrlParamExt,
-    proxy::ProxyConfig,
-    rustls::TlsClientConfigBundle,
-    trust_dns::proto::{
+    libdns::proto::{
         error::ProtoResult,
         op::{Edns, Message, MessageType, OpCode, Query},
         rr::{
@@ -25,9 +23,11 @@ use crate::{
         xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
         DnsHandle,
     },
+    proxy::ProxyConfig,
+    rustls::TlsClientConfigBundle,
 };
 
-use trust_dns_resolver::{
+use crate::libdns::resolver::{
     config::{NameServerConfig, Protocol, ResolverOpts, TlsClientConfig},
     lookup::Lookup,
     lookup_ip::LookupIp,
@@ -159,33 +159,34 @@ impl DnsClientBuilder {
         )
         .await;
 
-        let server_groups: HashMap<NameServerGroupName, HashSet<NameServerInfo>> = server_infos.iter().fold(HashMap::new(), |mut map, info| {
-            let mut group_names = info
-                .group
-                .iter()
-                .map(|s| s.deref())
-                .map(NameServerGroupName::from)
-                .collect::<Vec<_>>();
+        let server_groups: HashMap<NameServerGroupName, HashSet<NameServerInfo>> =
+            server_infos.iter().fold(HashMap::new(), |mut map, info| {
+                let mut group_names = info
+                    .group
+                    .iter()
+                    .map(|s| s.deref())
+                    .map(NameServerGroupName::from)
+                    .collect::<Vec<_>>();
 
-            if group_names.is_empty() {
-                group_names.push(NameServerGroupName::Default);
-            }
-
-            for name in group_names {
-                if name != NameServerGroupName::Default
-                    && !info.exclude_default_group
-                    && map
-                        .entry(NameServerGroupName::Default)
-                        .or_default()
-                        .insert(info.clone())
-                {
-                    debug!("append {} to default group.", info.url.to_string());
+                if group_names.is_empty() {
+                    group_names.push(NameServerGroupName::Default);
                 }
 
-                map.entry(name).or_default().insert(info.clone());
-            }
-            map
-        });
+                for name in group_names {
+                    if name != NameServerGroupName::Default
+                        && !info.exclude_default_group
+                        && map
+                            .entry(NameServerGroupName::Default)
+                            .or_default()
+                            .insert(info.clone())
+                    {
+                        debug!("append {} to default group.", info.url.to_string());
+                    }
+
+                    map.entry(name).or_default().insert(info.clone());
+                }
+                map
+            });
 
         let mut servers = HashMap::with_capacity(server_groups.len());
 
@@ -446,7 +447,7 @@ impl NameServerFactory {
         so_mark: Option<u32>,
         resolver_opts: NameServerOpts,
     ) -> Arc<NameServer> {
-        use trust_dns_resolver::name_server::NameServer as N;
+        use crate::libdns::resolver::name_server::NameServer as N;
 
         let key = format!(
             "{}{:?}{}",
@@ -479,7 +480,7 @@ impl NameServerFactory {
         url: &VerifiedDnsUrl,
         tls_client_config: TlsClientConfigBundle,
     ) -> NameServerConfig {
-        use trust_dns_resolver::config::Protocol::*;
+        use crate::libdns::resolver::config::Protocol::*;
 
         let addr = url.addr();
 
@@ -587,7 +588,7 @@ impl NameServerFactory {
                 info.edns_client_subnet
                     .map(|x| x.into())
                     .or(default_client_subnet),
-                *resolver.options(),
+                resolver.options().clone(),
             );
 
             let proxy = info
@@ -614,7 +615,7 @@ impl NameServerFactory {
 
 pub struct NameServer {
     opts: NameServerOpts,
-    inner: trust_dns_resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>,
+    inner: crate::libdns::resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>,
 }
 
 impl NameServer {
@@ -624,11 +625,11 @@ impl NameServer {
         proxy: Option<ProxyConfig>,
         so_mark: Option<u32>,
     ) -> Self {
-        use trust_dns_resolver::name_server::NameServer as N;
+        use crate::libdns::resolver::name_server::NameServer as N;
 
         let inner = N::<GenericConnector<TokioRuntimeProvider>>::new(
             config,
-            opts.resolver_opts,
+            opts.resolver_opts.clone(),
             GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark)),
         );
 
@@ -672,7 +673,7 @@ impl GenericResolver for NameServer {
             request_options,
         );
 
-        let mut ns = self.inner.clone();
+        let ns = self.inner.clone();
 
         let res = ns.send(req).first_answer().await?;
 
@@ -838,7 +839,7 @@ where
         };
 
         let strategy = self.options().ip_strategy;
-        use trust_dns_resolver::config::LookupIpStrategy::*;
+        use crate::libdns::resolver::config::LookupIpStrategy::*;
 
         match strategy {
             Ipv4Only => self.lookup(name.clone(), RecordType::A).await,
@@ -968,10 +969,10 @@ mod connection_provider {
 
     use std::{io, net::SocketAddr, pin::Pin};
 
+    use crate::libdns::proto::{iocompat::AsyncIoTokioAsStd, TokioTime};
+    use crate::libdns::resolver::{name_server::RuntimeProvider, TokioHandle};
     use futures::Future;
     use tokio::net::UdpSocket as TokioUdpSocket;
-    use trust_dns_proto::{iocompat::AsyncIoTokioAsStd, TokioTime};
-    use trust_dns_resolver::{name_server::RuntimeProvider, TokioHandle};
 
     /// The Tokio Runtime for async execution
     #[derive(Clone)]
@@ -1040,7 +1041,7 @@ mod connection_provider {
 }
 
 mod bootstrap {
-    use trust_dns_resolver::config::{NameServerConfigGroup, ResolverConfig};
+    use crate::libdns::resolver::config::{NameServerConfigGroup, ResolverConfig};
 
     use super::*;
 
@@ -1097,8 +1098,8 @@ mod bootstrap {
 
     impl BootstrapResolver<NameServerGroup> {
         pub fn from_system_conf() -> Self {
-            let (resolv_config, resolv_opts) = trust_dns_resolver::system_conf::read_system_conf()
-                .unwrap_or_else(|err| {
+            let (resolv_config, resolv_opts) =
+                crate::libdns::resolver::system_conf::read_system_conf().unwrap_or_else(|err| {
                     warn!("read system conf failed, {}", err);
 
                     use crate::preset_ns::{ALIDNS, ALIDNS_IPS, CLOUDFLARE, CLOUDFLARE_IPS};

@@ -1,4 +1,4 @@
-use trust_dns_proto::rr::Name;
+use crate::libdns::proto::rr::Name;
 
 mod listener;
 mod parser;

@@ -15,12 +15,12 @@ use crate::{
     third_ext::FutureJoinAllExt,
 };
 
-use trust_dns_proto::{
+use crate::libdns::proto::{
     op::{Edns, Header, MessageType, OpCode, ResponseCode},
     rr::Record,
 };
 
-use trust_dns_server::{
+use crate::libdns::server::{
     authority::{
         AuthLookup, EmptyLookup, LookupObject, LookupOptions, MessageResponse,
         MessageResponseBuilder, ZoneType,
@@ -28,7 +28,7 @@ use trust_dns_server::{
     server::{RequestHandler, ResponseHandler, ResponseInfo},
     store::forwarder::ForwardLookup,
 };
-pub use trust_dns_server::{server::Request, ServerFuture};
+pub use crate::libdns::server::{server::Request, ServerFuture};
 
 use crate::dns::DnsRequest;
 use crate::dns_mw::DnsMiddlewareHandler;
@@ -56,12 +56,12 @@ impl ServerRegistry {
         }
     }
 
-    pub async fn abort(self) -> Result<(), Aborted> {
+    pub async fn abort(mut self) -> Result<(), Aborted> {
         let (server, abort_handle) = abortable(async move {
             let _ = self
                 .servers
-                .into_values()
-                .map(|s| s.block_until_done())
+                .iter_mut()
+                .map(|(_, s)| s.block_until_done())
                 .join_all()
                 .await;
         });

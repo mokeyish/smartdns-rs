@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use crate::dns::*;
+use crate::libdns::proto::rr::{RData, RecordType};
 use crate::middleware::*;
-use crate::trust_dns::proto::rr::{RData, RecordType};
 
-use crate::trust_dns::resolver::TtlClip;
+use crate::libdns::resolver::TtlClip;
 
 #[derive(Debug)]
 pub struct AddressMiddleware;
@@ -145,7 +145,7 @@ mod tests {
     use crate::{
         dns_conf::{DomainAddress, SmartDnsConfig},
         dns_mw::*,
-        trust_dns::resolver::LookupTtl,
+        libdns::resolver::LookupTtl,
     };
 
     #[tokio::test(flavor = "multi_thread")]

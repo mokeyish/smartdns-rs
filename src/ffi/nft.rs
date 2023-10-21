@@ -15,17 +15,20 @@ impl Nft {
 
         let mut nft = Self {
             path: B_NAME.into(),
+            #[cfg(target_os = "linux")]
             avaliable: false,
         };
 
-        if let Ok(path) = which(B_NAME).or_else(|_| {
-            which_in_global(B_NAME, Some("/usr/sbin"))
-                .and_then(|mut s| s.next().ok_or(which::Error::CannotFindBinaryPath))
-        }) {
-            nft.path = path;
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(path) = which(B_NAME).or_else(|_| {
+                which_in_global(B_NAME, Some("/usr/sbin"))
+                    .and_then(|mut s| s.next().ok_or(which::Error::CannotFindBinaryPath))
+            }) {
+                nft.path = path;
+            }
+            nft.avaliable = nft.list_tables().is_ok();
         }
-
-        nft.avaliable = nft.list_tables().is_ok();
 
         nft
     }

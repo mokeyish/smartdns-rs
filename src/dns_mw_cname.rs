@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use trust_dns_proto::rr::rdata::CNAME;
+use crate::libdns::proto::rr::rdata::CNAME;
 
 use crate::dns::*;
 use crate::dns_rule::CNameRule;

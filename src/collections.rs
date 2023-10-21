@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use trust_dns_proto::rr::Name;
+use crate::libdns::proto::rr::Name;
 
 #[derive(Debug)]
 pub struct DomainMap<T: Debug>(HashMap<Name, T>);

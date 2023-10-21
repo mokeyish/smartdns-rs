@@ -1,10 +1,10 @@
-use std::{io, sync::Arc};
-use thiserror::Error;
-use trust_dns_proto::{error::ProtoError, op::ResponseCode};
-use trust_dns_resolver::{
+use crate::libdns::proto::{error::ProtoError, op::ResponseCode};
+use crate::libdns::resolver::{
     error::{ResolveError, ResolveErrorKind},
     lookup::Lookup,
 };
+use std::{io, sync::Arc};
+use thiserror::Error;
 
 #[allow(clippy::large_enum_variant)]
 /// A query could not be fulfilled
@@ -21,10 +21,10 @@ pub enum LookupError {
     #[error("Forward resolution error: {0}")]
     ResolveError(#[from] ResolveError),
     /// Recursive Resolver Error
-    #[cfg(feature = "trust-dns-recursor")]
+    #[cfg(feature = "hickory-recursor")]
     #[cfg_attr(docsrs, doc(cfg(feature = "recursor")))]
     #[error("Recursive resolution error: {0}")]
-    RecursiveError(#[from] trust_dns_recursor::Error),
+    RecursiveError(#[from] create::libdns::recursor::Error),
     /// An underlying IO error occurred
     #[error("io error: {0}")]
     Io(Arc<io::Error>),
