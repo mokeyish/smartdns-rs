@@ -159,7 +159,7 @@ impl DnsClientBuilder {
         )
         .await;
 
-        let server_groups = server_infos.iter().fold(HashMap::new(), |mut map, info| {
+        let server_groups: HashMap<NameServerGroupName, HashSet<NameServerInfo>> = server_infos.iter().fold(HashMap::new(), |mut map, info| {
             let mut group_names = info
                 .group
                 .iter()
@@ -176,15 +176,13 @@ impl DnsClientBuilder {
                     && !info.exclude_default_group
                     && map
                         .entry(NameServerGroupName::Default)
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(info.clone())
                 {
                     debug!("append {} to default group.", info.url.to_string());
                 }
 
-                map.entry(name)
-                    .or_insert_with(HashSet::new)
-                    .insert(info.clone());
+                map.entry(name).or_default().insert(info.clone());
             }
             map
         });
@@ -1292,7 +1290,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_nameserver_cloudflare_https_resolve() {
-        let dns_url = DnsUrl::from_str("https://cloudflare-dns.com/dns-query").unwrap();
+        let dns_url = DnsUrl::from_str("https://dns.cloudflare.com/dns-query").unwrap();
         let client = DnsClient::builder().add_server(dns_url).build().await;
         assert_google(&client).await;
         assert_alidns(&client).await;

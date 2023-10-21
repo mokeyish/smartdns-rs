@@ -504,7 +504,7 @@ impl DnsCache {
                 }
 
                 map.entry(query)
-                    .or_insert_with(Vec::default)
+                    .or_default()
                     .push((record, ttl));
 
                 map

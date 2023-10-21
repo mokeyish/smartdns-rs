@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use cli::*;
-use dns_conf::BindServer;
 use std::{io, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, UdpSocket},
@@ -10,6 +9,7 @@ use tokio::{
 
 mod cli;
 mod collections;
+mod config;
 mod dns;
 mod dns_client;
 mod dns_conf;
@@ -22,12 +22,14 @@ mod dns_mw_cache;
 mod dns_mw_cname;
 mod dns_mw_dnsmasq;
 mod dns_mw_dualstack;
+mod dns_mw_nftset;
 mod dns_mw_ns;
 mod dns_mw_zone;
 mod dns_rule;
 mod dns_server;
 mod dns_url;
 mod dnsmasq;
+mod ffi;
 mod infra;
 mod log;
 mod preset_ns;
@@ -45,11 +47,16 @@ use dns_mw_cache::DnsCacheMiddleware;
 use dns_mw_cname::DnsCNameMiddleware;
 use dns_mw_dnsmasq::DnsmasqMiddleware;
 use dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
+use dns_mw_nftset::DnsNftsetMiddleware;
 use dns_mw_ns::NameServerMiddleware;
 use dns_mw_zone::DnsZoneMiddleware;
 use infra::middleware;
 
-use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig, dns_server::ServerRegistry};
+use crate::{
+    config::IpConfig, dns_client::DnsClient, dns_conf::SmartDnsConfig, dns_server::ServerRegistry,
+    ffi::nft::Nft,
+};
+
 use crate::{
     infra::process_guard::ProcessGuardError,
     log::{debug, error, info, warn},
@@ -239,6 +246,31 @@ fn run_server(conf: Option<PathBuf>) {
             middleware_builder = middleware_builder.with(DnsCacheMiddleware::new(&cfg));
         }
 
+        // nftset
+        let nftsets = cfg.valid_nftsets();
+        if !nftsets.is_empty() {
+            let nft = Nft::new();
+            if nft.avaliable() {
+                let mut success = true;
+                for i in nftsets {
+                    if let Err(err) = match i {
+                        IpConfig::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
+                        IpConfig::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
+                        _ => Ok(()),
+                    } {
+                        warn!("nft add set failed, {:?}, skipped", err);
+                        success = false;
+                        break;
+                    }
+                }
+                if success {
+                    middleware_builder = middleware_builder.with(DnsNftsetMiddleware::new(nft));
+                }
+            } else {
+                warn!("nft is not avaliable, skipped.",);
+            }
+        }
+
         middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);
 
         if !cfg.bogus_nxdomain().is_empty() {
@@ -258,7 +290,7 @@ fn run_server(conf: Option<PathBuf>) {
     // load udp the listeners
     for bind in cfg.binds() {
         let _guard = runtime.enter();
-        let udp_socket = bind_to(udp, bind.sock_addr, bind.device(), "UDP");
+        let udp_socket = bind_to(udp, bind.sock_addr(), bind.device(), "UDP");
 
         server
             .with_opts(bind.opts.clone())
@@ -268,7 +300,7 @@ fn run_server(conf: Option<PathBuf>) {
     // and TCP as necessary
     for bind in cfg.binds_tcp() {
         let _guard = runtime.enter();
-        let tcp_listener = bind_to(tcp, bind.sock_addr, bind.device(), "TCP");
+        let tcp_listener = bind_to(tcp, bind.sock_addr(), bind.device(), "TCP");
 
         server
             .with_opts(bind.opts.clone())
@@ -324,7 +356,7 @@ fn run_server(conf: Option<PathBuf>) {
 #[cfg(feature = "dns-over-tls")]
 fn serve_tls(
     server: &mut ServerRegistry,
-    binds: &[BindServer],
+    binds: Vec<&crate::config::TlsListener>,
     runtime: &runtime::Runtime,
     tcp_idle_time: u64,
     certificate: Option<&std::path::Path>,
@@ -364,7 +396,7 @@ fn serve_tls(
 
         let _guard = runtime.enter();
 
-        let tls_listener = bind_to(tcp, bind.sock_addr, bind.device(), "TLS");
+        let tls_listener = bind_to(tcp, bind.sock_addr(), bind.device(), "TLS");
 
         server
             .with_opts(bind.opts.clone())
@@ -380,7 +412,7 @@ fn serve_tls(
 #[cfg(feature = "dns-over-https")]
 fn serve_https(
     server: &mut ServerRegistry,
-    binds: &[BindServer],
+    binds: Vec<&crate::config::HttpsListener>,
     runtime: &runtime::Runtime,
     tcp_idle_time: u64,
     certificate: Option<&std::path::Path>,
@@ -420,7 +452,7 @@ fn serve_https(
 
         let _guard = runtime.enter();
 
-        let https_listener = bind_to(tcp, bind.sock_addr, bind.device(), "HTTPS");
+        let https_listener = bind_to(tcp, bind.sock_addr(), bind.device(), "HTTPS");
 
         server
             .with_opts(bind.opts.clone())
@@ -437,7 +469,7 @@ fn serve_https(
 #[cfg(feature = "dns-over-quic")]
 fn serve_quic(
     server: &mut ServerRegistry,
-    binds: &[BindServer],
+    binds: Vec<&crate::config::QuicListener>,
     runtime: &runtime::Runtime,
     tcp_idle_time: u64,
     certificate: Option<&std::path::Path>,
@@ -476,7 +508,7 @@ fn serve_quic(
             read_key(certificate_key).expect("error loading tls certificate_key file");
 
         let _guard = runtime.enter();
-        let quic_listener = bind_to(udp, bind.sock_addr, bind.device(), "QUIC");
+        let quic_listener = bind_to(udp, bind.sock_addr(), bind.device(), "QUIC");
 
         server
             .with_opts(bind.opts.clone())

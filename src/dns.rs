@@ -13,7 +13,7 @@ pub use crate::trust_dns::proto::{
 };
 
 pub use trust_dns_resolver::{
-    config::{NameServerConfig, NameServerConfigGroup},
+    config::{NameServerConfig, NameServerConfigGroup, Protocol},
     error::{ResolveError, ResolveErrorKind},
     lookup::Lookup,
 };

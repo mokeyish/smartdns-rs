@@ -19,3 +19,5 @@ node_modules
 dist
 
 .idea/
+
+etc/smartdns/smartdns.yaml

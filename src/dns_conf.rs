@@ -1,17 +1,19 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::net::ToSocketAddrs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use cfg_if::cfg_if;
 use ipnet::IpNet;
 use trust_dns_proto::rr::Name;
 
+use crate::config::{
+    Domain, DomainConfigItem, HttpsListener, IpConfig, Listener, ListenerAddress, NftsetConfig,
+    NomParser, QuicListener, TcpListener, TlsListener, UdpListener,
+};
 use crate::dns::RecordType;
 use crate::dns_rule::{CNameRule, DomainRule, DomainRuleMap, DomainRuleTreeNode, ResponseMode};
 use crate::dns_url::{DnsUrl, DnsUrlParamExt};
@@ -19,15 +21,15 @@ use crate::infra::file_mode::FileMode;
 use crate::infra::ipset::IpSet;
 use crate::log::{debug, error, info, warn};
 use crate::proxy::ProxyConfig;
-use crate::third_ext::FromStrOrHex;
+use crate::third_ext::{DefaultExt, FromStrOrHex};
 
 const DEFAULT_GROUP: &str = "default";
 
 pub type DomainSets = HashMap<String, HashSet<Name>>;
 pub type ForwardRules = Vec<ForwardRule>;
-pub type AddressRules = Vec<ConfigItem<DomainId, DomainAddress>>;
-pub type DomainRules = Vec<ConfigItem<DomainId, DomainRule>>;
-pub type CNameRules = Vec<ConfigItem<DomainId, CNameRule>>;
+pub type AddressRules = Vec<ConfigItem<Domain, DomainAddress>>;
+pub type DomainRules = Vec<ConfigItem<Domain, DomainRule>>;
+pub type CNameRules = Vec<ConfigItem<Domain, CNameRule>>;
 
 #[derive(Default)]
 pub struct SmartDnsConfig {
@@ -143,13 +145,13 @@ impl SmartDnsConfig {
             Some(ref server_name) => Some(server_name.clone()),
             None => match hostname::get() {
                 Ok(name) => match name.to_str() {
-                    Some(s) => Name::from_str(s).ok(),
+                    Some(s) => s.parse().ok(),
                     None => None,
                 },
                 Err(_) => None,
             },
         }
-        .unwrap_or_else(|| Name::from_str(crate::NAME).unwrap())
+        .unwrap_or_else(|| crate::NAME.parse().unwrap())
     }
 
     /// The number of worker threads
@@ -158,24 +160,59 @@ impl SmartDnsConfig {
         self.num_workers
     }
     /// dns server bind ip and port, default dns server port is 53, support binding multi ip and port
-    pub fn binds(&self) -> &[BindServer] {
-        &self.inner.binds
+    pub fn binds(&self) -> Vec<&UdpListener> {
+        self.inner
+            .listeners
+            .iter()
+            .flat_map(|n| match n {
+                Listener::Udp(n) => Some(n),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     }
     /// bind tcp server
-    pub fn binds_tcp(&self) -> &[BindServer] {
-        &self.inner.binds_tcp
+    pub fn binds_tcp(&self) -> Vec<&TcpListener> {
+        self.inner
+            .listeners
+            .iter()
+            .flat_map(|n| match n {
+                Listener::Tcp(n) => Some(n),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     }
     /// bind https server
-    pub fn binds_https(&self) -> &[BindServer] {
-        &self.inner.binds_https
+    pub fn binds_https(&self) -> Vec<&HttpsListener> {
+        self.inner
+            .listeners
+            .iter()
+            .flat_map(|n| match n {
+                Listener::Https(n) => Some(n),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     }
     /// bind tls server
-    pub fn binds_tls(&self) -> &[BindServer] {
-        &self.inner.binds_tls
+    pub fn binds_tls(&self) -> Vec<&TlsListener> {
+        self.inner
+            .listeners
+            .iter()
+            .flat_map(|n| match n {
+                Listener::Tls(n) => Some(n),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     }
     /// bind quic server
-    pub fn binds_quic(&self) -> &[BindServer] {
-        &self.inner.binds_quic
+    pub fn binds_quic(&self) -> Vec<&QuicListener> {
+        self.inner
+            .listeners
+            .iter()
+            .flat_map(|n| match n {
+                Listener::Quic(n) => Some(n),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     }
 
     /// SSL Certificate file path
@@ -497,6 +534,16 @@ impl SmartDnsConfig {
         &self.cnames
     }
 
+    pub fn valid_nftsets(&self) -> Vec<&IpConfig<NftsetConfig>> {
+        self.nftsets
+            .iter()
+            .flat_map(|x| &x.config)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter(|x| !matches!(x, IpConfig::None))
+            .collect()
+    }
+
     #[inline]
     pub fn find_domain_rule(&self, domain: &Name) -> Option<Arc<DomainRuleTreeNode>> {
         self.domain_rule_map.find(domain).cloned()
@@ -532,18 +579,8 @@ impl SmartDnsConfigBuilder {
     pub fn build(self) -> SmartDnsConfig {
         let mut cfg = self.0;
 
-        if cfg.binds.is_empty()
-            && cfg.binds_tcp.is_empty()
-            && cfg.binds_https.is_empty()
-            && cfg.binds_tls.is_empty()
-            && cfg.binds_quic.is_empty()
-        {
-            cfg.binds.push(BindServer {
-                sock_addr: ("0.0.0.0", 53).to_socket_addrs().unwrap().next().unwrap(),
-                device: None,
-                ssl_config: None,
-                opts: Default::default(),
-            })
+        if cfg.listeners.is_empty() {
+            cfg.listeners.push(UdpListener::default().into())
         }
 
         let bogus_nxdomain: Arc<IpSet> = cfg.bogus_nxdomain.compact().into();
@@ -561,14 +598,17 @@ impl SmartDnsConfigBuilder {
             &cfg.forward_rules,
             &cfg.domain_sets,
             &cfg.cnames,
+            &cfg.nftsets,
         );
 
         // set nameserver group for bootstraping
         for server in cfg.servers.iter_mut() {
             if server.url.ip().is_none() {
                 let host = server.url.host().to_string();
-                if let Ok(Some(rule)) =
-                    Name::from_str(host.as_str()).map(|domain| domain_rule_map.find(&domain))
+                if let Ok(Some(rule)) = host
+                    .as_str()
+                    .parse()
+                    .map(|domain| domain_rule_map.find(&domain))
                 {
                     server.resolve_group = rule.get(|r| r.nameserver.clone());
                 }
@@ -577,25 +617,15 @@ impl SmartDnsConfigBuilder {
 
         // find device address
         {
-            let f = |bind: &'_ &mut BindServer| bind.device.is_some();
-
-            let binds = [
-                cfg.binds.iter_mut().filter(f),
-                cfg.binds_tcp.iter_mut().filter(f),
-                cfg.binds_https.iter_mut().filter(f),
-                cfg.binds_tls.iter_mut().filter(f),
-                cfg.binds_quic.iter_mut().filter(f),
-            ]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-
-            if !binds.is_empty() {
+            if !cfg.listeners.is_empty() {
                 use local_ip_address::list_afinet_netifas;
                 match list_afinet_netifas() {
                     Ok(network_interfaces) => {
-                        for bind in binds {
-                            let device = bind.device.as_deref().expect("bind device");
+                        for listener in &mut cfg.listeners {
+                            let device = match listener.device() {
+                                Some(v) => v,
+                                None => continue,
+                            };
 
                             let ips = network_interfaces
                                 .iter()
@@ -607,15 +637,15 @@ impl SmartDnsConfigBuilder {
                                 warn!("network device {} not found.", device);
                             }
 
-                            let ip = ips.into_iter().find(|ip| {
-                                match bind.sock_addr {
-                                    SocketAddr::V4(_) => ip.is_ipv4(),
-                                    SocketAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
-                                }
+                            let ip = ips.into_iter().find(|ip| match listener.listen() {
+                                ListenerAddress::Localhost => true,
+                                ListenerAddress::All => true,
+                                ListenerAddress::V4(_) => ip.is_ipv4(),
+                                ListenerAddress::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
                             });
 
                             match ip {
-                                Some(ip) => bind.sock_addr.set_ip(ip),
+                                Some(ip) => *listener.mut_listen() = ip.into(),
                                 None => {
                                     warn!("no ip address on device {}", device)
                                 }
@@ -631,48 +661,24 @@ impl SmartDnsConfigBuilder {
 
         // dedup bind address
         {
-            // priority: QUIC => UDP
             let mut udp_addr = HashSet::new();
-            // priority: Https => TLS => TCP
             let mut tcp_addr = HashSet::new();
 
-            fn dedup(addr_set: &mut HashSet<SocketAddr>, binds: &[BindServer]) -> Vec<usize> {
-                let mut remove_idx = vec![];
-                for (idx, bind) in binds.iter().enumerate().rev() {
-                    if !addr_set.insert(bind.sock_addr) {
-                        remove_idx.push(idx);
+            let mut remove_idx = vec![];
+            for (idx, listener) in cfg.listeners.iter().enumerate().rev() {
+                let addr = listener.sock_addr();
+                if matches!(listener, Listener::Udp(_) | Listener::Quic(_)) {
+                    if !udp_addr.insert(addr) {
+                        remove_idx.push(idx)
                     }
+                } else if !tcp_addr.insert(addr) {
+                    remove_idx.push(idx)
                 }
-                remove_idx
             }
 
-            // quic udp
-            for idx in dedup(&mut udp_addr, &cfg.binds_quic) {
-                let bind = cfg.binds_quic.remove(idx);
-                warn!("remove duplicated bind-quic {:?}", bind.sock_addr);
-            }
-
-            // udp
-            for idx in dedup(&mut udp_addr, &cfg.binds) {
-                let bind = cfg.binds.remove(idx);
-                warn!("remove duplicated bind-udp {:?}", bind.sock_addr);
-            }
-
-            // https tcp
-            for idx in dedup(&mut tcp_addr, &cfg.binds_https) {
-                let bind = cfg.binds_https.remove(idx);
-                warn!("remove duplicated bind-https {:?}", bind.sock_addr);
-            }
-            // tls tcp
-            for idx in dedup(&mut tcp_addr, &cfg.binds_tls) {
-                let bind = cfg.binds_tls.remove(idx);
-                warn!("remove duplicated bind-tls {:?}", bind.sock_addr);
-            }
-
-            // tcp
-            for idx in dedup(&mut tcp_addr, &cfg.binds_tcp) {
-                let bind = cfg.binds_tcp.remove(idx);
-                warn!("remove duplicated bind-tcp {:?}", bind.sock_addr);
+            for idx in remove_idx {
+                let listener = cfg.listeners.remove(idx);
+                warn!("remove duplicated listener {:?}", listener);
             }
         }
 
@@ -743,16 +749,8 @@ pub struct InnerConfig {
     /// ```
     conf_file: Option<PathBuf>,
 
-    /// dns server bind ip and port, default dns server port is 53, support binding multi ip and port
-    binds: Vec<BindServer>,
-    /// bind tcp server
-    binds_tcp: Vec<BindServer>,
-    /// bind tls server
-    binds_tls: Vec<BindServer>,
-    /// bind https server
-    binds_https: Vec<BindServer>,
-    /// bind quic server
-    binds_quic: Vec<BindServer>,
+    /// listeners
+    listeners: Vec<Listener>,
 
     /// SSL Certificate file path
     bind_cert_file: Option<PathBuf>,
@@ -969,6 +967,8 @@ pub struct InnerConfig {
     /// The proxy server for upstream querying.
     proxy_servers: Arc<HashMap<String, ProxyConfig>>,
 
+    nftsets: Vec<DomainConfigItem<Vec<IpConfig<NftsetConfig>>>>,
+
     resolv_file: Option<String>,
     domain_sets: HashMap<String, HashSet<Name>>,
 }
@@ -1043,7 +1043,7 @@ impl BindServer {
     }
 }
 
-impl FromStr for BindServer {
+impl std::str::FromStr for BindServer {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1146,7 +1146,7 @@ impl BindServer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct SslConfig {
     pub server_name: Option<String>,
     pub certificate: Option<PathBuf>,
@@ -1187,11 +1187,6 @@ pub struct ServerOpts {
 }
 
 impl ServerOpts {
-    #[inline]
-    pub fn is_default(&self) -> bool {
-        self.eq(&Default::default())
-    }
-
     /// set domain request to use the appropriate server group.
     #[inline]
     pub fn group(&self) -> Option<&str> {
@@ -1392,7 +1387,7 @@ pub struct NameServerInfo {
     pub so_mark: Option<u32>,
 }
 
-impl FromStr for NameServerInfo {
+impl std::str::FromStr for NameServerInfo {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1505,7 +1500,7 @@ pub enum DomainAddress {
     IPv6(Ipv6Addr),
 }
 
-impl FromStr for DomainAddress {
+impl std::str::FromStr for DomainAddress {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1535,12 +1530,12 @@ impl FromStr for DomainAddress {
 /// alias: nameserver rules
 #[derive(Debug, Clone)]
 pub struct ForwardRule {
-    pub domain: DomainId,
+    pub domain: Domain,
     pub nameserver: String,
 }
 
 /// domain-rules /domain/ [-rules...]
-impl FromStr for ConfigItem<DomainId, DomainRule> {
+impl std::str::FromStr for ConfigItem<Domain, DomainRule> {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1549,7 +1544,7 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
             return Err(());
         }
 
-        if let Ok(domain) = DomainId::from_str(parts[0]) {
+        if let Ok(domain) = Domain::from_str(parts[0]) {
             let mut speed_check_mode = vec![];
             let mut cname = None;
             let mut address = None;
@@ -1586,7 +1581,9 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                             nameserver = parts.next().map(|s| s.to_string())
                         }
                         "-d" | "-dualstack-ip-selection" | "--dualstack-ip-selection" => {
-                            dualstack_ip_selection = parts.next().map(parse::parse_bool)
+                            dualstack_ip_selection = parts
+                                .next()
+                                .and_then(|s| <bool as crate::config::NomParser>::from_str(s).ok())
                         }
                         "-p" | "-ipset" | "--ipset" => warn!("ignore ipset: {:?}", parts.next()),
                         "-t" | "-nftset" | "--nftset" => warn!("ignore nftset: {:?}", parts.next()),
@@ -1615,39 +1612,9 @@ impl FromStr for ConfigItem<DomainId, DomainRule> {
                     rr_ttl: None,
                     rr_ttl_min: None,
                     rr_ttl_max: None,
+                    nftset: None,
                 },
             })
-        } else {
-            Err(())
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum DomainId {
-    Domain(Name),
-    DomainSet(String),
-}
-
-impl From<Name> for DomainId {
-    #[inline]
-    fn from(value: Name) -> Self {
-        Self::Domain(value)
-    }
-}
-
-impl FromStr for DomainId {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.starts_with("domain-set:") {
-            let idx = s.find(':').unwrap();
-            let set_name = &s[(idx + 1)..];
-
-            Ok(DomainId::DomainSet(set_name.to_string()))
-        } else if let Ok(mut domain) = Name::from_str(s) {
-            domain.set_fqdn(true);
-            Ok(DomainId::Domain(domain.to_lowercase()))
         } else {
             Err(())
         }
@@ -1708,7 +1675,7 @@ impl Default for SpeedCheckMode {
     }
 }
 
-impl FromStr for SpeedCheckMode {
+impl std::str::FromStr for SpeedCheckMode {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1735,7 +1702,7 @@ impl FromStr for SpeedCheckMode {
     }
 }
 
-impl FromStr for ResponseMode {
+impl std::str::FromStr for ResponseMode {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1750,7 +1717,7 @@ impl FromStr for ResponseMode {
     }
 }
 
-impl FromStr for CNameRule {
+impl std::str::FromStr for CNameRule {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -1764,6 +1731,8 @@ impl FromStr for CNameRule {
 
 mod parse {
     use byte_unit::Byte;
+
+    use crate::config::Listener;
 
     use super::*;
     use std::{ffi::OsStr, net::AddrParseError};
@@ -1817,33 +1786,15 @@ mod parse {
                     match conf_name {
                         "server-name" => self.server_name = options.parse().ok(),
                         "num-workers" => self.num_workers = options.parse().ok(),
-                        "resolv-hostname" => self.resolv_hostname = Some(parse_bool(options)),
+                        "resolv-hostname" => self.resolv_hostname = bool::from_str(options).ok(),
                         "user" => self.user = Some(options.to_string()),
                         "domain" => self.domain = options.parse().ok(),
                         "conf-file" => self.load_file(options).expect("load_file failed"),
-                        "bind" => {
-                            if let Ok(v) = options.parse() {
-                                self.binds.push(v)
-                            }
-                        }
-                        "bind-tcp" => {
-                            if let Ok(v) = options.parse() {
-                                self.binds_tcp.push(v)
-                            }
-                        }
-                        "bind-tls" => {
-                            if let Ok(v) = options.parse() {
-                                self.binds_tls.push(v)
-                            }
-                        }
-                        "bind-https" => {
-                            if let Ok(v) = options.parse() {
-                                self.binds_https.push(v)
-                            }
-                        }
-                        "bind-quic" => {
-                            if let Ok(v) = options.parse() {
-                                self.binds_quic.push(v)
+                        "bind" | "bind-tcp" | "bind-tls" | "bind-https" | "bind-quic" => {
+                            if let Ok(listener) = Listener::from_str(conf_line) {
+                                self.listeners.push(listener);
+                            } else {
+                                error!("parse failed {}", conf_line);
                             }
                         }
                         "bind-cert-file" => {
@@ -1855,10 +1806,10 @@ mod parse {
                         "bind-cert-key-pass" => self.bind_cert_key_pass = Some(options.to_string()),
                         "tcp-idle-time" => self.tcp_idle_time = options.parse().ok(),
                         "cache-size" => self.cache_size = options.parse().ok(),
-                        "cache-persist" => self.cache_persist = Some(parse_bool(options)),
+                        "cache-persist" => self.cache_persist = bool::from_str(options).ok(),
                         "cache-file" => self.cache_file = Some(Path::new(options).to_owned()),
-                        "prefetch-domain" => self.prefetch_domain = Some(parse_bool(options)),
-                        "serve-expired" => self.serve_expired = Some(parse_bool(options)),
+                        "prefetch-domain" => self.prefetch_domain = bool::from_str(options).ok(),
+                        "serve-expired" => self.serve_expired = bool::from_str(options).ok(),
                         "serve-expired-ttl" => self.serve_expired_ttl = options.parse().ok(),
                         "serve-expired-reply-ttl" => {
                             self.serve_expired_reply_ttl = options.parse().ok()
@@ -1884,9 +1835,9 @@ mod parse {
                             }
                         }
                         "speed-check-mode" => self.config_speed_check_mode(options),
-                        "force-AAAA-SOA" => self.force_aaaa_soa = Some(parse_bool(options)),
+                        "force-AAAA-SOA" => self.force_aaaa_soa = bool::from_str(options).ok(),
                         "force-qtype-SOA" => {
-                            if let Ok(r) = u16::from_str(options).map(RecordType::from) {
+                            if let Ok(r) = options.parse::<u16>().map(RecordType::from) {
                                 self.force_qtype_soa.insert(r);
                             }
                         }
@@ -1894,10 +1845,10 @@ mod parse {
                             self.dualstack_ip_selection_threshold = options.parse().ok()
                         }
                         "dualstack-ip-allow-force-AAAA" => {
-                            self.dualstack_ip_allow_force_aaaa = Some(parse_bool(options))
+                            self.dualstack_ip_allow_force_aaaa = bool::from_str(options).ok()
                         }
                         "dualstack-ip-selection" => {
-                            self.dualstack_ip_selection = Some(parse_bool(options))
+                            self.dualstack_ip_selection = bool::from_str(options).ok()
                         }
                         "edns-client-subnet" => self.edns_client_subnet = options.parse().ok(),
                         "rr-ttl" => self.rr_ttl = options.parse().ok(),
@@ -1917,7 +1868,7 @@ mod parse {
                         "log-num" => self.log_num = options.parse().ok(),
                         "log-file-mode" => self.log_file_mode = options.parse().ok(),
                         "log-filter" => self.log_filter = Some(options.to_string()),
-                        "audit-enable" => self.audit_enable = Some(parse_bool(options)),
+                        "audit-enable" => self.audit_enable = bool::from_str(options).ok(),
                         "audit-file" => self.audit_file = Some(Path::new(options).to_owned()),
                         "audit-size" => {
                             self.audit_size = Byte::from_str(options)
@@ -1944,7 +1895,18 @@ mod parse {
                         "domain-set" => self
                             .config_domain_set(options)
                             .expect("load domain-set failed"),
-                        _ => warn!("unknown conf: {}", conf_name),
+                        _ => {
+                            use crate::config::ConfigItem;
+
+                            match ConfigItem::parse(conf_line) {
+                                Ok((_, config_item)) => match config_item {
+                                    ConfigItem::NftSet(config) => self.nftsets.push(config),
+                                },
+                                Err(err) => {
+                                    warn!("unknown conf: {}, {:?}", conf_name, err);
+                                }
+                            }
+                        }
                     }
                 }
                 _ => (),
@@ -1972,7 +1934,7 @@ mod parse {
 
             let server_options = server_options.as_deref().unwrap_or(options);
 
-            if let Ok(server) = NameServerInfo::from_str(server_options) {
+            if let Ok(server) = server_options.parse::<NameServerInfo>() {
                 if server.group.is_empty() && server.exclude_default_group {
                     warn!("group name required when `-exclude_default_group` enabled");
                 }
@@ -1988,7 +1950,7 @@ mod parse {
                 let server_group = parts[1].to_string();
                 let part0 = parts[0];
 
-                let domain = DomainId::from_str(part0);
+                let domain = Domain::from_str(part0);
 
                 if let Ok(domain) = domain {
                     self.forward_rules.push(ForwardRule {
@@ -2010,10 +1972,10 @@ mod parse {
                 return;
             }
 
-            if let Ok(domain) = DomainId::from_str(parts[0]) {
+            if let Ok(domain) = Domain::from_str(parts[0]) {
                 let domain_address = parts.get(1).copied().unwrap_or("#");
 
-                if let Ok(addr) = DomainAddress::from_str(domain_address) {
+                if let Ok(addr) = domain_address.parse() {
                     self.address_rules.push(ConfigItem {
                         name: domain,
                         value: addr,
@@ -2026,8 +1988,8 @@ mod parse {
             let mut parts = split_options(options, '/');
 
             if let (Some(Ok(name)), Some(Ok(cname))) = (
-                parts.next().map(DomainId::from_str),
-                parts.next().map(CNameRule::from_str),
+                parts.next().map(Domain::from_str),
+                parts.next().map(|s| s.parse()),
             ) {
                 self.cnames.push(ConfigItem { name, value: cname })
             }
@@ -2043,7 +2005,7 @@ mod parse {
             while let Some(part) = parts.next() {
                 match part {
                     "-n" | "-name" | "--name" => name = parts.next().map(|s| s.to_string()),
-                    _ => proxy = ProxyConfig::from_str(part).ok(),
+                    _ => proxy = part.parse().ok(),
                 }
             }
 
@@ -2103,7 +2065,7 @@ mod parse {
                 let reader = BufReader::new(file);
                 for line in reader.lines() {
                     if let Some(line) = preline(line?.as_str()) {
-                        if let Ok(mut d) = Name::from_str(line) {
+                        if let Ok(mut d) = line.parse::<Name>() {
                             d.set_fqdn(true);
                             domain_set.insert(d);
                         }
@@ -2120,7 +2082,7 @@ mod parse {
         fn config_speed_check_mode(&mut self, options: &str) {
             let parts = split_options(options, ',');
             for p in parts {
-                if let Ok(m) = SpeedCheckMode::from_str(p) {
+                if let Ok(m) = p.parse() {
                     self.speed_check_mode.push(m);
                 }
             }
@@ -2159,11 +2121,7 @@ mod parse {
         let mut line = line.trim_start();
 
         // skip comments and empty line.
-        if match line.chars().next() {
-            Some(t) if t == '#' => true,
-            None => true,
-            _ => false,
-        } {
+        if matches!(line.chars().next(), Some('#') | None) {
             return None;
         }
 
@@ -2193,10 +2151,6 @@ mod parse {
         }
     }
 
-    pub fn parse_bool(s: &str) -> bool {
-        matches!(s, "y" | "yes" | "t" | "true" | "1")
-    }
-
     pub fn parse_sock_addrs(addr: &str) -> Result<SocketAddr, AddrParseError> {
         let addr = addr.trim();
         if let Some(port) = addr.to_lowercase().strip_prefix("localhost:") {
@@ -2212,6 +2166,8 @@ mod parse {
     mod tests {
         use trust_dns_resolver::config::Protocol;
 
+        use crate::config::ListenerAddress;
+
         use super::*;
 
         #[test]
@@ -2222,9 +2178,9 @@ mod parse {
                 .with("bind-https 0.0.0.0:4453@eth1")
                 .build();
 
-            assert_eq!(cfg.binds_tcp.len(), 0);
-            assert_eq!(cfg.binds_tls.len(), 1);
-            assert_eq!(cfg.binds_https.len(), 1);
+            assert_eq!(cfg.binds_tcp().len(), 0);
+            assert_eq!(cfg.binds_tls().len(), 1);
+            assert_eq!(cfg.binds_https().len(), 1);
         }
 
         #[test]
@@ -2234,24 +2190,26 @@ mod parse {
                 .with("bind 0.0.0.0:4453@eth1")
                 .build();
 
-            assert_eq!(cfg.binds.len(), 1);
+            assert_eq!(cfg.binds().len(), 1);
 
-            let bind = cfg.binds.get(0).unwrap();
+            let bind = *cfg.binds().get(0).unwrap();
 
-            assert_eq!(bind.sock_addr, "0.0.0.0:4453".parse().unwrap());
+            assert_eq!(bind.listen, ListenerAddress::V4("0.0.0.0".parse().unwrap()));
+            assert_eq!(bind.port, 4453);
 
             assert_eq!(bind.device, Some("eth1".to_string()));
         }
 
         #[test]
         fn test_config_bind_with_device_flags() {
-            let mut cfg = SmartDnsConfig::builder();
+            let cfg = SmartDnsConfig::builder()
+                .with("bind-https 0.0.0.0:443@eth2 -no-rule-addr")
+                .build();
 
-            cfg.config("bind-https 0.0.0.0:443@eth2 -no-rule-addr");
+            let bind = *cfg.binds_https().get(0).unwrap();
 
-            let bind = cfg.binds_https.get(0).unwrap();
-
-            assert_eq!(bind.sock_addr, "0.0.0.0:443".parse().unwrap());
+            assert_eq!(bind.listen, ListenerAddress::V4("0.0.0.0".parse().unwrap()));
+            assert_eq!(bind.port, 443);
 
             assert_eq!(bind.device, Some("eth2".to_string()));
             assert!(bind.opts.no_rule_addr());
@@ -2265,15 +2223,16 @@ mod parse {
                 "bind-https 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key",
             );
 
-            assert!(!cfg.binds_https.is_empty());
+            let cfg = cfg.build();
 
-            let bind = cfg.binds_https.first().unwrap();
+            assert!(!cfg.binds_https().is_empty());
+
+            let bind = *cfg.binds_https().get(0).unwrap();
             let ssl_cfg = bind.ssl_config.as_ref().unwrap();
 
-            assert_eq!(
-                bind.sock_addr,
-                "0.0.0.0:4453".parse::<SocketAddr>().unwrap()
-            );
+            assert_eq!(bind.listen, ListenerAddress::V4("0.0.0.0".parse().unwrap()));
+
+            assert_eq!(bind.port, 4453);
 
             assert_eq!(ssl_cfg.server_name, Some("dns.example.com".to_string()));
             assert_eq!(
@@ -2401,7 +2360,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.name,
-                DomainId::from_str("test.example.com").unwrap()
+                Domain::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.value, DomainAddress::SOA);
@@ -2427,7 +2386,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.name,
-                DomainId::from_str("test.example.com").unwrap()
+                Domain::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.value, DomainAddress::SOAv4);
@@ -2443,7 +2402,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.name,
-                DomainId::from_str("test.example.com").unwrap()
+                Domain::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.value, DomainAddress::SOAv6);
@@ -2459,7 +2418,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.name,
-                DomainId::from_str("test.example.com").unwrap()
+                Domain::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.value, DomainAddress::IGN);
@@ -2475,7 +2434,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.name,
-                DomainId::from_str("test.example.com").unwrap()
+                Domain::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.value, DomainAddress::IGNv4);
@@ -2491,7 +2450,7 @@ mod parse {
 
             assert_eq!(
                 domain_addr_rule.name,
-                DomainId::from_str("test.example.com").unwrap()
+                Domain::from_str("test.example.com").unwrap()
             );
 
             assert_eq!(domain_addr_rule.value, DomainAddress::IGNv6);
@@ -2505,10 +2464,7 @@ mod parse {
 
             let nameserver_rule = cfg.forward_rules.first().unwrap();
 
-            assert_eq!(
-                nameserver_rule.domain,
-                DomainId::from_str("doh.pub").unwrap()
-            );
+            assert_eq!(nameserver_rule.domain, Domain::from_str("doh.pub").unwrap());
 
             assert_eq!(nameserver_rule.nameserver, "bootstrap");
         }
@@ -2521,10 +2477,7 @@ mod parse {
 
             let domain_rule = cfg.domain_rules.first().unwrap();
 
-            assert_eq!(
-                domain_rule.name,
-                DomainId::Domain(Name::from_str("doh.pub").unwrap())
-            );
+            assert_eq!(domain_rule.name, Domain::Name("doh.pub".parse().unwrap()));
             assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
             assert_eq!(
                 domain_rule.speed_check_mode,
@@ -2542,10 +2495,7 @@ mod parse {
 
             let domain_rule = cfg.domain_rules.first().unwrap();
 
-            assert_eq!(
-                domain_rule.name,
-                DomainId::Domain(Name::from_str("doh.pub").unwrap())
-            );
+            assert_eq!(domain_rule.name, Domain::Name("doh.pub".parse().unwrap()));
             assert_eq!(domain_rule.address, "127.0.0.1".parse().ok());
             assert_eq!(
                 domain_rule.speed_check_mode,
@@ -2563,7 +2513,7 @@ mod parse {
 
             let domain_rule = cfg.find_domain_rule(&"doh.pub".parse().unwrap()).unwrap();
 
-            assert_eq!(domain_rule.name(), &Name::from_str("doh.pub").unwrap());
+            assert_eq!(domain_rule.name(), &"doh.pub".parse().unwrap());
             assert_eq!(domain_rule.address, Some(DomainAddress::SOA));
             assert_eq!(
                 domain_rule.speed_check_mode,
@@ -2637,7 +2587,7 @@ mod parse {
             assert_eq!(cfg.server_name, "SmartDNS123".parse().ok());
             assert_eq!(
                 cfg.forward_rules.first().unwrap().domain,
-                DomainId::from_str("doh.pub").unwrap()
+                Domain::from_str("doh.pub").unwrap()
             );
             assert_eq!(cfg.forward_rules.first().unwrap().nameserver, "bootstrap");
         }

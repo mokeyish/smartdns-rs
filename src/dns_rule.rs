@@ -4,9 +4,10 @@ use trust_dns_proto::rr::Name;
 
 use crate::{
     collections::DomainMap,
+    config::{Domain, DomainConfigItem, IpConfig, NftsetConfig},
     dns_conf::{
-        AddressRules, CNameRules, DomainAddress, DomainId::*, DomainRules, DomainSets,
-        ForwardRules, SpeedCheckModeList,
+        AddressRules, CNameRules, DomainAddress, DomainRules, DomainSets, ForwardRules,
+        SpeedCheckModeList,
     },
 };
 
@@ -22,6 +23,7 @@ impl DomainRuleMap {
         forward_rules: &ForwardRules,
         domain_sets: &DomainSets,
         cnames: &CNameRules,
+        nftsets: &Vec<DomainConfigItem<Vec<IpConfig<NftsetConfig>>>>,
     ) -> Self {
         let mut name_rule_map = HashMap::<Name, DomainRule>::new();
 
@@ -29,10 +31,10 @@ impl DomainRuleMap {
 
         for rule in domain_rules {
             let names = match &rule.name {
-                Domain(name) => {
+                Domain::Name(name) => {
                     vec![name.clone()]
                 }
-                DomainSet(s) => domain_sets
+                Domain::Set(s) => domain_sets
                     .get(s)
                     .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
                     .unwrap_or_default(),
@@ -40,59 +42,51 @@ impl DomainRuleMap {
 
             for name in names {
                 // overide
-                *(name_rule_map
-                    .entry(name)
-                    .or_insert_with(DomainRule::default)) += rule.value.clone();
+                *(name_rule_map.entry(name).or_default()) += rule.value.clone();
             }
         }
 
         // append address rule
         for rule in address_rules.iter() {
             let names = match &rule.name {
-                Domain(name) => {
+                Domain::Name(name) => {
                     vec![name.clone()]
                 }
-                DomainSet(s) => domain_sets
+                Domain::Set(s) => domain_sets
                     .get(s)
                     .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
                     .unwrap_or_default(),
             };
 
             for name in names {
-                name_rule_map
-                    .entry(name)
-                    .or_insert_with(Default::default)
-                    .address = Some(rule.value);
+                name_rule_map.entry(name).or_default().address = Some(rule.value);
             }
         }
 
         // append forward rule
         for rule in forward_rules.iter() {
             let names = match &rule.domain {
-                Domain(name) => {
+                Domain::Name(name) => {
                     vec![name.clone()]
                 }
-                DomainSet(s) => domain_sets
+                Domain::Set(s) => domain_sets
                     .get(s)
                     .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
                     .unwrap_or_default(),
             };
 
             for name in names {
-                name_rule_map
-                    .entry(name)
-                    .or_insert_with(Default::default)
-                    .nameserver = Some(rule.nameserver.clone())
+                name_rule_map.entry(name).or_default().nameserver = Some(rule.nameserver.clone())
             }
         }
 
         // set cname
         for rule in cnames {
             let names = match &rule.name {
-                Domain(name) => {
+                Domain::Name(name) => {
                     vec![name.clone()]
                 }
-                DomainSet(s) => domain_sets
+                Domain::Set(s) => domain_sets
                     .get(s)
                     .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
                     .unwrap_or_default(),
@@ -100,8 +94,24 @@ impl DomainRuleMap {
             for name in names {
                 name_rule_map
                     .entry(name)
-                    .or_insert_with(Default::default)
+                    .or_default()
                     .cname = Some(rule.value.clone())
+            }
+        }
+
+        for rule in nftsets {
+            let names = match &rule.domain {
+                Domain::Name(name) => {
+                    vec![name.clone()]
+                }
+                Domain::Set(s) => domain_sets
+                    .get(s)
+                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            };
+
+            for name in names {
+                name_rule_map.entry(name).or_default().nftset = Some(rule.config.clone());
             }
         }
 
@@ -153,6 +163,7 @@ pub struct DomainRule {
 
     pub no_cache: Option<bool>,
     pub no_serve_expired: Option<bool>,
+    pub nftset: Option<Vec<IpConfig<NftsetConfig>>>,
 
     pub rr_ttl: Option<u64>,
     pub rr_ttl_min: Option<u64>,
@@ -250,7 +261,7 @@ mod tests {
 
     use std::{net::Ipv4Addr, ptr, str::FromStr};
 
-    use crate::dns_conf::{ConfigItem, DomainId};
+    use crate::dns_conf::ConfigItem;
 
     use super::*;
 
@@ -259,19 +270,20 @@ mod tests {
         let map = DomainRuleMap::create(
             &Default::default(),
             &vec![
-                ConfigItem::<DomainId, DomainAddress> {
+                ConfigItem::<Domain, DomainAddress> {
                     name: Name::from_str("a.b.c.www.example.com").unwrap().into(),
                     value: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
-                ConfigItem::<DomainId, DomainAddress> {
+                ConfigItem::<Domain, DomainAddress> {
                     name: Name::from_str("www.example.com").unwrap().into(),
                     value: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
-                ConfigItem::<DomainId, DomainAddress> {
+                ConfigItem::<Domain, DomainAddress> {
                     name: Name::from_str("example.com").unwrap().into(),
                     value: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
             ],
+            &Default::default(),
             &Default::default(),
             &Default::default(),
             &Default::default(),
