@@ -229,9 +229,11 @@ fn parse_ssl_config<'b>(options: &Options<'b>) -> (Options<'b>, SslConfig) {
 
     for (k, v) in options {
         match k.to_lowercase().as_str() {
-            "server_name" => config.server_name = v.map(|s| s.to_string()),
-            "certificate" => config.certificate = v.map(Path::new).map(|p| p.to_path_buf()),
-            "certificate_key" => config.certificate_key = v.map(Path::new).map(|p| p.to_path_buf()),
+            "server-name" => config.server_name = v.map(|s| s.to_string()),
+            "ssl-certificate-key" => {
+                config.certificate_key = v.map(Path::new).map(|p| p.to_path_buf())
+            }
+            "ssl-certificate" => config.certificate = v.map(Path::new).map(|p| p.to_path_buf()),
             _ => rest_options.push((*k, *v)),
         }
     }
@@ -430,6 +432,27 @@ mod tests {
                         no_rule_addr: Some(true),
                         ..Default::default()
                     }
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_tls_listener() {
+        assert_eq!(
+            TlsListener::parse("bind-tls 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key").unwrap(),
+            (
+                "", 
+                TlsListener {
+                    listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+                    port: 4453,
+                    device: None,
+                    opts: Default::default(),
+                    ssl_config: Some(SslConfig {
+                        server_name: Some("dns.example.com".to_string()), 
+                        certificate: Some(Path::new("/etc/nginx/dns.example.com.crt").to_path_buf()), 
+                        certificate_key: Some(Path::new("/etc/nginx/dns.example.com.key").to_path_buf())
+                    })
                 }
             )
         );

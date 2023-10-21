@@ -1,46 +1,34 @@
 use std::{ffi::OsStr, io, path::PathBuf};
 
+const B_NAME: &str = "nft";
+
 #[derive(Debug)]
 pub struct Nft {
     path: PathBuf,
-    #[cfg(target_os = "linux")]
     avaliable: bool,
 }
 
 impl Nft {
     pub fn new() -> Self {
-        use which::{which, which_in_global};
-
-        const B_NAME: &str = "nft";
-
         let mut nft = Self {
             path: B_NAME.into(),
-            #[cfg(target_os = "linux")]
             avaliable: false,
         };
 
-        #[cfg(target_os = "linux")]
-        {
-            if let Ok(path) = which(B_NAME).or_else(|_| {
-                which_in_global(B_NAME, Some("/usr/sbin"))
-                    .and_then(|mut s| s.next().ok_or(which::Error::CannotFindBinaryPath))
-            }) {
-                nft.path = path;
-            }
-            nft.avaliable = nft.list_tables().is_ok();
+        use which::{which, which_in_global};
+        if let Ok(path) = which(B_NAME).or_else(|_| {
+            which_in_global(B_NAME, Some("/usr/sbin"))
+                .and_then(|mut s| s.next().ok_or(which::Error::CannotFindBinaryPath))
+        }) {
+            nft.path = path;
         }
+        nft.avaliable = nft.list_tables().is_ok();
 
         nft
     }
 
-    #[cfg(target_os = "linux")]
     pub fn avaliable(&self) -> bool {
         self.avaliable
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn avaliable(&self) -> bool {
-        false
     }
 
     pub fn add_ipv4_set(&self, family: &'static str, table: &str, name: &str) -> io::Result<()> {

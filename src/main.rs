@@ -22,6 +22,7 @@ mod dns_mw_cache;
 mod dns_mw_cname;
 mod dns_mw_dnsmasq;
 mod dns_mw_dualstack;
+#[cfg(target_os = "linux")]
 mod dns_mw_nftset;
 mod dns_mw_ns;
 mod dns_mw_zone;
@@ -47,15 +48,13 @@ use dns_mw_cache::DnsCacheMiddleware;
 use dns_mw_cname::DnsCNameMiddleware;
 use dns_mw_dnsmasq::DnsmasqMiddleware;
 use dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
+#[cfg(target_os = "linux")]
 use dns_mw_nftset::DnsNftsetMiddleware;
 use dns_mw_ns::NameServerMiddleware;
 use dns_mw_zone::DnsZoneMiddleware;
 use infra::middleware;
 
-use crate::{
-    config::IpConfig, dns_client::DnsClient, dns_conf::SmartDnsConfig, dns_server::ServerRegistry,
-    ffi::nft::Nft,
-};
+use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig, dns_server::ServerRegistry};
 
 use crate::{
     infra::process_guard::ProcessGuardError,
@@ -247,27 +246,32 @@ fn run_server(conf: Option<PathBuf>) {
         }
 
         // nftset
-        let nftsets = cfg.valid_nftsets();
-        if !nftsets.is_empty() {
-            let nft = Nft::new();
-            if nft.avaliable() {
-                let mut success = true;
-                for i in nftsets {
-                    if let Err(err) = match i {
-                        IpConfig::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
-                        IpConfig::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
-                        _ => Ok(()),
-                    } {
-                        warn!("nft add set failed, {:?}, skipped", err);
-                        success = false;
-                        break;
+        #[cfg(target_os = "linux")]
+        {
+            use config::IpConfig;
+            use ffi::nft::Nft;
+            let nftsets = cfg.valid_nftsets();
+            if !nftsets.is_empty() {
+                let nft = Nft::new();
+                if nft.avaliable() {
+                    let mut success = true;
+                    for i in nftsets {
+                        if let Err(err) = match i {
+                            IpConfig::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
+                            IpConfig::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
+                            _ => Ok(()),
+                        } {
+                            warn!("nft add set failed, {:?}, skipped", err);
+                            success = false;
+                            break;
+                        }
                     }
+                    if success {
+                        middleware_builder = middleware_builder.with(DnsNftsetMiddleware::new(nft));
+                    }
+                } else {
+                    warn!("nft is not avaliable, skipped.",);
                 }
-                if success {
-                    middleware_builder = middleware_builder.with(DnsNftsetMiddleware::new(nft));
-                }
-            } else {
-                warn!("nft is not avaliable, skipped.",);
             }
         }
 
