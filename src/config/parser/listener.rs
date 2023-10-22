@@ -1,7 +1,6 @@
 use super::*;
 use crate::dns::Protocol;
 use crate::log::warn;
-use crate::third_ext::DefaultExt;
 use std::convert::{Into, TryInto};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
@@ -75,7 +74,7 @@ impl NomParser for QuicListener {
 
 impl NomParser for HttpsListener {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_opt(parse, |listener| listener.try_into().ok())(input)
+        map_res(parse, TryInto::try_into)(input)
     }
 }
 
@@ -137,17 +136,9 @@ fn parse(input: &str) -> IResult<&str, Listener> {
 
     let (options, ssl_config) =
         if !matches!(&proto, Protocol::Tcp | Protocol::Udp) && !options.is_empty() {
-            let (rest, ssl_config) = parse_ssl_config(&options);
-            (
-                rest,
-                if ssl_config.is_default() {
-                    None
-                } else {
-                    Some(ssl_config)
-                },
-            )
+            parse_ssl_config(&options)
         } else {
-            (Vec::with_capacity(0), None)
+            (Vec::with_capacity(0), Default::default())
         };
 
     if !options.is_empty() {
@@ -448,11 +439,12 @@ mod tests {
                     port: 4453,
                     device: None,
                     opts: Default::default(),
-                    ssl_config: Some(SslConfig {
+                    ssl_config: SslConfig {
                         server_name: Some("dns.example.com".to_string()), 
                         certificate: Some(Path::new("/etc/nginx/dns.example.com.crt").to_path_buf()), 
-                        certificate_key: Some(Path::new("/etc/nginx/dns.example.com.key").to_path_buf())
-                    })
+                        certificate_key: Some(Path::new("/etc/nginx/dns.example.com.key").to_path_buf()),
+                        ..Default::default()
+                    }
                 }
             )
         );

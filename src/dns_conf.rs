@@ -11,8 +11,8 @@ use cfg_if::cfg_if;
 use ipnet::IpNet;
 
 use crate::config::{
-    Domain, DomainConfigItem, HttpsListener, IpConfig, Listener, ListenerAddress, NftsetConfig,
-    NomParser, QuicListener, TcpListener, TlsListener, UdpListener,
+    Domain, DomainConfigItem, IListener, IpConfig, Listener, ListenerAddress, NftsetConfig,
+    NomParser, UdpListener,
 };
 use crate::dns::RecordType;
 use crate::dns_rule::{CNameRule, DomainRule, DomainRuleMap, DomainRuleTreeNode, ResponseMode};
@@ -159,60 +159,9 @@ impl SmartDnsConfig {
     pub fn num_workers(&self) -> Option<usize> {
         self.num_workers
     }
-    /// dns server bind ip and port, default dns server port is 53, support binding multi ip and port
-    pub fn binds(&self) -> Vec<&UdpListener> {
-        self.inner
-            .listeners
-            .iter()
-            .flat_map(|n| match n {
-                Listener::Udp(n) => Some(n),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    }
-    /// bind tcp server
-    pub fn binds_tcp(&self) -> Vec<&TcpListener> {
-        self.inner
-            .listeners
-            .iter()
-            .flat_map(|n| match n {
-                Listener::Tcp(n) => Some(n),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    }
-    /// bind https server
-    pub fn binds_https(&self) -> Vec<&HttpsListener> {
-        self.inner
-            .listeners
-            .iter()
-            .flat_map(|n| match n {
-                Listener::Https(n) => Some(n),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    }
-    /// bind tls server
-    pub fn binds_tls(&self) -> Vec<&TlsListener> {
-        self.inner
-            .listeners
-            .iter()
-            .flat_map(|n| match n {
-                Listener::Tls(n) => Some(n),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    }
-    /// bind quic server
-    pub fn binds_quic(&self) -> Vec<&QuicListener> {
-        self.inner
-            .listeners
-            .iter()
-            .flat_map(|n| match n {
-                Listener::Quic(n) => Some(n),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
+
+    pub fn listeners(&self) -> &[Listener] {
+        &self.listeners
     }
 
     /// SSL Certificate file path
@@ -1118,6 +1067,7 @@ impl std::str::FromStr for BindServer {
             server_name,
             certificate: ssl_certificate,
             certificate_key: ssl_certificate_key,
+            ..Default::default()
         });
 
         Ok(Self {
@@ -1151,6 +1101,7 @@ pub struct SslConfig {
     pub server_name: Option<String>,
     pub certificate: Option<PathBuf>,
     pub certificate_key: Option<PathBuf>,
+    pub certificate_key_pass: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
@@ -2166,7 +2117,7 @@ mod parse {
     mod tests {
         use crate::libdns::resolver::config::Protocol;
 
-        use crate::config::ListenerAddress;
+        use crate::config::{HttpsListener, ListenerAddress};
 
         use super::*;
 
@@ -2178,9 +2129,27 @@ mod parse {
                 .with("bind-https 0.0.0.0:4453@eth1")
                 .build();
 
-            assert_eq!(cfg.binds_tcp().len(), 0);
-            assert_eq!(cfg.binds_tls().len(), 1);
-            assert_eq!(cfg.binds_https().len(), 1);
+            assert_eq!(
+                cfg.listeners()
+                    .iter()
+                    .filter(|x| matches!(x, Listener::Tcp(_)))
+                    .count(),
+                0
+            );
+            assert_eq!(
+                cfg.listeners()
+                    .iter()
+                    .filter(|x| matches!(x, Listener::Tls(_)))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                cfg.listeners()
+                    .iter()
+                    .filter(|x| matches!(x, Listener::Https(_)))
+                    .count(),
+                1
+            );
         }
 
         #[test]
@@ -2190,14 +2159,17 @@ mod parse {
                 .with("bind 0.0.0.0:4453@eth1")
                 .build();
 
-            assert_eq!(cfg.binds().len(), 1);
+            assert_eq!(cfg.listeners().len(), 1);
 
-            let bind = *cfg.binds().get(0).unwrap();
+            let bind = cfg.listeners().get(0).unwrap();
 
-            assert_eq!(bind.listen, ListenerAddress::V4("0.0.0.0".parse().unwrap()));
-            assert_eq!(bind.port, 4453);
+            assert_eq!(
+                bind.listen(),
+                ListenerAddress::V4("0.0.0.0".parse().unwrap())
+            );
+            assert_eq!(bind.port(), 4453);
 
-            assert_eq!(bind.device, Some("eth1".to_string()));
+            assert_eq!(bind.device(), Some("eth1"));
         }
 
         #[test]
@@ -2206,13 +2178,21 @@ mod parse {
                 .with("bind-https 0.0.0.0:443@eth2 -no-rule-addr")
                 .build();
 
-            let bind = *cfg.binds_https().get(0).unwrap();
+            let listener = cfg.listeners().get(0).unwrap();
 
-            assert_eq!(bind.listen, ListenerAddress::V4("0.0.0.0".parse().unwrap()));
-            assert_eq!(bind.port, 443);
-
-            assert_eq!(bind.device, Some("eth2".to_string()));
-            assert!(bind.opts.no_rule_addr());
+            assert_eq!(
+                listener,
+                &Listener::Https(HttpsListener {
+                    listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+                    port: 443,
+                    device: Some("eth2".to_string()),
+                    opts: ServerOpts {
+                        no_rule_addr: Some(true),
+                        ..Default::default()
+                    },
+                    ssl_config: Default::default()
+                })
+            );
         }
 
         #[test]
@@ -2225,23 +2205,28 @@ mod parse {
 
             let cfg = cfg.build();
 
-            assert!(!cfg.binds_https().is_empty());
+            assert!(!cfg.listeners().is_empty());
 
-            let bind = *cfg.binds_https().get(0).unwrap();
-            let ssl_cfg = bind.ssl_config.as_ref().unwrap();
+            let listener = cfg.listeners().get(0).unwrap();
 
-            assert_eq!(bind.listen, ListenerAddress::V4("0.0.0.0".parse().unwrap()));
-
-            assert_eq!(bind.port, 4453);
-
-            assert_eq!(ssl_cfg.server_name, Some("dns.example.com".to_string()));
             assert_eq!(
-                ssl_cfg.certificate,
-                Some(Path::new("/etc/nginx/dns.example.com.crt").to_path_buf())
-            );
-            assert_eq!(
-                ssl_cfg.certificate_key,
-                Some(Path::new("/etc/nginx/dns.example.com.key").to_path_buf())
+                listener,
+                &Listener::Https(HttpsListener {
+                    listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+                    port: 4453,
+                    ssl_config: SslConfig {
+                        server_name: Some("dns.example.com".to_string()),
+                        certificate: Some(
+                            Path::new("/etc/nginx/dns.example.com.crt").to_path_buf()
+                        ),
+                        certificate_key: Some(
+                            Path::new("/etc/nginx/dns.example.com.key").to_path_buf()
+                        ),
+                        certificate_key_pass: None
+                    },
+                    device: None,
+                    opts: Default::default()
+                })
             );
         }
 
