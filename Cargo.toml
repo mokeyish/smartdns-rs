@@ -120,7 +120,7 @@ csv = "1.1"
 hostname = "0.3"
 byte-unit = "4.0.17"
 ipnet = "2.7"
-which = "4.3.0"
+which = "5.0.0"
 
 # process
 sysinfo = "0.29"
