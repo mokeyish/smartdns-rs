@@ -36,6 +36,12 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
+      
+      - name: Patch crates
+        run: |
+          cargo install patch-crate --force
+          cargo patch-crate
+        shell: bash
           
       - name: Test
         uses: actions-rs/cargo@v1.0.3
@@ -134,12 +140,18 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
+
+      - name: Patch crates
+        run: |
+          cargo install patch-crate --force
+          cargo patch-crate
+        shell: bash
+
       - name: Check
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.os == 'ubuntu-latest' }}
           command: check
           args: --workspace --tests --benches --examples --target ${{ matrix.target }}
-
 
 
