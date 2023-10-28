@@ -17,6 +17,8 @@ repository = "https://github.com/mokeyish/smartdns-rs"
 license = "GPL-v3.0"
 readme = "README.md"
 
+[package.metadata.patch]
+crates = ["hickory-server"]
 
 [features]
 
@@ -44,10 +46,11 @@ dns-over-https-rustls = [
 # quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
 # hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
 # hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
-# hickory-server = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
+hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
-enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
+# enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
+axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 
 [dependencies]
 cfg-if = "1"
@@ -57,14 +60,24 @@ once_cell = "1.16.0"
 nom = "7.1.3"
 enum_dispatch = "0.3.12"
 
+# api
+axum = { version = "0.6.16" }
+axum-server = { version = "0.5.1", features = ["tls-rustls"] }
+
 # async/await
 futures = { version = "0.3.5", default-features = false, features = ["std"] }
 futures-intrusive = "0.5"
-futures-util = { version = "0.3", default-features = false, features = ["std"]}
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 async-trait = "0.1.43"
-tokio = { version = "1.28", features = ["time", "rt", "signal", "macros", "parking_lot"] }
+tokio = { version = "1.28", features = [
+  "time",
+  "rt",
+  "signal",
+  "macros",
+  "parking_lot",
+] }
 tokio-rustls = "0.24.0"
-socket2 = { version = "0.5", features = ["all"]}
+socket2 = { version = "0.5", features = ["all"] }
 
 # log
 tracing = "0.1"
@@ -76,17 +89,20 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { version = "0.24"}
-hickory-resolver = { version = "0.24", features = ["serde-config", "system-config"]}
-hickory-server = { version = "0.24", features = ["resolver"]}
+hickory-proto = { version = "0.24" }
+hickory-resolver = { version = "0.24", features = [
+  "serde-config",
+  "system-config",
+] }
+hickory-server = { version = "0.24", features = ["resolver"] }
 
 # ssl
 webpki-roots = "0.25.2"
-rustls = { version = "0.21.1", features = ["dangerous_configuration"]}
+rustls = { version = "0.21.1", features = ["dangerous_configuration"] }
 rustls-pemfile = "1.0.2"
 rustls-native-certs = "0.6.2"
 
-lru = { version = "0.12", default-features = false}
+lru = { version = "0.12", default-features = false }
 time = "0.3"
 chrono = "0.4"
 surge-ping = "0.8.0"
@@ -103,7 +119,10 @@ sysinfo = "0.29"
 
 # proxy
 fast-socks5 = "0.9.1"
-async-http-proxy = { version = "1.2.5", features = ["runtime-tokio", "basic-auth"]}
+async-http-proxy = { version = "1.2.5", features = [
+  "runtime-tokio",
+  "basic-auth",
+] }
 
 num-traits = "0.2.15"
 url = "2.3.1"

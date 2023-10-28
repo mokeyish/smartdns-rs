@@ -98,7 +98,7 @@ mod request {
     };
     use crate::libdns::server::server::Protocol;
 
-    use crate::dns_server::Request as OriginRequest;
+    use crate::libdns::server::server::Request as OriginRequest;
 
     #[derive(Clone)]
     pub struct Request {
