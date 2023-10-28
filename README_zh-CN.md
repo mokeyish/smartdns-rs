@@ -147,6 +147,12 @@ address /ads.example.com/#
 git clone https://github.com/mokeyish/smartdns-rs.git
 cd smartdns-rs
 
+# 安装 patch-crate
+cargo install patch-crate
+
+# 执行 patch crates
+cargo patch-crate
+
 # 编译
 cargo build --release
 
