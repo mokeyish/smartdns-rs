@@ -12,9 +12,9 @@ use crate::{
     config::{IListener, Listener},
     dns_conf::{SmartDnsConfig, SslConfig},
     dns_mw::DnsMiddlewareHandler,
-    dns_server::ServerHandler,
+    dns_server::DnsServerHandler,
     error::Error,
-    libdns::server::ServerFuture,
+    libdns::{proto::error::ProtoError, server::ServerFuture},
     log,
     third_ext::FutureJoinAllExt,
 };
@@ -22,7 +22,7 @@ use crate::{
 pub struct App {
     cfg: RwLock<Arc<SmartDnsConfig>>,
     handler: RwLock<Arc<DnsMiddlewareHandler>>,
-    listener_map: Arc<RwLock<HashMap<crate::config::Listener, ServerFuture<ServerHandler>>>>,
+    listener_map: Arc<RwLock<HashMap<crate::config::Listener, ServerTasks>>>,
     runtime: Runtime,
     guard: AppGuard,
 }
@@ -83,13 +83,11 @@ impl App {
 
         let handler = create_middleware_handler(cfg.clone(), &runtime);
 
-        let listeners = Default::default();
-
         Self {
             cfg: RwLock::new(cfg),
             handler: RwLock::new(Arc::new(handler)),
             runtime,
-            listener_map: listeners,
+            listener_map: Default::default(),
             guard,
         }
     }
@@ -105,13 +103,15 @@ impl App {
 
         let listeners = self.listener_map.clone();
 
+        let shutdown_timeout = Duration::from_secs(5);
+
         self.runtime.block_on(async move {
             use crate::signal;
             let _ = signal::terminate().await;
             // close all servers.
             let mut listeners = listeners.write().await;
             let shutdown_tasks = listeners.iter_mut().map(|(_, server)| async move {
-                match server.block_until_done().await {
+                match server.shutdown(shutdown_timeout).await {
                     Ok(_) => (),
                     Err(err) => log::warn!("{:?}", err),
                 }
@@ -119,7 +119,7 @@ impl App {
             shutdown_tasks.join_all().await;
         });
 
-        self.runtime.shutdown_timeout(Duration::from_secs(5));
+        self.runtime.shutdown_timeout(shutdown_timeout);
     }
 
     async fn register_listeners(&self) {
@@ -142,7 +142,7 @@ impl App {
                         listener_map.write().await.insert(listener.clone(), server)
                     {
                         tokio::spawn(async move {
-                            let _ = prev_server.block_until_done().await;
+                            let _ = prev_server.shutdown(Duration::from_secs(5)).await;
                         });
                     }
                 }
@@ -157,24 +157,29 @@ impl App {
 async fn create_listener(
     app: &App,
     listener: &crate::config::Listener,
-) -> Result<ServerFuture<ServerHandler>, crate::Error> {
+) -> Result<ServerTasks, crate::Error> {
     use crate::{bind_to, tcp, udp};
     let handler = app.handler.read().await.clone();
 
-    let mut server = ServerFuture::new(ServerHandler::new(handler, listener.server_opts().clone()));
+    let server_handler = DnsServerHandler::new(handler, listener.server_opts().clone());
 
     let cfg = app.cfg.read().await.clone();
 
     let tcp_idle_time = cfg.tcp_idle_time();
 
-    match listener {
+    let server = match listener {
         Listener::Udp(listener) => {
             let udp_socket = bind_to(udp, listener.sock_addr(), listener.device(), "UDP");
-            server.register_socket(udp_socket)
+            let mut server = ServerFuture::new(server_handler);
+            server.register_socket(udp_socket);
+            ServerTasks::Future(server)
         }
         Listener::Tcp(listener) => {
             let tcp_listener = bind_to(tcp, listener.sock_addr(), listener.device(), "TCP");
-            server.register_listener(tcp_listener, Duration::from_secs(tcp_idle_time))
+            let mut server = ServerFuture::new(server_handler);
+            server.register_listener(tcp_listener, Duration::from_secs(tcp_idle_time));
+
+            ServerTasks::Future(server)
         }
         #[cfg(feature = "dns-over-tls")]
         Listener::Tls(listener) => {
@@ -190,6 +195,7 @@ async fn create_listener(
 
             let tls_listener = bind_to(tcp, listener.sock_addr(), listener.device(), LISTENER_TYPE);
 
+            let mut server = ServerFuture::new(server_handler);
             server
                 .register_tls_listener(
                     tls_listener,
@@ -203,6 +209,8 @@ async fn create_listener(
                         err.to_string(),
                     )
                 })?;
+
+            ServerTasks::Future(server)
         }
         #[cfg(feature = "dns-over-https")]
         Listener::Https(listener) => {
@@ -219,20 +227,24 @@ async fn create_listener(
             let https_listener =
                 bind_to(tcp, listener.sock_addr(), listener.device(), LISTENER_TYPE);
 
-            server
-                .register_https_listener(
+            let handle = axum_server::Handle::new();
+            let handle_clone = handle.clone();
+
+            let server_opts = listener.server_opts().clone();
+
+            tokio::spawn(async move {
+                let _ = crate::api::register_https(
                     https_listener,
-                    Duration::from_secs(tcp_idle_time),
-                    (certificate.clone(), certificate_key.clone()),
-                    ssl_config.server_name.clone(),
+                    server_handler,
+                    server_opts,
+                    certificate,
+                    certificate_key,
+                    handle_clone,
                 )
-                .map_err(|err| {
-                    crate::Error::RegisterListenerFailed(
-                        LISTENER_TYPE,
-                        listener.sock_addr(),
-                        err.to_string(),
-                    )
-                })?;
+                .await
+                .map_err(crate::libdns::proto::error::ProtoError::from);
+            });
+            ServerTasks::Handle(handle)
         }
         #[cfg(feature = "dns-over-quic")]
         Listener::Quic(listener) => {
@@ -248,6 +260,7 @@ async fn create_listener(
 
             let quic_listener = bind_to(udp, listener.sock_addr(), listener.device(), "QUIC");
 
+            let mut server = ServerFuture::new(server_handler);
             server
                 .register_quic_listener(
                     quic_listener,
@@ -262,6 +275,8 @@ async fn create_listener(
                         err.to_string(),
                     )
                 })?;
+
+            ServerTasks::Future(server)
         }
         #[cfg(not(feature = "dns-over-tls"))]
         Listener::Tls(listener) => {
@@ -275,7 +290,8 @@ async fn create_listener(
         Listener::Quic(listener) => {
             warn!("Bind DoQ not enabled")
         }
-    }
+    };
+
     fn load_certificate_and_key(
         ssl_config: &SslConfig,
         cert_file: Option<&Path>,
@@ -418,8 +434,28 @@ fn create_middleware_handler(cfg: Arc<SmartDnsConfig>, runtime: &Runtime) -> Dns
     middleware_builder.build(cfg.clone())
 }
 
-#[cfg(target_os = "linux")]
 struct AppGuard {
     log_guard: Option<tracing::dispatcher::DefaultGuard>,
+    #[cfg(target_os = "linux")]
     user_guard: Option<users::switch::SwitchUserGuard>,
+}
+
+enum ServerTasks {
+    Future(ServerFuture<DnsServerHandler>),
+    Handle(axum_server::Handle),
+}
+
+impl ServerTasks {
+    async fn shutdown(&mut self, shutdown_timeout: Duration) -> Result<(), ProtoError> {
+        match self {
+            ServerTasks::Future(s) => {
+                let _ = s.block_until_done().await;
+                Ok(())
+            }
+            ServerTasks::Handle(s) => {
+                s.graceful_shutdown(Some(shutdown_timeout));
+                Ok(())
+            }
+        }
+    }
 }

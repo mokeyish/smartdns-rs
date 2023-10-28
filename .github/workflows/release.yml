@@ -74,10 +74,13 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
+      - name: cargo install patch-crate
+        uses: baptiste0928/cargo-install@v2
+        with:
+          crate: patch-crate
+          
       - name: Patch crates
-        run: |
-          cargo install patch-crate --force
-          cargo patch-crate
+        run: cargo patch-crate
         shell: bash
 
       - name: Build

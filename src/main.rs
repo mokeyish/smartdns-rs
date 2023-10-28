@@ -4,6 +4,7 @@ use cli::*;
 use std::{io, net::SocketAddr, path::PathBuf};
 use tokio::net::{TcpListener, UdpSocket};
 
+mod api;
 mod app;
 mod cli;
 mod collections;
