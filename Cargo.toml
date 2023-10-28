@@ -46,7 +46,6 @@ dns-over-https-rustls = [
 # hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
 # hickory-server = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
-surge-ping = { git = "https://github.com/mokeyish/surge-ping.git", rev = "04c51d6" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
 
@@ -90,7 +89,7 @@ rustls-native-certs = "0.6.2"
 lru = { version = "0.12", default-features = false}
 time = "0.3"
 chrono = "0.4"
-surge-ping = "0.7.4"
+surge-ping = "0.8.0"
 rand = "0.8.5"
 smallvec = "1.10.0"
 csv = "1.1"

@@ -21,3 +21,6 @@ dist
 .idea/
 
 etc/smartdns/smartdns.yaml
+
+localhost.crt
+localhost.key

@@ -289,6 +289,129 @@ mod icmp {
 
     use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
 
+    mod auto_sock_type {
+        use cfg_if::cfg_if;
+        use socket2::Type;
+        use surge_ping::ICMP;
+
+        cfg_if! {
+            if #[cfg(any(target_os = "linux", target_os = "android"))] {
+                use once_cell::sync::Lazy;
+                use socket2::{Domain, Protocol, Socket};
+                use std::{io, net::IpAddr};
+
+                pub trait CheckAllowUnprivilegedIcmp {
+                    fn allow_unprivileged_icmp(&self) -> bool;
+                }
+
+
+                pub trait CheckAllowRawSocket {
+                    fn allow_raw_socket(&self) -> bool;
+                }
+
+                impl CheckAllowUnprivilegedIcmp for ICMP {
+                    fn allow_unprivileged_icmp(&self) -> bool {
+                        match self {
+                            ICMP::V4 => *ALLOW_IPV4_UNPRIVILEGED_ICMP,
+                            ICMP::V6 => *ALLOW_IPV6_UNPRIVILEGED_ICMP
+                        }
+                    }
+                }
+
+                impl CheckAllowRawSocket for ICMP {
+                    #[inline]
+                    fn allow_raw_socket(&self) -> bool {
+                        match self {
+                            ICMP::V4 => *ALLOW_IPV4_RAW_SOCKET,
+                            ICMP::V6 => *ALLOW_IPV6_RAW_SOCKET
+                        }
+                    }
+                }
+
+                impl CheckAllowUnprivilegedIcmp for IpAddr {
+                    #[inline]
+                    fn allow_unprivileged_icmp(&self) -> bool {
+                        match self {
+                            IpAddr::V4(_) => *ALLOW_IPV4_UNPRIVILEGED_ICMP,
+                            IpAddr::V6(_) => *ALLOW_IPV6_UNPRIVILEGED_ICMP,
+                        }
+                    }
+                }
+
+                impl CheckAllowRawSocket for IpAddr {
+                    #[inline]
+                    fn allow_raw_socket(&self) -> bool {
+                        match self {
+                            IpAddr::V4(_) => *ALLOW_IPV4_RAW_SOCKET,
+                            IpAddr::V6(_) => *ALLOW_IPV6_RAW_SOCKET,
+                        }
+                    }
+                }
+
+
+
+
+                pub static ALLOW_IPV4_UNPRIVILEGED_ICMP: Lazy<bool> = Lazy::new(|| {
+                    allow_unprivileged_icmp(Domain::IPV4, Protocol::ICMPV4)
+                });
+
+                pub static ALLOW_IPV4_RAW_SOCKET: Lazy<bool> =
+                    Lazy::new(|| allow_raw_socket(Domain::IPV4, Protocol::ICMPV4));
+
+
+                pub static ALLOW_IPV6_UNPRIVILEGED_ICMP: Lazy<bool> = Lazy::new(|| {
+                    allow_unprivileged_icmp(Domain::IPV6, Protocol::ICMPV6)
+                });
+
+                pub static ALLOW_IPV6_RAW_SOCKET: Lazy<bool> =
+                    Lazy::new(|| allow_raw_socket(Domain::IPV6, Protocol::ICMPV6));
+
+
+                fn allow_unprivileged_icmp(domain: Domain, proto: Protocol) -> bool {
+                    !is_permission_denied(Socket::new(domain, Type::DGRAM, Some(proto)))
+                }
+
+                fn allow_raw_socket(domain: Domain, proto: Protocol) -> bool {
+                    !is_permission_denied(Socket::new(domain, Type::RAW, Some(proto)))
+                }
+
+                #[inline]
+                fn is_permission_denied(res: io::Result<Socket>) -> bool {
+                    matches!(res, Err(err) if matches!(err.kind(), std::io::ErrorKind::PermissionDenied))
+                }
+
+            }
+
+
+        }
+
+        #[allow(unused_variables)]
+        pub fn detect(kind: ICMP) -> Type {
+            cfg_if! {
+                if #[cfg(any(target_os = "linux", target_os = "android"))] {
+
+                    if kind.allow_unprivileged_icmp() {
+                        //  enable by running: `sudo sysctl -w net.ipv4.ping_group_range='0 2147483647'`
+                        Type::DGRAM
+                    } else if kind.allow_raw_socket() {
+                        // enable by running: `sudo setcap CAP_NET_RAW+eip /path/to/program`
+                        Type::RAW
+                    } else {
+                        panic!("unpriviledged ping is disabled, please enable by setting `net.ipv4.ping_group_range` or setting `CAP_NET_RAW`")
+                    }
+                } else if #[cfg(any(target_os = "macos"))] {
+                    // MacOS seems enable UNPRIVILEGED_ICMP by default.
+                    Type::DGRAM
+                } else if #[cfg(any(target_os = "windows"))] {
+                    // Windows seems enable RAW_SOCKET by default.
+                    Type::RAW
+                } else {
+                    Type::RAW
+                }
+            }
+        }
+    }
+
     pub async fn ping(ipaddr: IpAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
         let PingOptions {
             times,
@@ -300,8 +423,18 @@ mod icmp {
         let mut durations = Vec::new();
 
         let client = match ipaddr {
-            IpAddr::V4(_) => Client::new(&Config::default()),
-            IpAddr::V6(_) => Client::new(&Config::builder().kind(ICMP::V6).build()),
+            IpAddr::V4(_) => Client::new(
+                &Config::builder()
+                    .kind(ICMP::V4)
+                    .sock_type_hint(auto_sock_type::detect(ICMP::V4))
+                    .build(),
+            ),
+            IpAddr::V6(_) => Client::new(
+                &Config::builder()
+                    .kind(ICMP::V6)
+                    .sock_type_hint(auto_sock_type::detect(ICMP::V6))
+                    .build(),
+            ),
         }?;
 
         let mut pinger = client.pinger(ipaddr, PingIdentifier(random())).await;
