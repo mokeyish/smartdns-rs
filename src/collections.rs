@@ -28,7 +28,11 @@ impl<T: Debug> DomainMap<T> {
                 break;
             }
 
-            domain = domain.base_name();
+            if domain.is_wildcard() {
+                domain = domain.base_name();
+            } else {
+                domain = domain.into_wildcard();
+            }
         }
 
         None

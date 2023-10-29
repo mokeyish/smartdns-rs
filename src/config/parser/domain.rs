@@ -12,7 +12,7 @@ impl NomParser for Domain {
 fn parse(input: &str) -> IResult<&str, Domain> {
     let set = alphanumeric0;
 
-    let name = is_not(" \n\t\\/|\"#',!+*<>");
+    let name = is_not(" \n\t\\/|\"#',!+<>");
 
     alt((
         map(
@@ -46,5 +46,14 @@ mod test {
 
         let (_, domain) = parse("xxx.集团 w").unwrap();
         assert_eq!(domain, Domain::Name(Name::from_str("xxx.集团").unwrap()));
+    }
+
+    #[test]
+    fn test2() {
+        let n = Name::from_str(".").unwrap();
+        assert_eq!(n, Name::root());
+
+        let n = Name::from_str("*").unwrap();
+        assert!(n.is_wildcard());
     }
 }
