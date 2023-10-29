@@ -2115,6 +2115,8 @@ mod parse {
 
     #[cfg(test)]
     mod tests {
+        use std::str::FromStr;
+
         use crate::libdns::resolver::config::Protocol;
 
         use crate::config::{HttpsListener, ListenerAddress};
@@ -2439,6 +2441,26 @@ mod parse {
             );
 
             assert_eq!(domain_addr_rule.value, DomainAddress::IGNv6);
+        }
+
+        #[test]
+        fn test_config_address_whitelist_mode() {
+            let cfg = SmartDnsConfig::builder()
+                .with("address /google.com/-")
+                .with("address /*/#")
+                .build();
+
+            assert_eq!(
+                cfg.find_domain_rule(&Name::from_str("cloudflare.com").unwrap())
+                    .and_then(|r| r.get(|n| n.address)),
+                Some(DomainAddress::SOA)
+            );
+
+            assert_eq!(
+                cfg.find_domain_rule(&Name::from_str("google.com").unwrap())
+                    .and_then(|r| r.get(|n| n.address)),
+                Some(DomainAddress::IGN)
+            );
         }
 
         #[test]
