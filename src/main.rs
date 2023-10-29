@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+// #![feature(test)]
 
 use cli::*;
 use std::{io, net::SocketAddr, path::PathBuf};

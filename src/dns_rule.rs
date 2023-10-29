@@ -253,6 +253,32 @@ pub enum CNameRule {
     Name(Name),
 }
 
+#[cfg(feature = "experimental-trie")]
+impl From<Name> for crate::collections::TrieKey<Name> {
+    fn from(value: Name) -> Self {
+        let mut keys = vec![];
+        let labels = value.into_iter().collect::<Vec<_>>();
+        for i in 0..labels.len() {
+            keys.push(Name::from_labels(labels[i..].to_vec()).unwrap())
+        }
+        keys.push(Name::root());
+        Self(keys)
+    }
+}
+
+#[cfg(feature = "experimental-trie")]
+impl From<&Name> for crate::collections::TrieKey<Name> {
+    fn from(value: &Name) -> Self {
+        let mut keys = vec![];
+        let labels = value.into_iter().collect::<Vec<_>>();
+        for i in 0..labels.len() {
+            keys.push(Name::from_labels(labels[i..].to_vec()).unwrap())
+        }
+        keys.push(Name::root());
+        Self(keys)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 

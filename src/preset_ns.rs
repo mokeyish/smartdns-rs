@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
