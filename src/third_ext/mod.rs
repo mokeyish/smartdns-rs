@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 mod default;
 mod future;
 mod num;

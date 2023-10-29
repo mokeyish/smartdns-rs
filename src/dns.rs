@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 use std::fmt::Debug;
 
 use std::{str::FromStr, sync::Arc, time::Duration};
