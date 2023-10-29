@@ -53,7 +53,7 @@ experimental-phf = [
 # quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
 # hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
 # hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
-hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
+# hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
