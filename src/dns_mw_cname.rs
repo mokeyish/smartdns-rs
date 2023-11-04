@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use crate::libdns::proto::rr::rdata::CNAME;
 
+use crate::config::CName;
 use crate::dns::*;
-use crate::dns_rule::CNameRule;
 use crate::middleware::*;
 
 pub struct DnsCNameMiddleware;
@@ -19,8 +19,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddl
         let cname = match &ctx.domain_rule {
             Some(rule) => rule.get(|r| match &r.cname {
                 Some(cname) => match cname {
-                    CNameRule::Ignore => None,
-                    CNameRule::Name(n) => Some(n.clone()),
+                    CName::IGN => None,
+                    CName::Value(n) => Some(n.clone()),
                 },
                 None => None,
             }),

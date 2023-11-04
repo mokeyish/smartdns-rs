@@ -9,8 +9,8 @@ use rustls::{Certificate, PrivateKey};
 use tokio::{runtime::Runtime, sync::RwLock};
 
 use crate::{
-    config::{IListener, Listener},
-    dns_conf::{SmartDnsConfig, SslConfig},
+    config::{IListener, Listener, SslConfig},
+    dns_conf::SmartDnsConfig,
     dns_mw::DnsMiddlewareHandler,
     dns_server::DnsServerHandler,
     error::Error,
@@ -394,7 +394,7 @@ fn create_middleware_handler(cfg: Arc<SmartDnsConfig>, runtime: &Runtime) -> Dns
     // nftset
     #[cfg(target_os = "linux")]
     {
-        use crate::config::IpConfig;
+        use crate::config::ConfigForIP;
         use crate::ffi::nft::Nft;
         let nftsets = cfg.valid_nftsets();
         if !nftsets.is_empty() {
@@ -403,8 +403,8 @@ fn create_middleware_handler(cfg: Arc<SmartDnsConfig>, runtime: &Runtime) -> Dns
                 let mut success = true;
                 for i in nftsets {
                     if let Err(err) = match i {
-                        IpConfig::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
-                        IpConfig::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
+                        ConfigForIP::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
+                        ConfigForIP::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
                         _ => Ok(()),
                     } {
                         log::warn!("nft add set failed, {:?}, skipped", err);

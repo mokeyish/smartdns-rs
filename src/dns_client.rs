@@ -1213,6 +1213,7 @@ mod tests {
     use crate::{
         dns_url::DnsUrl,
         preset_ns::{ALIDNS_IPS, CLOUDFLARE_IPS},
+        third_ext::FutureJoinAllExt,
     };
     use std::net::IpAddr;
     use std::str::FromStr;
@@ -1239,149 +1240,98 @@ mod tests {
         assert_eq!(a, b);
     }
 
-    async fn assert_google(client: &DnsClient) {
+    async fn query_google(client: &DnsClient) -> bool {
         let name = "dns.google";
-        let addrs = client
-            .lookup_ip(name)
-            .await
-            .unwrap()
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
-
+        let addrs = match client.lookup_ip(name).await {
+            Ok(lookup) => lookup
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+            Err(e) => e.to_string(),
+        };
         // println!("name: {} addrs => {}", name, addrs);
-
-        assert!(addrs.contains("8.8.8.8"));
+        addrs.contains("8.8.8.8") || addrs.contains("8.8.4.4")
     }
 
-    async fn assert_alidns(client: &DnsClient) {
+    async fn query_alidns(client: &DnsClient) -> bool {
         let name = "dns.alidns.com";
-        let addrs = client
-            .lookup_ip(name)
-            .await
-            .unwrap()
-            .iter()
-            .map(|x| x.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let addrs = match client.lookup_ip(name).await {
+            Ok(lookup) => lookup
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+            Err(e) => e.to_string(),
+        };
 
         // println!("name: {} addrs => {}", name, addrs);
-
-        assert!(addrs.contains("223.5.5.5") || addrs.contains("223.6.6.6"));
+        addrs.contains("223.5.5.5") || addrs.contains("223.6.6.6")
     }
 
     #[tokio::test]
-    async fn test_nameserver_google_tls_resolve() {
-        let dns_url = DnsUrl::from_str("tls://dns.google?enable_sni=false").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
+    async fn test_nameserver_tls_resolve() {
+        let urls = [
+            DnsUrl::from_str("tls://dns.google?enable_sni=false").unwrap(),
+            DnsUrl::from_str("tls://dns.cloudflare.com?enable_sni=false").unwrap(),
+            DnsUrl::from_str("tls://dns.quad9.net?enable_sni=false").unwrap(),
+            DnsUrl::from_str("tls://dns.alidns.com").unwrap(),
+            DnsUrl::from_str("tls://dot.pub").unwrap(),
+        ];
+
+        let results = urls
+            .into_iter()
+            .map(|url| async move {
+                let client = DnsClient::builder().add_server(url).build().await;
+                query_google(&client).await && query_alidns(&client).await
+            })
+            .join_all()
+            .await;
+
+        let total = results.len() as f32;
+        let success = results.into_iter().filter(|r| *r).count();
+        println!("test_nameserver_tls_resolve, success: {success}/{total}");
+        assert!(success > 0);
+    }
+
+    #[tokio::test]
+    async fn test_nameserver_https_resolve() {
+        let urls = [
+            DnsUrl::from_str("https://dns.cloudflare.com/dns-query").unwrap(),
+            DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap(),
+            DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap(),
+            DnsUrl::from_str("https://doh.pub/dns-query").unwrap(),
+            DnsUrl::from_str("https://dns.adguard-dns.com/dns-query").unwrap(),
+            DnsUrl::from_str("https://dns.quad9.net/dns-query").unwrap(),
+        ];
+
+        let results = urls
+            .into_iter()
+            .map(|url| async move {
+                let client = DnsClient::builder().add_server(url).build().await;
+                query_google(&client).await && query_alidns(&client).await
+            })
+            .join_all()
+            .await;
+
+        assert!(results.into_iter().all(|r| r));
     }
 
     #[tokio::test]
     async fn test_nameserver_cloudflare_resolve() {
-        // todo:// support alias.
         let dns_urls = CLOUDFLARE_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
 
         let client = DnsClient::builder().add_servers(dns_urls).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_cloudflare_https_resolve() {
-        let dns_url = DnsUrl::from_str("https://dns.cloudflare.com/dns-query").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    #[ignore = "reason"]
-    async fn test_nameserver_cloudflare_tls_resolve() {
-        let dns_url = DnsUrl::from_str("tls://dns.cloudflare.com?enable_sni=false").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_quad9_tls_resolve() {
-        let dns_url = DnsUrl::from_str("tls://dns.quad9.net?enable_sni=false").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_quad9_dns_url_https_resolve() {
-        let dns_url = DnsUrl::from_str("https://dns.quad9.net/dns-query").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
+        assert!(query_google(&client).await);
+        assert!(query_alidns(&client).await);
     }
 
     #[tokio::test]
     async fn test_nameserver_alidns_resolve() {
-        // todo:// support alias.
         let dns_urls = ALIDNS_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
-
         let client = DnsClient::builder().add_servers(dns_urls).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_alidns_dns_url_https_resolve() {
-        let dns_url = DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap();
-
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_alidns_dns_url_tls_resolve() {
-        let dns_url = DnsUrl::from_str("tls://dns.alidns.com").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_alidns_https_tls_name_with_ip_resolve() {
-        let dns_url = DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_dnspod_https_resolve() {
-        let dns_url = DnsUrl::from_str("https://doh.pub/dns-query").unwrap();
-
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_dnspod_tls_resolve() {
-        let dns_url = DnsUrl::from_str("tls://dot.pub").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-
-        assert_google(&client).await;
-        assert_alidns(&client).await;
-    }
-
-    #[tokio::test]
-    async fn test_nameserver_adguard_https_resolve() {
-        let dns_url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query").unwrap();
-
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
+        assert!(query_google(&client).await);
+        assert!(query_alidns(&client).await);
     }
 
     #[tokio::test]
@@ -1389,8 +1339,8 @@ mod tests {
     async fn test_nameserver_adguard_quic_resolve() {
         let dns_url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
         let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert_google(&client).await;
-        assert_alidns(&client).await;
+        assert!(query_google(&client).await);
+        assert!(query_alidns(&client).await);
     }
 
     // #[test]

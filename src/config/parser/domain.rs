@@ -1,26 +1,25 @@
-use std::str::FromStr;
-
 use super::*;
+
+impl NomParser for Name {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        let name = is_not(" \n\t\\/|\"#',!+<>");
+        map_res(name, <Name as std::str::FromStr>::from_str)(input)
+    }
+}
 
 impl NomParser for Domain {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Domain> {
-        parse(input)
+        let set = alphanumeric0;
+
+        alt((
+            map(
+                preceded(tag_no_case("domain-set:"), map(set, String::from)),
+                Domain::Set,
+            ),
+            map(NomParser::parse, Domain::Name),
+        ))(input)
     }
-}
-
-fn parse(input: &str) -> IResult<&str, Domain> {
-    let set = alphanumeric0;
-
-    let name = is_not(" \n\t\\/|\"#',!+<>");
-
-    alt((
-        map(
-            preceded(tag_no_case("domain-set:"), map(set, String::from)),
-            Domain::Set,
-        ),
-        map(map_res(name, Name::from_str), Domain::Name),
-    ))(input)
 }
 
 #[cfg(test)]
@@ -29,27 +28,25 @@ mod test {
 
     #[test]
     fn test() {
-        let (_, domain) = parse("domain-set:abc").unwrap();
+        let (_, domain) = Domain::parse("domain-set:abc").unwrap();
         assert_eq!(domain, Domain::Set("abc".to_string()));
 
-        let (_, domain) = parse("www.baidu.com").unwrap();
-        assert_eq!(
-            domain,
-            Domain::Name(Name::from_str("www.baidu.com").unwrap())
-        );
+        let (_, domain) = Domain::parse("www.baidu.com").unwrap();
+        assert_eq!(domain, Domain::Name("www.baidu.com".parse().unwrap()));
 
-        let (_, domain) = parse("baidu.com").unwrap();
-        assert_eq!(domain, Domain::Name(Name::from_str("baidu.com").unwrap()));
+        let (_, domain) = Domain::parse("baidu.com").unwrap();
+        assert_eq!(domain, Domain::Name("baidu.com".parse().unwrap()));
 
-        let (_, domain) = parse("xxx.集团").unwrap();
-        assert_eq!(domain, Domain::Name(Name::from_str("xxx.集团").unwrap()));
+        let (_, domain) = Domain::parse("xxx.集团").unwrap();
+        assert_eq!(domain, Domain::Name("xxx.集团".parse().unwrap()));
 
-        let (_, domain) = parse("xxx.集团 w").unwrap();
-        assert_eq!(domain, Domain::Name(Name::from_str("xxx.集团").unwrap()));
+        let (_, domain) = Domain::parse("xxx.集团 w").unwrap();
+        assert_eq!(domain, Domain::Name("xxx.集团".parse().unwrap()));
     }
 
     #[test]
     fn test2() {
+        use std::str::FromStr;
         let n = Name::from_str(".").unwrap();
         assert_eq!(n, Name::root());
 

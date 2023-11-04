@@ -7,7 +7,8 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use crate::dns_error::LookupError;
 use crate::dns_rule::DomainRuleTreeNode;
 
-use crate::dns_conf::{ServerOpts, SmartDnsConfig};
+use crate::config::ServerOpts;
+use crate::dns_conf::SmartDnsConfig;
 
 pub use crate::libdns::proto::{
     op,

@@ -4,7 +4,7 @@ use futures::Future;
 use std::{io, sync::Arc};
 
 use crate::{
-    dns_conf::ServerOpts,
+    config::ServerOpts,
     dns_error::LookupError,
     log::{debug, error, info, warn},
 };

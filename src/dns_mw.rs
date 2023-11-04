@@ -8,8 +8,9 @@ use crate::libdns::proto::{
 use crate::libdns::resolver::error::ResolveErrorKind;
 
 use crate::{
+    config::ServerOpts,
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
-    dns_conf::{ServerOpts, SmartDnsConfig},
+    dns_conf::SmartDnsConfig,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
