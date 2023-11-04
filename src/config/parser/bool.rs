@@ -2,13 +2,7 @@ use super::*;
 
 impl NomParser for bool {
     fn parse(input: &str) -> IResult<&str, Self> {
-        parse(input)
-    }
-}
-
-fn parse(input: &str) -> IResult<&str, bool> {
-    alt((
-        value(
+        let t = value(
             true,
             alt((
                 tag_no_case("True"),
@@ -17,8 +11,9 @@ fn parse(input: &str) -> IResult<&str, bool> {
                 tag_no_case("Y"),
                 tag("1"),
             )),
-        ),
-        value(
+        );
+
+        let f = value(
             false,
             alt((
                 tag_no_case("False"),
@@ -27,8 +22,9 @@ fn parse(input: &str) -> IResult<&str, bool> {
                 tag_no_case("N"),
                 tag("0"),
             )),
-        ),
-    ))(input)
+        );
+        alt((t, f))(input)
+    }
 }
 
 #[cfg(test)]
@@ -37,8 +33,8 @@ mod tests {
 
     #[test]
     fn test_parse() {
-        assert_eq!(parse("true"), Ok(("", true)));
-        assert_eq!(parse("0"), Ok(("", false)));
-        assert_eq!(parse("n"), Ok(("", false)));
+        assert_eq!(bool::parse("true"), Ok(("", true)));
+        assert_eq!(bool::parse("0"), Ok(("", false)));
+        assert_eq!(bool::parse("n"), Ok(("", false)));
     }
 }

@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 
 use crate::libdns::{proto::xfer::SerialMessage, server::server::Protocol};
 
-use crate::{dns_conf::ServerOpts, dns_server::DnsServerHandler};
+use crate::{config::ServerOpts, dns_server::DnsServerHandler};
 
 pub struct AppState {
     server_opts: ServerOpts,

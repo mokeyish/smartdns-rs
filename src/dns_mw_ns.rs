@@ -7,12 +7,12 @@ use crate::dns_client::{LookupOptions, NameServer};
 use crate::dns_conf::SpeedCheckModeList;
 use crate::infra::ipset::IpSet;
 use crate::{
+    config::ResponseMode,
     dns::*,
     dns_client::GenericResolver,
     dns_client::{DnsClient, NameServerGroup},
     dns_conf::SpeedCheckMode,
     dns_error::LookupError,
-    dns_rule::ResponseMode,
     log::{debug, error},
     middleware::*,
 };

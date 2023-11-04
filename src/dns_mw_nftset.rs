@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::config::IpConfig;
+use crate::config::ConfigForIP;
 use crate::dns::*;
 use crate::ffi::nft::Nft;
 use crate::middleware::*;
@@ -51,7 +51,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsNftsetMidd
                             };
                             if !ipv4s.is_empty() {
                                 for nftset in &nftsets {
-                                    if let IpConfig::V4(cfg) = nftset {
+                                    if let ConfigForIP::V4(cfg) = nftset {
                                         let _ = nft.add_ip_element(
                                             cfg.family,
                                             &cfg.table,
@@ -64,7 +64,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsNftsetMidd
 
                             if !ipv6s.is_empty() {
                                 for nftset in &nftsets {
-                                    if let IpConfig::V6(cfg) = nftset {
+                                    if let ConfigForIP::V6(cfg) = nftset {
                                         let _ = nft.add_ip_element(
                                             cfg.family,
                                             &cfg.table,
