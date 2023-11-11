@@ -69,9 +69,14 @@ once_cell = "1.16.0"
 nom = "7.1.3"
 enum_dispatch = "0.3.12"
 
+
 # api
 axum = { version = "0.6.16" }
 axum-server = { version = "0.5.1", features = ["tls-rustls"] }
+
+# serde
+serde = "1.0"
+serde_yaml = "0.9"
 
 # async/await
 futures = { version = "0.3.5", default-features = false, features = ["std"] }

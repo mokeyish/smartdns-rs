@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::Read;
 use std::num::NonZeroUsize;
 
+use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::Path;
@@ -25,6 +26,7 @@ use crate::{
 };
 use futures_util::Future;
 use futures_util::TryFutureExt;
+use hickory_proto::rr::DNSClass;
 use lru::LruCache;
 use tokio::sync::Notify;
 use tokio::time::sleep;
@@ -77,6 +79,10 @@ impl DnsCacheMiddleware {
             client: RwLock::new(Default::default()),
             prefetch_notify: RwLock::new(Default::default()),
         }
+    }
+
+    pub fn cache(&self) -> &Arc<DnsCache> {
+        &self.cache
     }
 
     async fn start_prefetching(&self) {
@@ -405,7 +411,7 @@ impl Deref for DomainPrefetchingNotify {
 const MAX_TTL: u32 = 86400_u32;
 
 /// An LRU eviction cache specifically for storing DNS records
-struct DnsCache {
+pub struct DnsCache {
     cache: Arc<Mutex<LruCache<Query, DnsCacheEntry>>>,
     ttl: TtlOpts,
 }
@@ -425,8 +431,27 @@ impl DnsCache {
 
     // fn insert
 
-    async fn clear(&self) {
+    pub async fn clear(&self) {
         self.cache.lock().await.clear();
+    }
+
+    pub async fn cached_records(&self) -> Vec<CachedQueryRecord> {
+        self.cache
+            .lock()
+            .await
+            .iter()
+            .flat_map(|(query, v)| match &v.lookup {
+                Ok(lookup) => Some(CachedQueryRecord {
+                    name: query.name().clone(),
+                    query_type: query.query_type(),
+                    query_class: query.query_class(),
+                    records: lookup
+                        .records().to_vec()
+                        .into_boxed_slice(),
+                }),
+                Err(_) => None,
+            })
+            .collect()
     }
 
     async fn insert(
@@ -593,6 +618,14 @@ impl DnsCache {
         }
         lookup
     }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct CachedQueryRecord {
+    name: Name,
+    query_type: RecordType,
+    query_class: DNSClass,
+    records: Box<[Record]>,
 }
 
 struct TtlOpts {

@@ -1,40 +1,35 @@
 use std::{io, sync::Arc};
 
-use axum::{
-    body::Bytes,
-    extract::{FromRequest, Request, State},
-    routing::{any, get},
-    Json, Router,
-};
+use axum::{routing::get, Json, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use rustls::{Certificate, PrivateKey};
 use tokio::net::TcpListener;
 
-use crate::libdns::{proto::xfer::SerialMessage, server::server::Protocol};
+mod cache;
+mod serve_dns;
 
-use crate::{config::ServerOpts, dns_server::DnsServerHandler};
+use crate::{app::App, dns_server::DnsServerHandler};
 
-pub struct AppState {
-    server_opts: ServerOpts,
+type StatefulRouter = Router<Arc<ServeState>>;
+
+pub struct ServeState {
+    app: Arc<App>,
     dns_handler: DnsServerHandler,
 }
 
 pub async fn register_https(
-    tcp_listener: TcpListener,
+    app: Arc<App>,
     dns_handler: DnsServerHandler,
-    server_opts: ServerOpts,
+    tcp_listener: TcpListener,
     certificate: Vec<Certificate>,
     certificate_key: PrivateKey,
     handle: axum_server::Handle,
 ) -> io::Result<()> {
-    let state = Arc::new(AppState {
-        server_opts,
-        dns_handler,
-    });
+    let state = Arc::new(ServeState { app, dns_handler });
 
     let app = Router::new()
-        .route("/dns-query", any(serve_dns))
-        .nest("/api", Router::new().route("/version", get(version)))
+        .merge(serve_dns::routes())
+        .nest("/api", api_routes())
         .with_state(state.clone());
 
     let certificate = certificate.into_iter().map(|c| c.0).collect::<Vec<_>>();
@@ -51,32 +46,12 @@ pub async fn register_https(
     Ok(())
 }
 
-async fn version() -> Json<&'static str> {
-    Json(crate::version())
+fn api_routes() -> StatefulRouter {
+    Router::new()
+        .route("/version", get(version))
+        .merge(cache::routes())
 }
 
-async fn serve_dns(State(state): State<Arc<AppState>>, req: Request) -> Bytes {
-    let s = req
-        .headers()
-        .iter()
-        .map(|(n, v)| format!("{}: {:?}", n, v))
-        .collect::<Vec<_>>();
-
-    println!("{}", s.join("\n"));
-
-    if let Ok(bytes) = Bytes::from_request(req, &state).await {
-        state
-            .dns_handler
-            .handle(
-                SerialMessage::new(bytes.into(), "0.0.0.0:0".parse().unwrap()),
-                Protocol::Https,
-            )
-            .await
-            .into_parts()
-            .0
-    } else {
-        println!("读取数据处理");
-        Default::default()
-    }
-    .into()
+async fn version() -> Json<&'static str> {
+    Json(crate::version())
 }

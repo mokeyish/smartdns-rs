@@ -6,12 +6,16 @@ use std::{
 };
 
 use rustls::{Certificate, PrivateKey};
-use tokio::{runtime::Runtime, sync::RwLock};
+use tokio::{
+    runtime::{Handle, Runtime},
+    sync::RwLock,
+};
 
 use crate::{
     config::{IListener, Listener, SslConfig},
     dns_conf::SmartDnsConfig,
-    dns_mw::DnsMiddlewareHandler,
+    dns_mw::{DnsMiddlewareBuilder, DnsMiddlewareHandler},
+    dns_mw_cache::DnsCache,
     dns_server::DnsServerHandler,
     error::Error,
     libdns::{proto::error::ProtoError, server::ServerFuture},
@@ -23,12 +27,13 @@ pub struct App {
     cfg: RwLock<Arc<SmartDnsConfig>>,
     handler: RwLock<Arc<DnsMiddlewareHandler>>,
     listener_map: Arc<RwLock<HashMap<crate::config::Listener, ServerTasks>>>,
-    runtime: Runtime,
+    cache: RwLock<Option<Arc<DnsCache>>>,
+    runtime: Handle,
     guard: AppGuard,
 }
 
 impl App {
-    pub fn new(conf: Option<PathBuf>) -> Self {
+    fn new(conf: Option<PathBuf>) -> (Runtime, Self) {
         let cfg = SmartDnsConfig::load(conf);
 
         let guard = {
@@ -81,87 +86,208 @@ impl App {
                 .expect("failed to initialize Tokio Runtime")
         };
 
-        let handler = create_middleware_handler(cfg.clone(), &runtime);
+        let handler = DnsMiddlewareBuilder::new().build(cfg.clone());
 
-        Self {
-            cfg: RwLock::new(cfg),
-            handler: RwLock::new(Arc::new(handler)),
+        let runtime_handle = runtime.handle().clone();
+
+        (
             runtime,
-            listener_map: Default::default(),
-            guard,
-        }
+            Self {
+                cfg: RwLock::new(cfg),
+                handler: RwLock::new(Arc::new(handler)),
+                runtime: runtime_handle,
+                listener_map: Default::default(),
+                cache: RwLock::const_new(None),
+                guard,
+            },
+        )
     }
 
-    pub fn bootstrap(self) {
-        self.runtime.block_on(self.register_listeners());
-
-        crate::banner();
-
-        log::info!("awaiting connections...");
-
-        log::info!("server starting up");
-
-        let listeners = self.listener_map.clone();
-
-        let shutdown_timeout = Duration::from_secs(5);
-
-        self.runtime.block_on(async move {
-            use crate::signal;
-            let _ = signal::terminate().await;
-            // close all servers.
-            let mut listeners = listeners.write().await;
-            let shutdown_tasks = listeners.iter_mut().map(|(_, server)| async move {
-                match server.shutdown(shutdown_timeout).await {
-                    Ok(_) => (),
-                    Err(err) => log::warn!("{:?}", err),
-                }
-            });
-            shutdown_tasks.join_all().await;
-        });
-
-        self.runtime.shutdown_timeout(shutdown_timeout);
+    pub async fn get_dns_handler(&self) -> Arc<DnsMiddlewareHandler> {
+        self.handler.read().await.clone()
     }
 
-    async fn register_listeners(&self) {
+    pub async fn cache(&self) -> Option<Arc<DnsCache>> {
+        self.cache.read().await.clone()
+    }
+
+    async fn update_middleware_handler(&self) {
+        use crate::dns_mw_addr::AddressMiddleware;
+        use crate::dns_mw_audit::DnsAuditMiddleware;
+        use crate::dns_mw_bogus::DnsBogusMiddleware;
+        use crate::dns_mw_cache::DnsCacheMiddleware;
+        use crate::dns_mw_cname::DnsCNameMiddleware;
+        use crate::dns_mw_dnsmasq::DnsmasqMiddleware;
+        use crate::dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
+        #[cfg(target_os = "linux")]
+        use crate::dns_mw_nftset::DnsNftsetMiddleware;
+        use crate::dns_mw_ns::NameServerMiddleware;
+        use crate::dns_mw_zone::DnsZoneMiddleware;
+
         let cfg = self.cfg.read().await.clone();
 
-        let listener_map = self.listener_map.clone();
+        let middleware_handler = {
+            let mut middleware_builder = DnsMiddlewareBuilder::new();
 
-        let listeners = {
-            let listener_map = listener_map.read().await;
-            cfg.listeners()
-                .iter()
-                .filter(|l| !listener_map.contains_key(l))
-                .collect::<Vec<_>>()
-        };
+            // check if audit enabled.
+            if cfg.audit_enable() && cfg.audit_file().is_some() {
+                middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(
+                    cfg.audit_file().unwrap(),
+                    cfg.audit_size(),
+                    cfg.audit_num(),
+                    cfg.audit_file_mode().into(),
+                ));
+            }
 
-        for listener in listeners {
-            match create_listener(self, listener).await {
-                Ok(server) => {
-                    if let Some(mut prev_server) =
-                        listener_map.write().await.insert(listener.clone(), server)
-                    {
-                        tokio::spawn(async move {
-                            let _ = prev_server.shutdown(Duration::from_secs(5)).await;
-                        });
+            if !cfg.cnames().is_empty() {
+                middleware_builder = middleware_builder.with(DnsCNameMiddleware);
+            }
+
+            middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
+
+            middleware_builder = middleware_builder.with(AddressMiddleware);
+
+            if cfg
+                .dnsmasq_lease_file()
+                .map(|x| x.is_file())
+                .unwrap_or_default()
+            {
+                middleware_builder = middleware_builder.with(DnsmasqMiddleware::new(
+                    cfg.dnsmasq_lease_file().unwrap(),
+                    cfg.domain().cloned(),
+                ));
+            }
+
+            // check if cache enabled.
+            if cfg.cache_size() > 0 {
+                let cache_middleware = DnsCacheMiddleware::new(&cfg);
+                *self.cache.write().await = Some(cache_middleware.cache().clone());
+                middleware_builder = middleware_builder.with(cache_middleware);
+            }
+
+            // nftset
+            #[cfg(target_os = "linux")]
+            {
+                use crate::config::ConfigForIP;
+                use crate::ffi::nft::Nft;
+                let nftsets = cfg.valid_nftsets();
+                if !nftsets.is_empty() {
+                    let nft = Nft::new();
+                    if nft.avaliable() {
+                        let mut success = true;
+                        for i in nftsets {
+                            if let Err(err) = match i {
+                                ConfigForIP::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
+                                ConfigForIP::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
+                                _ => Ok(()),
+                            } {
+                                log::warn!("nft add set failed, {:?}, skipped", err);
+                                success = false;
+                                break;
+                            }
+                        }
+                        if success {
+                            middleware_builder =
+                                middleware_builder.with(DnsNftsetMiddleware::new(nft));
+                        }
+                    } else {
+                        log::warn!("nft is not avaliable, skipped.",);
                     }
                 }
-                Err(err) => {
-                    log::error!("{}", err)
+            }
+
+            middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);
+
+            if !cfg.bogus_nxdomain().is_empty() {
+                middleware_builder = middleware_builder.with(DnsBogusMiddleware);
+            }
+
+            middleware_builder =
+                middleware_builder.with(NameServerMiddleware::new(cfg.create_dns_client().await));
+
+            middleware_builder.build(cfg.clone())
+        };
+
+        *self.handler.write().await = Arc::new(middleware_handler);
+    }
+}
+
+pub fn bootstrap(conf: Option<PathBuf>) {
+    let (runtime, app) = App::new(conf);
+    let app = Arc::new(app);
+
+    let _guarad = runtime.enter();
+
+    runtime.block_on(async {
+        app.update_middleware_handler().await;
+        register_listeners(&app).await
+    });
+
+    crate::banner();
+
+    log::info!("awaiting connections...");
+
+    log::info!("server starting up");
+
+    let listeners = app.listener_map.clone();
+
+    let shutdown_timeout = Duration::from_secs(5);
+
+    runtime.block_on(async move {
+        use crate::signal;
+        let _ = signal::terminate().await;
+        // close all servers.
+        let mut listeners = listeners.write().await;
+        let shutdown_tasks = listeners.iter_mut().map(|(_, server)| async move {
+            match server.shutdown(shutdown_timeout).await {
+                Ok(_) => (),
+                Err(err) => log::warn!("{:?}", err),
+            }
+        });
+        shutdown_tasks.join_all().await;
+    });
+
+    runtime.shutdown_timeout(shutdown_timeout);
+}
+
+async fn register_listeners(app: &Arc<App>) {
+    let cfg = app.cfg.read().await.clone();
+
+    let listener_map = app.listener_map.clone();
+
+    let listeners = {
+        let listener_map = listener_map.read().await;
+        cfg.listeners()
+            .iter()
+            .filter(|l| !listener_map.contains_key(l))
+            .collect::<Vec<_>>()
+    };
+
+    for listener in listeners {
+        match create_listener(app, listener).await {
+            Ok(server) => {
+                if let Some(mut prev_server) =
+                    listener_map.write().await.insert(listener.clone(), server)
+                {
+                    tokio::spawn(async move {
+                        let _ = prev_server.shutdown(Duration::from_secs(5)).await;
+                    });
                 }
+            }
+            Err(err) => {
+                log::error!("{}", err)
             }
         }
     }
 }
 
 async fn create_listener(
-    app: &App,
+    app: &Arc<App>,
     listener: &crate::config::Listener,
 ) -> Result<ServerTasks, crate::Error> {
     use crate::{bind_to, tcp, udp};
-    let handler = app.handler.read().await.clone();
 
-    let server_handler = DnsServerHandler::new(handler, listener.server_opts().clone());
+    let server_handler = DnsServerHandler::new(app.clone(), listener.server_opts().clone());
 
     let cfg = app.cfg.read().await.clone();
 
@@ -228,22 +354,22 @@ async fn create_listener(
                 bind_to(tcp, listener.sock_addr(), listener.device(), LISTENER_TYPE);
 
             let handle = axum_server::Handle::new();
-            let handle_clone = handle.clone();
-
-            let server_opts = listener.server_opts().clone();
-
-            tokio::spawn(async move {
-                let _ = crate::api::register_https(
-                    https_listener,
-                    server_handler,
-                    server_opts,
-                    certificate,
-                    certificate_key,
-                    handle_clone,
-                )
-                .await
-                .map_err(crate::libdns::proto::error::ProtoError::from);
-            });
+            {
+                let handle = handle.clone();
+                let app = app.clone();
+                tokio::spawn(async move {
+                    let _ = crate::api::register_https(
+                        app,
+                        server_handler,
+                        https_listener,
+                        certificate,
+                        certificate_key,
+                        handle,
+                    )
+                    .await
+                    .map_err(crate::libdns::proto::error::ProtoError::from);
+                });
+            }
             ServerTasks::Handle(handle)
         }
         #[cfg(feature = "dns-over-quic")]
@@ -337,101 +463,6 @@ async fn create_listener(
     }
 
     Ok(server)
-}
-
-fn create_middleware_handler(cfg: Arc<SmartDnsConfig>, runtime: &Runtime) -> DnsMiddlewareHandler {
-    use crate::dns_mw::DnsMiddlewareBuilder;
-    use crate::dns_mw_addr::AddressMiddleware;
-    use crate::dns_mw_audit::DnsAuditMiddleware;
-    use crate::dns_mw_bogus::DnsBogusMiddleware;
-    use crate::dns_mw_cache::DnsCacheMiddleware;
-    use crate::dns_mw_cname::DnsCNameMiddleware;
-    use crate::dns_mw_dnsmasq::DnsmasqMiddleware;
-    use crate::dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
-    #[cfg(target_os = "linux")]
-    use crate::dns_mw_nftset::DnsNftsetMiddleware;
-    use crate::dns_mw_ns::NameServerMiddleware;
-    use crate::dns_mw_zone::DnsZoneMiddleware;
-
-    let _guard = runtime.enter();
-
-    let mut middleware_builder = DnsMiddlewareBuilder::new();
-
-    // check if audit enabled.
-    if cfg.audit_enable() && cfg.audit_file().is_some() {
-        middleware_builder = middleware_builder.with(DnsAuditMiddleware::new(
-            cfg.audit_file().unwrap(),
-            cfg.audit_size(),
-            cfg.audit_num(),
-            cfg.audit_file_mode().into(),
-        ));
-    }
-
-    if !cfg.cnames().is_empty() {
-        middleware_builder = middleware_builder.with(DnsCNameMiddleware);
-    }
-
-    middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
-
-    middleware_builder = middleware_builder.with(AddressMiddleware);
-
-    if cfg
-        .dnsmasq_lease_file()
-        .map(|x| x.is_file())
-        .unwrap_or_default()
-    {
-        middleware_builder = middleware_builder.with(DnsmasqMiddleware::new(
-            cfg.dnsmasq_lease_file().unwrap(),
-            cfg.domain().cloned(),
-        ));
-    }
-
-    // check if cache enabled.
-    if cfg.cache_size() > 0 {
-        middleware_builder = middleware_builder.with(DnsCacheMiddleware::new(&cfg));
-    }
-
-    // nftset
-    #[cfg(target_os = "linux")]
-    {
-        use crate::config::ConfigForIP;
-        use crate::ffi::nft::Nft;
-        let nftsets = cfg.valid_nftsets();
-        if !nftsets.is_empty() {
-            let nft = Nft::new();
-            if nft.avaliable() {
-                let mut success = true;
-                for i in nftsets {
-                    if let Err(err) = match i {
-                        ConfigForIP::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
-                        ConfigForIP::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
-                        _ => Ok(()),
-                    } {
-                        log::warn!("nft add set failed, {:?}, skipped", err);
-                        success = false;
-                        break;
-                    }
-                }
-                if success {
-                    middleware_builder = middleware_builder.with(DnsNftsetMiddleware::new(nft));
-                }
-            } else {
-                log::warn!("nft is not avaliable, skipped.",);
-            }
-        }
-    }
-
-    middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);
-
-    if !cfg.bogus_nxdomain().is_empty() {
-        middleware_builder = middleware_builder.with(DnsBogusMiddleware);
-    }
-
-    middleware_builder = middleware_builder.with(NameServerMiddleware::new(
-        runtime.block_on(cfg.create_dns_client()),
-    ));
-
-    middleware_builder.build(cfg.clone())
 }
 
 struct AppGuard {

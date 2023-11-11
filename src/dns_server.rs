@@ -4,6 +4,7 @@ use futures::Future;
 use std::{io, sync::Arc};
 
 use crate::{
+    app::App,
     config::ServerOpts,
     dns_error::LookupError,
     log::{debug, error, info, warn},
@@ -26,19 +27,15 @@ use crate::libdns::{
 };
 
 use crate::dns::DnsRequest;
-use crate::dns_mw::DnsMiddlewareHandler;
 
 pub struct DnsServerHandler {
-    handler: Arc<DnsMiddlewareHandler>,
+    app: Arc<App>,
     server_opts: ServerOpts,
 }
 
 impl DnsServerHandler {
-    pub fn new(handler: Arc<DnsMiddlewareHandler>, server_opts: ServerOpts) -> Self {
-        Self {
-            handler,
-            server_opts,
-        }
+    pub fn new(app: Arc<App>, server_opts: ServerOpts) -> Self {
+        Self { app, server_opts }
     }
 }
 
@@ -135,8 +132,10 @@ impl RequestHandler for DnsServerHandler {
                             let future = async {
                                 let req: &DnsRequest = &request.into();
 
+                                let handler = self.app.get_dns_handler().await;
+
                                 let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
-                                    match self.handler.search(req, &self.server_opts).await {
+                                    match handler.search(req, &self.server_opts).await {
                                         Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
                                         Err(err) => Err(err),
                                     };
@@ -386,7 +385,8 @@ impl DnsServerHandler {
 
                 let answers = {
                     let req = &DnsRequest::from(&request);
-                    match self.handler.search(req, &self.server_opts).await {
+                    let handler = self.app.get_dns_handler().await;
+                    match handler.search(req, &self.server_opts).await {
                         Ok(lookup) => Box::new(ForwardLookup(lookup)),
                         Err(e) => {
                             if e.is_nx_domain() {
