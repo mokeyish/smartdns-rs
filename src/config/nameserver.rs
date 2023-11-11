@@ -83,3 +83,21 @@ pub struct NameServerInfo {
     /// The value for the SO_MARK option on socket.
     pub so_mark: Option<u32>,
 }
+
+impl From<DnsUrl> for NameServerInfo {
+    fn from(url: DnsUrl) -> Self {
+        Self {
+            url,
+            group: vec![],
+            exclude_default_group: false,
+            blacklist_ip: false,
+            whitelist_ip: false,
+            bootstrap_dns: false,
+            check_edns: false,
+            proxy: None,
+            so_mark: None,
+            resolve_group: None,
+            edns_client_subnet: None,
+        }
+    }
+}

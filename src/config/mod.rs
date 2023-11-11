@@ -3,13 +3,14 @@ use std::{
     path::PathBuf,
 };
 
-use crate::log::Level;
 use crate::{
     infra::file_mode::FileMode,
     libdns::proto::rr::{Name, RecordType},
 };
+use crate::{log::Level, proxy::ProxyConfig};
 
 mod domain_rule;
+mod domain_set_provider;
 mod listener;
 mod nameserver;
 pub mod parser;
@@ -19,6 +20,7 @@ mod speed_mode;
 
 use byte_unit::Byte;
 pub use domain_rule::*;
+pub use domain_set_provider::*;
 use ipnet::IpNet;
 pub use listener::*;
 pub use nameserver::*;
@@ -26,67 +28,10 @@ pub use response_mode::*;
 pub use server_opts::*;
 pub use speed_mode::*;
 
-/// one line config.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum OneLineConfig {
-    Address(ConfigForDomain<DomainAddress>),
-    BindCertFile(PathBuf),
-    BindCertKeyFile(PathBuf),
-    BindCertKeyPass(String),
-    CacheFile(PathBuf),
-    CaFile(PathBuf),
-    CaPath(PathBuf),
-    ConfFile(PathBuf),
-    DomainRule(ConfigForDomain<DomainRule>),
-    DnsmasqLeaseFile(PathBuf),
-    EdnsClientSubnet(IpNet),
-    ForwardRule(ForwardRule),
-    ServerName(Name),
-    Domain(Name),
-    NftSet(ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>),
-    Server(NameServerInfo),
-    ResponseMode(ResponseMode),
-    Listener(Listener),
-    ResolvHostname(bool),
-    ServeExpired(bool),
-    ServeExpiredTtl(u64),
-    ServeExpiredReplyTtl(u64),
-    CachePersist(bool),
-    CacheSize(usize),
-    PrefetchDomain(bool),
-    ForceAAAASOA(bool),
-    ForceQtypeSoa(RecordType),
-    DualstackIpAllowForceAAAA(bool),
-    DualstackIpSelection(bool),
-    DualstackIpSelectionThreshold(u16),
-    AuditEnable(bool),
-    AuditFile(PathBuf),
-    AuditFileMode(FileMode),
-    AuditNum(usize),
-    AuditSize(Byte),
-    RrTtl(u64),
-    RrTtlMin(u64),
-    RrTtlMax(u64),
-    RrTtlReplyMax(u64),
-    LocalTtl(u64),
-    MaxReplyIpNum(u8),
-    LogNum(u64),
-    LogSize(Byte),
-    LogLevel(Level),
-    LogFile(PathBuf),
-    LogFileMode(FileMode),
-    LogFilter(String),
-    ResolvFile(PathBuf),
-    CName(ConfigForDomain<CName>),
-    NumWorkers(usize),
-    SpeedMode(SpeedCheckModeList),
-    BogusNxDomain(IpNet),
-    BlacklistIp(IpNet),
-    WhitelistIp(IpNet),
-    IgnoreIp(IpNet),
-    TcpIdleTime(u64),
-    User(String),
+pub struct NamedProxyConfig {
+    pub name: String,
+    pub config: ProxyConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

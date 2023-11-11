@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
-use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,7 +13,6 @@ use ipnet::IpNet;
 pub use crate::config::*;
 use crate::dns::RecordType;
 use crate::dns_rule::{DomainRuleMap, DomainRuleTreeNode};
-use crate::dns_url::DnsUrl;
 use crate::infra::file_mode::FileMode;
 use crate::infra::ipset::IpSet;
 use crate::log::{debug, info, warn};
@@ -30,9 +28,11 @@ pub type CNameRules = Vec<ConfigForDomain<CName>>;
 
 #[derive(Default)]
 pub struct SmartDnsConfig {
-    inner: InnerConfig,
+    inner: RawConfig,
 
     domain_rule_map: DomainRuleMap,
+
+    proxy_servers: Arc<HashMap<String, ProxyConfig>>,
 
     /// List of hosts that supply bogus NX domain results
     bogus_nxdomain: Arc<IpSet>,
@@ -96,7 +96,7 @@ impl SmartDnsConfig {
     }
 
     pub fn builder() -> SmartDnsConfigBuilder {
-        SmartDnsConfigBuilder(InnerConfig {
+        SmartDnsConfigBuilder(RawConfig {
             ..Default::default()
         })
     }
@@ -467,11 +467,6 @@ impl SmartDnsConfig {
     }
 
     #[inline]
-    pub fn domain_sets(&self) -> &HashMap<String, HashSet<Name>> {
-        &self.domain_sets
-    }
-
-    #[inline]
     pub fn cnames(&self) -> &CNameRules {
         &self.cnames
     }
@@ -507,7 +502,7 @@ impl SmartDnsConfig {
 }
 
 impl std::ops::Deref for SmartDnsConfig {
-    type Target = InnerConfig;
+    type Target = RawConfig;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -515,7 +510,7 @@ impl std::ops::Deref for SmartDnsConfig {
     }
 }
 
-pub struct SmartDnsConfigBuilder(InnerConfig);
+pub struct SmartDnsConfigBuilder(RawConfig);
 
 impl SmartDnsConfigBuilder {
     pub fn build(self) -> SmartDnsConfig {
@@ -534,11 +529,22 @@ impl SmartDnsConfigBuilder {
             cfg.cnames.dedup_by(|a, b| a.domain == b.domain);
         }
 
+        let mut domain_sets: HashMap<String, HashSet<Name>> = HashMap::new();
+
+        for provider in cfg.domain_set_providers.values() {
+            if let Ok(set) = provider.get_domain_set() {
+                domain_sets
+                    .entry(provider.name().to_string())
+                    .or_default()
+                    .extend(set);
+            }
+        }
+
         let domain_rule_map = DomainRuleMap::create(
             &cfg.domain_rules,
             &cfg.address_rules,
             &cfg.forward_rules,
-            &cfg.domain_sets,
+            &domain_sets,
             &cfg.cnames,
             &cfg.nftsets,
         );
@@ -624,6 +630,10 @@ impl SmartDnsConfigBuilder {
             }
         }
 
+        let mut proxy_servers = HashMap::with_capacity(0);
+
+        std::mem::swap(&mut proxy_servers, &mut cfg.proxy_servers);
+
         SmartDnsConfig {
             inner: cfg,
             domain_rule_map,
@@ -631,12 +641,13 @@ impl SmartDnsConfigBuilder {
             blacklist_ip,
             whitelist_ip,
             ignore_ip,
+            proxy_servers: Arc::new(proxy_servers),
         }
     }
 }
 
 impl std::ops::Deref for SmartDnsConfigBuilder {
-    type Target = InnerConfig;
+    type Target = RawConfig;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -652,7 +663,7 @@ impl std::ops::DerefMut for SmartDnsConfigBuilder {
 }
 
 #[derive(Default)]
-pub struct InnerConfig {
+pub struct RawConfig {
     /// dns server name, default is host name
     ///
     /// ```
@@ -907,56 +918,12 @@ pub struct InnerConfig {
     cnames: CNameRules,
 
     /// The proxy server for upstream querying.
-    proxy_servers: Arc<HashMap<String, ProxyConfig>>,
+    proxy_servers: HashMap<String, ProxyConfig>,
 
     nftsets: Vec<ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>>,
 
     resolv_file: Option<PathBuf>,
-    domain_sets: HashMap<String, HashSet<Name>>,
-}
-
-#[derive(Clone)]
-pub struct ConfigItem<N: Clone, V: Clone> {
-    pub name: N,
-    pub value: V,
-}
-
-impl<N: Clone, V: Clone> ConfigItem<N, V> {
-    fn new(name: N, value: V) -> Self {
-        Self { name, value }
-    }
-}
-
-impl<N: Clone, V: Clone> Deref for ConfigItem<N, V> {
-    type Target = V;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<N: Clone, V: Clone> DerefMut for ConfigItem<N, V> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
-}
-
-impl From<DnsUrl> for NameServerInfo {
-    fn from(url: DnsUrl) -> Self {
-        Self {
-            url,
-            group: vec![],
-            exclude_default_group: false,
-            blacklist_ip: false,
-            whitelist_ip: false,
-            bootstrap_dns: false,
-            check_edns: false,
-            proxy: None,
-            so_mark: None,
-            resolve_group: None,
-            edns_client_subnet: None,
-        }
-    }
+    domain_set_providers: HashMap<String, DomainSetProvider>,
 }
 
 mod parse {
@@ -1008,196 +975,88 @@ mod parse {
             match sp_idx {
                 Some(sp_idx) if sp_idx > 0 => {
                     let conf_name = &conf_line[0..sp_idx];
-                    let options = conf_line[sp_idx..].trim_start();
-
-                    match conf_name {
-                        "nameserver" => self.config_nameserver(options),
-                        "proxy-server" => self.config_proxy_server(options),
-                        "domain-set" => self
-                            .config_domain_set(options)
-                            .expect("load domain-set failed"),
-                        _ => {
-                            use crate::config::parser::NomParser;
-                            use OneLineConfig::*;
-                            match OneLineConfig::parse(conf_line) {
-                                Ok((_, config_item)) => match config_item {
-                                    AuditEnable(v) => self.audit_enable = Some(v),
-                                    AuditFile(v) => self.audit_file = Some(v),
-                                    AuditFileMode(v) => self.audit_file_mode = Some(v),
-                                    AuditNum(v) => self.audit_num = Some(v),
-                                    AuditSize(v) => self.audit_size = Some(v),
-                                    BindCertFile(v) => self.bind_cert_file = Some(v),
-                                    BindCertKeyFile(v) => self.bind_cert_key_file = Some(v),
-                                    BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
-                                    CacheFile(v) => self.cache_file = Some(v),
-                                    CachePersist(v) => self.cache_persist = Some(v),
-                                    CName(v) => self.cnames.push(v),
-                                    NftSet(config) => self.nftsets.push(config),
-                                    Server(server) => self.servers.push(server),
-                                    ResponseMode(mode) => self.response_mode = Some(mode),
-                                    ResolvHostname(v) => self.resolv_hostname = Some(v),
-                                    ServeExpired(v) => self.serve_expired = Some(v),
-                                    PrefetchDomain(v) => self.prefetch_domain = Some(v),
-                                    ForceAAAASOA(v) => self.force_aaaa_soa = Some(v),
-                                    DualstackIpAllowForceAAAA(v) => {
-                                        self.dualstack_ip_allow_force_aaaa = Some(v)
-                                    }
-                                    DualstackIpSelection(v) => {
-                                        self.dualstack_ip_selection = Some(v)
-                                    }
-                                    ServerName(v) => self.server_name = Some(v),
-                                    NumWorkers(v) => self.num_workers = Some(v),
-                                    Domain(v) => self.domain = Some(v),
-                                    SpeedMode(v) => self.speed_check_mode.extend(v.0),
-                                    ServeExpiredTtl(v) => self.serve_expired_ttl = Some(v),
-                                    ServeExpiredReplyTtl(v) => {
-                                        self.serve_expired_reply_ttl = Some(v)
-                                    }
-                                    CacheSize(v) => self.cache_size = Some(v),
-                                    ForceQtypeSoa(v) => {
-                                        self.force_qtype_soa.insert(v);
-                                    }
-                                    DualstackIpSelectionThreshold(v) => {
-                                        self.dualstack_ip_selection_threshold = Some(v)
-                                    }
-                                    RrTtl(v) => self.rr_ttl = Some(v),
-                                    RrTtlMin(v) => self.rr_ttl_min = Some(v),
-                                    RrTtlMax(v) => self.rr_ttl_max = Some(v),
-                                    RrTtlReplyMax(v) => self.rr_ttl_reply_max = Some(v),
-                                    Listener(listener) => self.listeners.push(listener),
-                                    LocalTtl(v) => self.local_ttl = Some(v),
-                                    LogNum(v) => self.log_num = Some(v),
-                                    LogLevel(v) => self.log_level = Some(v),
-                                    LogFile(v) => self.log_file = Some(v),
-                                    LogFileMode(v) => self.log_file_mode = Some(v),
-                                    LogFilter(v) => self.log_filter = Some(v),
-                                    LogSize(v) => self.log_size = Some(v),
-                                    MaxReplyIpNum(v) => self.max_reply_ip_num = Some(v),
-                                    BlacklistIp(v) => self.blacklist_ip += v,
-                                    BogusNxDomain(v) => self.bogus_nxdomain += v,
-                                    WhitelistIp(v) => self.whitelist_ip += v,
-                                    IgnoreIp(v) => self.ignore_ip += v,
-                                    CaFile(v) => self.ca_file = Some(v),
-                                    CaPath(v) => self.ca_path = Some(v),
-                                    ConfFile(v) => self.load_file(v).expect("load_file failed"),
-                                    DnsmasqLeaseFile(v) => self.dnsmasq_lease_file = Some(v),
-                                    ResolvFile(v) => self.resolv_file = Some(v),
-                                    DomainRule(v) => self.domain_rules.push(v),
-                                    ForwardRule(v) => self.forward_rules.push(v),
-                                    User(v) => self.user = Some(v),
-                                    TcpIdleTime(v) => self.tcp_idle_time = Some(v),
-                                    EdnsClientSubnet(v) => self.edns_client_subnet = Some(v),
-                                    Address(v) => self.address_rules.push(v),
-                                    // #[allow(unreachable_patterns)]
-                                    // c => log::warn!("unhandled config {:?}", c),
-                                },
-                                Err(err) => {
-                                    warn!("unknown conf: {}, {:?}", conf_name, err);
-                                }
+                    use crate::config::parser::OneConfig::*;
+                    match parser::parse_config(conf_line) {
+                        Ok((_, config_item)) => match config_item {
+                            AuditEnable(v) => self.audit_enable = Some(v),
+                            AuditFile(v) => self.audit_file = Some(v),
+                            AuditFileMode(v) => self.audit_file_mode = Some(v),
+                            AuditNum(v) => self.audit_num = Some(v),
+                            AuditSize(v) => self.audit_size = Some(v),
+                            BindCertFile(v) => self.bind_cert_file = Some(v),
+                            BindCertKeyFile(v) => self.bind_cert_key_file = Some(v),
+                            BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
+                            CacheFile(v) => self.cache_file = Some(v),
+                            CachePersist(v) => self.cache_persist = Some(v),
+                            CName(v) => self.cnames.push(v),
+                            NftSet(config) => self.nftsets.push(config),
+                            Server(server) => self.servers.push(server),
+                            ResponseMode(mode) => self.response_mode = Some(mode),
+                            ResolvHostname(v) => self.resolv_hostname = Some(v),
+                            ServeExpired(v) => self.serve_expired = Some(v),
+                            PrefetchDomain(v) => self.prefetch_domain = Some(v),
+                            ForceAAAASOA(v) => self.force_aaaa_soa = Some(v),
+                            DualstackIpAllowForceAAAA(v) => {
+                                self.dualstack_ip_allow_force_aaaa = Some(v)
                             }
+                            DualstackIpSelection(v) => self.dualstack_ip_selection = Some(v),
+                            ServerName(v) => self.server_name = Some(v),
+                            NumWorkers(v) => self.num_workers = Some(v),
+                            Domain(v) => self.domain = Some(v),
+                            SpeedMode(v) => self.speed_check_mode.extend(v.0),
+                            ServeExpiredTtl(v) => self.serve_expired_ttl = Some(v),
+                            ServeExpiredReplyTtl(v) => self.serve_expired_reply_ttl = Some(v),
+                            CacheSize(v) => self.cache_size = Some(v),
+                            ForceQtypeSoa(v) => {
+                                self.force_qtype_soa.insert(v);
+                            }
+                            DualstackIpSelectionThreshold(v) => {
+                                self.dualstack_ip_selection_threshold = Some(v)
+                            }
+                            RrTtl(v) => self.rr_ttl = Some(v),
+                            RrTtlMin(v) => self.rr_ttl_min = Some(v),
+                            RrTtlMax(v) => self.rr_ttl_max = Some(v),
+                            RrTtlReplyMax(v) => self.rr_ttl_reply_max = Some(v),
+                            Listener(listener) => self.listeners.push(listener),
+                            LocalTtl(v) => self.local_ttl = Some(v),
+                            LogNum(v) => self.log_num = Some(v),
+                            LogLevel(v) => self.log_level = Some(v),
+                            LogFile(v) => self.log_file = Some(v),
+                            LogFileMode(v) => self.log_file_mode = Some(v),
+                            LogFilter(v) => self.log_filter = Some(v),
+                            LogSize(v) => self.log_size = Some(v),
+                            MaxReplyIpNum(v) => self.max_reply_ip_num = Some(v),
+                            BlacklistIp(v) => self.blacklist_ip += v,
+                            BogusNxDomain(v) => self.bogus_nxdomain += v,
+                            WhitelistIp(v) => self.whitelist_ip += v,
+                            IgnoreIp(v) => self.ignore_ip += v,
+                            CaFile(v) => self.ca_file = Some(v),
+                            CaPath(v) => self.ca_path = Some(v),
+                            ConfFile(v) => self.load_file(v).expect("load_file failed"),
+                            DnsmasqLeaseFile(v) => self.dnsmasq_lease_file = Some(v),
+                            ResolvFile(v) => self.resolv_file = Some(v),
+                            DomainRule(v) => self.domain_rules.push(v),
+                            ForwardRule(v) => self.forward_rules.push(v),
+                            User(v) => self.user = Some(v),
+                            TcpIdleTime(v) => self.tcp_idle_time = Some(v),
+                            EdnsClientSubnet(v) => self.edns_client_subnet = Some(v),
+                            Address(v) => self.address_rules.push(v),
+                            DomainSetProvider(v) => {
+                                self.domain_set_providers.insert(v.name().to_string(), v);
+                            }
+                            ProxyConfig(v) => {
+                                self.proxy_servers.insert(v.name.clone(), v.config);
+                            }
+                            // #[allow(unreachable_patterns)]
+                            // c => log::warn!("unhandled config {:?}", c),
+                        },
+                        Err(err) => {
+                            warn!("unknown conf: {}, {:?}", conf_name, err);
                         }
                     }
                 }
                 _ => (),
             }
-        }
-
-        #[inline]
-        fn config_nameserver(&mut self, options: &str) {
-            use crate::config::parser::NomParser;
-            let parts = split_options(options, '/').collect::<Vec<&str>>();
-
-            if parts.len() == 2 {
-                let server_group = parts[1].to_string();
-                let part0 = parts[0];
-
-                let domain = Domain::parse(part0).map(|(_, s)| s);
-
-                if let Ok(domain) = domain {
-                    self.forward_rules.push(ForwardRule {
-                        domain,
-                        nameserver: server_group,
-                    })
-                } else {
-                    println!("parse err");
-                }
-            }
-        }
-
-        #[inline]
-        fn config_proxy_server(&mut self, options: &str) {
-            let mut parts = split_options(options, ' ');
-
-            let mut name = None;
-            let mut proxy = None;
-
-            while let Some(part) = parts.next() {
-                match part {
-                    "-n" | "-name" | "--name" => name = parts.next().map(|s| s.to_string()),
-                    _ => proxy = part.parse().ok(),
-                }
-            }
-
-            match (name, proxy) {
-                (Some(name), Some(proxy)) => {
-                    let mut tmp = self.proxy_servers.as_ref().clone();
-                    tmp.insert(name, proxy);
-                    self.proxy_servers = tmp.into();
-                }
-                _ => warn!("the proxy url or name not specific"),
-            }
-        }
-
-        #[inline]
-        fn config_domain_set(&mut self, options: &str) -> Result<(), Box<dyn std::error::Error>> {
-            let mut parts = split_options(options, ' ');
-
-            let mut set_name = None;
-            let mut set_path = None;
-
-            while let Some(p) = parts.next() {
-                match p {
-                    "-n" | "-name" | "--name" => set_name = parts.next(),
-                    "-f" | "-file" | "--file" => set_path = parts.next(),
-                    _ => warn!(">> domain-set: unexpected options {}.", p),
-                }
-            }
-
-            if set_name.is_none() || set_path.is_none() {
-                return Ok(());
-            }
-
-            let set_name = set_name.unwrap();
-            let set_path = set_path.unwrap();
-
-            let path = find_path(set_path, self.conf_file.as_ref());
-
-            if path.exists() {
-                let domain_set = {
-                    if let Some(domain_set) = self.domain_sets.get_mut(set_name) {
-                        domain_set
-                    } else {
-                        self.domain_sets
-                            .insert(set_name.to_string(), Default::default());
-
-                        self.domain_sets.get_mut(set_name).unwrap()
-                    }
-                };
-                let file = File::open(path)?;
-                let reader = BufReader::new(file);
-                for line in reader.lines() {
-                    if let Some(line) = preline(line?.as_str()) {
-                        if let Ok(mut d) = line.parse::<Name>() {
-                            d.set_fqdn(true);
-                            domain_set.insert(d);
-                        }
-                    }
-                }
-            } else {
-                warn!(">> domain-set: file {:?} not exist.", path);
-            }
-
-            Ok(())
         }
     }
 

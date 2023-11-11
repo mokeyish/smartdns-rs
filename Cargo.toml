@@ -64,6 +64,7 @@ axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 cfg-if = "1"
 clap = { version = "4.0", features = ["derive"] }
 thiserror = "1.0"
+anyhow = "1.0"
 once_cell = "1.16.0"
 nom = "7.1.3"
 enum_dispatch = "0.3.12"
@@ -86,6 +87,10 @@ tokio = { version = "1.28", features = [
 ] }
 tokio-rustls = "0.24.0"
 socket2 = { version = "0.5", features = ["all"] }
+reqwest = { version = "0.11", default-features = false, features = [
+  "blocking",
+  "rustls-tls",
+] }
 
 # log
 tracing = "0.1"
