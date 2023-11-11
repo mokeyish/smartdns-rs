@@ -10,6 +10,7 @@ mod config_for_domain;
 mod domain;
 mod domain_policy;
 mod domain_rule;
+mod domain_set_provider;
 mod file_mode;
 mod forward_rule;
 mod ipnet;
@@ -19,6 +20,7 @@ mod nameserver;
 mod nftset;
 mod options;
 mod path;
+mod proxy_config;
 mod record_type;
 mod response_mode;
 mod speed_mode;
@@ -59,104 +61,161 @@ impl NomParser for u8 {
 
 impl NomParser for String {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map(is_a(" \r\r\n"), Into::into)(input)
+        map(is_not(" \t\r\n"), ToString::to_string)(input)
     }
 }
 
-impl NomParser for OneLineConfig {
-    fn parse(input: &str) -> IResult<&str, Self> {
-        let comment = opt(preceded(space1, preceded(char('#'), not_line_ending)));
+/// one line config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum OneConfig {
+    Address(ConfigForDomain<DomainAddress>),
+    AuditEnable(bool),
+    AuditFile(PathBuf),
+    AuditFileMode(FileMode),
+    AuditNum(usize),
+    AuditSize(Byte),
+    BindCertFile(PathBuf),
+    BindCertKeyFile(PathBuf),
+    BindCertKeyPass(String),
+    BlacklistIp(IpNet),
+    BogusNxDomain(IpNet),
+    CacheFile(PathBuf),
+    CachePersist(bool),
+    CacheSize(usize),
+    CaFile(PathBuf),
+    CaPath(PathBuf),
+    CName(ConfigForDomain<CName>),
+    ConfFile(PathBuf),
+    DnsmasqLeaseFile(PathBuf),
+    Domain(Name),
+    DomainRule(ConfigForDomain<DomainRule>),
+    DomainSetProvider(DomainSetProvider),
+    DualstackIpAllowForceAAAA(bool),
+    DualstackIpSelection(bool),
+    DualstackIpSelectionThreshold(u16),
+    EdnsClientSubnet(IpNet),
+    ForceAAAASOA(bool),
+    ForceQtypeSoa(RecordType),
+    ForwardRule(ForwardRule),
+    IgnoreIp(IpNet),
+    Listener(Listener),
+    LocalTtl(u64),
+    LogNum(u64),
+    LogSize(Byte),
+    LogLevel(Level),
+    LogFile(PathBuf),
+    LogFileMode(FileMode),
+    LogFilter(String),
+    MaxReplyIpNum(u8),
+    NftSet(ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>),
+    NumWorkers(usize),
+    PrefetchDomain(bool),
+    ProxyConfig(NamedProxyConfig),
+    ResolvHostname(bool),
+    ResponseMode(ResponseMode),
+    ServeExpired(bool),
+    ServeExpiredTtl(u64),
+    ServeExpiredReplyTtl(u64),
+    Server(NameServerInfo),
+    ServerName(Name),
+    ResolvFile(PathBuf),
+    RrTtl(u64),
+    RrTtlMin(u64),
+    RrTtlMax(u64),
+    RrTtlReplyMax(u64),
+    SpeedMode(SpeedCheckModeList),
+    TcpIdleTime(u64),
+    WhitelistIp(IpNet),
+    User(String),
+}
 
-        fn parse_item<'a, T: NomParser>(
-            keyword: &'static str,
-        ) -> impl FnMut(&'a str) -> IResult<&str, T> {
-            preceded(tuple((space0, tag_no_case(keyword), space1)), T::parse)
-        }
+pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
+    let comment = opt(preceded(space1, preceded(char('#'), not_line_ending)));
 
-        let group1 = alt((
-            map(parse_item("address"), OneLineConfig::Address),
-            map(parse_item("audit-enable"), OneLineConfig::AuditEnable),
-            map(parse_item("audit-file-mode"), OneLineConfig::AuditFileMode),
-            map(parse_item("audit-file"), OneLineConfig::AuditFile),
-            map(parse_item("audit-num"), OneLineConfig::AuditNum),
-            map(parse_item("audit-size"), OneLineConfig::AuditSize),
-            map(parse_item("bind-cert-file"), OneLineConfig::BindCertFile),
-            map(
-                parse_item("bind-cert-key-file"),
-                OneLineConfig::BindCertKeyFile,
-            ),
-            map(
-                parse_item("bind-cert-key-pass"),
-                OneLineConfig::BindCertKeyPass,
-            ),
-            map(parse_item("cache-file"), OneLineConfig::CacheFile),
-            map(parse_item("cache-persist"), OneLineConfig::CachePersist),
-            map(parse_item("ca-file"), OneLineConfig::CaFile),
-            map(parse_item("ca-path"), OneLineConfig::CaPath),
-            map(parse_item("conf-file"), OneLineConfig::ConfFile),
-            map(parse_item("cache-size"), OneLineConfig::CacheSize),
-            map(parse_item("domain-rules"), OneLineConfig::DomainRule),
-            map(parse_item("domain-rule"), OneLineConfig::DomainRule),
-            map(
-                parse_item("dnsmasq-lease-file"),
-                OneLineConfig::DnsmasqLeaseFile,
-            ),
-            map(
-                parse_item("dualstack-ip-allow-force-AAAA"),
-                OneLineConfig::DualstackIpAllowForceAAAA,
-            ),
-            map(
-                parse_item("dualstack-ip-selection"),
-                OneLineConfig::DualstackIpSelection,
-            ),
-            map(
-                parse_item("edns-client-subnet"),
-                OneLineConfig::EdnsClientSubnet,
-            ),
-        ));
-
-        let group2 = alt((
-            map(parse_item("force-AAAA-SOA"), OneLineConfig::ForceAAAASOA),
-            map(parse_item("force-qtype-soa"), OneLineConfig::ForceQtypeSoa),
-            map(parse_item("response"), OneLineConfig::ResponseMode),
-            map(parse_item("prefetch-domain"), OneLineConfig::PrefetchDomain),
-            map(parse_item("cname"), OneLineConfig::CName),
-            map(parse_item("num-workers"), OneLineConfig::NumWorkers),
-            map(parse_item("domain"), OneLineConfig::Domain),
-            map(parse_item("local-ttl"), OneLineConfig::LocalTtl),
-            map(parse_item("log-file-mode"), OneLineConfig::LogFileMode),
-            map(parse_item("log-file"), OneLineConfig::LogFile),
-            map(parse_item("log-filter"), OneLineConfig::LogFilter),
-            map(parse_item("log-level"), OneLineConfig::LogLevel),
-            map(parse_item("log-num"), OneLineConfig::LogNum),
-            map(parse_item("max-reply-ip-num"), OneLineConfig::MaxReplyIpNum),
-        ));
-
-        let group3 = alt((
-            map(parse_item("rr-ttl-reply-max"), OneLineConfig::RrTtlReplyMax),
-            map(parse_item("rr-ttl-min"), OneLineConfig::RrTtlMin),
-            map(parse_item("rr-ttl-max"), OneLineConfig::RrTtlMax),
-            map(parse_item("rr-ttl"), OneLineConfig::RrTtl),
-            map(parse_item("resolv-file"), OneLineConfig::ResolvFile),
-            map(parse_item("server-name"), OneLineConfig::ServerName),
-            map(parse_item("speed-check-mode"), OneLineConfig::SpeedMode),
-            map(
-                parse_item("serve-expired-reply-ttl"),
-                OneLineConfig::ServeExpiredReplyTtl,
-            ),
-            map(
-                parse_item("serve-expired-ttl"),
-                OneLineConfig::ServeExpiredTtl,
-            ),
-            map(parse_item("serve-expired"), OneLineConfig::ServeExpired),
-            map(parse_item("tcp-idle-time"), OneLineConfig::TcpIdleTime),
-            map(parse_item("nftset"), OneLineConfig::NftSet),
-            map(parse_item("user"), OneLineConfig::User),
-            map(NomParser::parse, OneLineConfig::Listener),
-            map(NomParser::parse, OneLineConfig::Server),
-        ));
-        terminated(alt((group1, group2, group3)), comment)(input)
+    fn parse_item<'a, T: NomParser>(
+        keyword: &'static str,
+    ) -> impl FnMut(&'a str) -> IResult<&str, T> {
+        preceded(tuple((space0, tag_no_case(keyword), space1)), T::parse)
     }
+
+    let group1 = alt((
+        map(parse_item("address"), OneConfig::Address),
+        map(parse_item("audit-enable"), OneConfig::AuditEnable),
+        map(parse_item("audit-file-mode"), OneConfig::AuditFileMode),
+        map(parse_item("audit-file"), OneConfig::AuditFile),
+        map(parse_item("audit-num"), OneConfig::AuditNum),
+        map(parse_item("audit-size"), OneConfig::AuditSize),
+        map(parse_item("bind-cert-file"), OneConfig::BindCertFile),
+        map(parse_item("bind-cert-key-file"), OneConfig::BindCertKeyFile),
+        map(parse_item("bind-cert-key-pass"), OneConfig::BindCertKeyPass),
+        map(parse_item("cache-file"), OneConfig::CacheFile),
+        map(parse_item("cache-persist"), OneConfig::CachePersist),
+        map(parse_item("ca-file"), OneConfig::CaFile),
+        map(parse_item("ca-path"), OneConfig::CaPath),
+        map(parse_item("conf-file"), OneConfig::ConfFile),
+        map(parse_item("cache-size"), OneConfig::CacheSize),
+        map(parse_item("domain-rules"), OneConfig::DomainRule),
+        map(parse_item("domain-rule"), OneConfig::DomainRule),
+        map(parse_item("domain-set"), OneConfig::DomainSetProvider),
+        map(
+            parse_item("dnsmasq-lease-file"),
+            OneConfig::DnsmasqLeaseFile,
+        ),
+        map(
+            parse_item("dualstack-ip-allow-force-AAAA"),
+            OneConfig::DualstackIpAllowForceAAAA,
+        ),
+    ));
+
+    let group2 = alt((
+        map(
+            parse_item("dualstack-ip-selection"),
+            OneConfig::DualstackIpSelection,
+        ),
+        map(
+            parse_item("edns-client-subnet"),
+            OneConfig::EdnsClientSubnet,
+        ),
+        map(parse_item("force-AAAA-SOA"), OneConfig::ForceAAAASOA),
+        map(parse_item("force-qtype-soa"), OneConfig::ForceQtypeSoa),
+        map(parse_item("response"), OneConfig::ResponseMode),
+        map(parse_item("prefetch-domain"), OneConfig::PrefetchDomain),
+        map(parse_item("cname"), OneConfig::CName),
+        map(parse_item("num-workers"), OneConfig::NumWorkers),
+        map(parse_item("domain"), OneConfig::Domain),
+        map(parse_item("local-ttl"), OneConfig::LocalTtl),
+        map(parse_item("log-file-mode"), OneConfig::LogFileMode),
+        map(parse_item("log-file"), OneConfig::LogFile),
+        map(parse_item("log-filter"), OneConfig::LogFilter),
+        map(parse_item("log-level"), OneConfig::LogLevel),
+        map(parse_item("log-num"), OneConfig::LogNum),
+        map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
+        map(parse_item("nameserver"), OneConfig::ForwardRule),
+    ));
+
+    let group3 = alt((
+        map(parse_item("proxy-server"), OneConfig::ProxyConfig),
+        map(parse_item("rr-ttl-reply-max"), OneConfig::RrTtlReplyMax),
+        map(parse_item("rr-ttl-min"), OneConfig::RrTtlMin),
+        map(parse_item("rr-ttl-max"), OneConfig::RrTtlMax),
+        map(parse_item("rr-ttl"), OneConfig::RrTtl),
+        map(parse_item("resolv-file"), OneConfig::ResolvFile),
+        map(parse_item("server-name"), OneConfig::ServerName),
+        map(parse_item("speed-check-mode"), OneConfig::SpeedMode),
+        map(
+            parse_item("serve-expired-reply-ttl"),
+            OneConfig::ServeExpiredReplyTtl,
+        ),
+        map(parse_item("serve-expired-ttl"), OneConfig::ServeExpiredTtl),
+        map(parse_item("serve-expired"), OneConfig::ServeExpired),
+        map(parse_item("tcp-idle-time"), OneConfig::TcpIdleTime),
+        map(parse_item("nftset"), OneConfig::NftSet),
+        map(parse_item("user"), OneConfig::User),
+        map(NomParser::parse, OneConfig::Listener),
+        map(NomParser::parse, OneConfig::Server),
+    ));
+    terminated(alt((group1, group2, group3)), comment)(input)
 }
 
 #[cfg(test)]
@@ -166,10 +225,10 @@ mod tests {
     #[test]
     fn test_nftset() {
         assert_eq!(
-            OneLineConfig::parse("nftset /www.example.com/#4:inet#tab#dns4").unwrap(),
+            parse_config("nftset /www.example.com/#4:inet#tab#dns4").unwrap(),
             (
                 "",
-                OneLineConfig::NftSet(ConfigForDomain {
+                OneConfig::NftSet(ConfigForDomain {
                     domain: Domain::Name("www.example.com".parse().unwrap()),
                     config: vec![ConfigForIP::V4(NftsetConfig {
                         family: "inet",
@@ -181,10 +240,10 @@ mod tests {
         );
 
         assert_eq!(
-            OneLineConfig::parse("nftset /www.example.com/#4:inet#tab#dns4 # comment 123").unwrap(),
+            parse_config("nftset /www.example.com/#4:inet#tab#dns4 # comment 123").unwrap(),
             (
                 "",
-                OneLineConfig::NftSet(ConfigForDomain {
+                OneConfig::NftSet(ConfigForDomain {
                     domain: Domain::Name("www.example.com".parse().unwrap()),
                     config: vec![ConfigForIP::V4(NftsetConfig {
                         family: "inet",
