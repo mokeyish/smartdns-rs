@@ -41,7 +41,6 @@ mod rustls;
 mod service;
 mod third_ext;
 
-use app::App;
 use error::Error;
 use infra::middleware;
 
@@ -153,7 +152,7 @@ impl Cli {
 
 fn run_server(conf: Option<PathBuf>) {
     hello_starting();
-    App::new(conf).bootstrap();
+    app::bootstrap(conf);
     log::info!("{} {} shutdown", crate::NAME, crate::version());
 }
 
