@@ -445,9 +445,7 @@ impl DnsCache {
                     name: query.name().clone(),
                     query_type: query.query_type(),
                     query_class: query.query_class(),
-                    records: lookup
-                        .records().to_vec()
-                        .into_boxed_slice(),
+                    records: lookup.records().to_vec().into_boxed_slice(),
                 }),
                 Err(_) => None,
             })
