@@ -4,8 +4,10 @@ use crate::libdns::proto::rr::Name;
 
 use crate::{
     collections::DomainMap,
-    config::{ConfigForDomain, ConfigForIP, Domain, DomainRule, NftsetConfig},
-    dns_conf::{AddressRules, CNameRules, DomainRules, DomainSets, ForwardRules},
+    config::{
+        AddressRules, CNameRules, ConfigForDomain, ConfigForIP, Domain, DomainRule, DomainRules,
+        DomainSets, ForwardRules, NftsetConfig,
+    },
 };
 
 #[derive(Default)]
@@ -56,7 +58,7 @@ impl DomainRuleMap {
             };
 
             for name in names {
-                name_rule_map.entry(name).or_default().address = Some(rule.config);
+                name_rule_map.entry(name).or_default().address = Some(rule.address);
             }
         }
 
@@ -197,7 +199,7 @@ impl From<&Name> for crate::collections::TrieKey<Name> {
 #[cfg(test)]
 mod tests {
 
-    use crate::config::DomainAddress;
+    use crate::config::{AddressRule, DomainAddress};
     use std::{net::Ipv4Addr, ptr, str::FromStr};
 
     use super::*;
@@ -207,17 +209,17 @@ mod tests {
         let map = DomainRuleMap::create(
             &Default::default(),
             &vec![
-                ConfigForDomain::<DomainAddress> {
+                AddressRule {
                     domain: Name::from_str("a.b.c.www.example.com").unwrap().into(),
-                    config: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
+                    address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
-                ConfigForDomain::<DomainAddress> {
+                AddressRule {
                     domain: Name::from_str("www.example.com").unwrap().into(),
-                    config: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
+                    address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
-                ConfigForDomain::<DomainAddress> {
+                AddressRule {
                     domain: Name::from_str("example.com").unwrap().into(),
-                    config: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
+                    address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
             ],
             &Default::default(),

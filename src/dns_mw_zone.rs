@@ -9,7 +9,7 @@ use crate::libdns::server::authority::{AuthorityObject, LookupOptions};
 use ipnet::IpNet;
 
 use crate::dns::*;
-use crate::dns_conf::SmartDnsConfig;
+use crate::dns_conf::RuntimeConfig;
 use crate::infra::ipset::IpSet;
 use crate::log::debug;
 use crate::middleware::*;
@@ -21,7 +21,7 @@ pub struct DnsZoneMiddleware {
 }
 
 impl DnsZoneMiddleware {
-    pub fn new(_cfg: &SmartDnsConfig) -> Self {
+    pub fn new(_cfg: &RuntimeConfig) -> Self {
         let catalog = Catalog::new();
 
         let server_net = {

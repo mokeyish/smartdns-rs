@@ -1,32 +1,31 @@
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-
 use axum::{
     extract::State,
     http::StatusCode,
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
 
-use crate::dns_mw_cache::CachedQueryRecord;
-
-use super::{ServeState, StatefulRouter};
+use super::{IntoDataListPayload, ServeState, StatefulRouter};
 
 pub fn routes() -> StatefulRouter {
     Router::new()
-        .route("/cache", get(get_caches))
-        .route("/cache/flush", post(flush_cache))
+        .route("/caches", get(caches))
+        .route("/caches/config", get(cache_config))
+        .route("/caches/flush", post(flush_cache))
 }
 
-async fn get_caches(State(state): State<Arc<ServeState>>) -> Json<DnsCachePayload> {
-    Json(DnsCachePayload::new(
-        if let Some(c) = state.app.cache().await {
+async fn caches(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
+    Json(
+        (if let Some(c) = state.app.cache().await {
             c.cached_records().await
         } else {
             vec![]
-        },
-    ))
+        })
+        .into_data_list_payload(),
+    )
 }
 
 async fn flush_cache(State(state): State<Arc<ServeState>>) -> StatusCode {
@@ -36,17 +35,6 @@ async fn flush_cache(State(state): State<Arc<ServeState>>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-#[derive(Deserialize, Serialize)]
-struct DnsCachePayload {
-    count: usize,
-    data: Vec<CachedQueryRecord>,
-}
-
-impl DnsCachePayload {
-    fn new(data: Vec<CachedQueryRecord>) -> Self {
-        Self {
-            count: data.len(),
-            data,
-        }
-    }
+async fn cache_config(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
+    Json(state.app.cfg().await.cache_config()).into_response()
 }

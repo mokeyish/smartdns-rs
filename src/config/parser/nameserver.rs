@@ -56,7 +56,7 @@ impl NomParser for NameServerInfo {
         let (input, options) = opt(preceded(space1, options::parse))(input)?;
 
         let mut nameserver = Self {
-            url,
+            server: url,
             group: Default::default(),
             blacklist_ip: Default::default(),
             whitelist_ip: Default::default(),
@@ -101,9 +101,9 @@ impl NomParser for NameServerInfo {
                     "host-name" => match v {
                         Some(host_name) => {
                             if host_name == "-" {
-                                nameserver.url.set_sni_off(true);
+                                nameserver.server.set_sni_off(true);
                             } else {
-                                nameserver.url.set_host(host_name);
+                                nameserver.server.set_host(host_name);
                             }
                         }
                         None => {
@@ -111,7 +111,7 @@ impl NomParser for NameServerInfo {
                         }
                     },
                     "no-check-certificate" => {
-                        nameserver.url.set_ssl_verify(false);
+                        nameserver.server.set_ssl_verify(false);
                     }
                     _ => {
                         log::warn!("unknown server options: {}, {:?}", k, v);
@@ -135,7 +135,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    url: DnsUrl::from_str("udp://8.8.8.8:53").unwrap(),
+                    server: DnsUrl::from_str("udp://8.8.8.8:53").unwrap(),
                     group: Default::default(),
                     blacklist_ip: Default::default(),
                     whitelist_ip: Default::default(),
@@ -155,7 +155,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    url: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
+                    server: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
                     group: Default::default(),
                     blacklist_ip: Default::default(),
                     whitelist_ip: Default::default(),
@@ -187,7 +187,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    url: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
+                    server: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
                     group: Default::default(),
                     blacklist_ip: Default::default(),
                     whitelist_ip: Default::default(),
@@ -207,7 +207,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    url: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
+                    server: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
                     group: Default::default(),
                     blacklist_ip: Default::default(),
                     whitelist_ip: Default::default(),
@@ -232,7 +232,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    url: DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap(),
+                    server: DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap(),
                     group: vec!["bootstrap".to_string()],
                     blacklist_ip: Default::default(),
                     whitelist_ip: Default::default(),

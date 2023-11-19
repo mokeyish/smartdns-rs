@@ -13,20 +13,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::dns_conf::SmartDnsConfig;
+use crate::dns_conf::RuntimeConfig;
 use crate::dns_mw::BackgroundQueryTask;
 use crate::dns_mw::DnsMiddlewareHost;
 use crate::libdns::proto::error::ProtoResult;
 use crate::libdns::resolver::LookupTtl;
 use crate::{
     dns::*,
-    libdns::proto::op::Query,
+    libdns::proto::{op::Query, rr::DNSClass},
     log::{debug, error, info},
     middleware::*,
 };
 use futures_util::Future;
 use futures_util::TryFutureExt;
-use hickory_proto::rr::DNSClass;
 use lru::LruCache;
 use tokio::sync::Notify;
 use tokio::time::sleep;
@@ -36,14 +35,14 @@ use tokio::{
 };
 
 pub struct DnsCacheMiddleware {
-    cfg: Arc<SmartDnsConfig>,
+    cfg: Arc<RuntimeConfig>,
     cache: Arc<DnsCache>,
     client: RwLock<Option<Arc<DnsMiddlewareHost>>>,
     prefetch_notify: RwLock<Option<Arc<DomainPrefetchingNotify>>>,
 }
 
 impl DnsCacheMiddleware {
-    pub fn new(cfg: &Arc<SmartDnsConfig>) -> Self {
+    pub fn new(cfg: &Arc<RuntimeConfig>) -> Self {
         // create
         let mut ttl = TtlOpts::default();
 

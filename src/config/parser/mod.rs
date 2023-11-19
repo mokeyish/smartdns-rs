@@ -3,6 +3,7 @@ use nom::{
     IResult,
 };
 
+mod address_rule;
 mod bool;
 mod bytes;
 mod cname;
@@ -69,7 +70,7 @@ impl NomParser for String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum OneConfig {
-    Address(ConfigForDomain<DomainAddress>),
+    Address(AddressRule),
     AuditEnable(bool),
     AuditFile(PathBuf),
     AuditFileMode(FileMode),

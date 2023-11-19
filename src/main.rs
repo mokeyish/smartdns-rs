@@ -44,7 +44,7 @@ mod third_ext;
 use error::Error;
 use infra::middleware;
 
-use crate::{dns_client::DnsClient, dns_conf::SmartDnsConfig};
+use crate::{dns_client::DnsClient, dns_conf::RuntimeConfig};
 
 use crate::{
     infra::process_guard::ProcessGuardError,
@@ -247,7 +247,7 @@ fn hello_starting() {
     info!("Smart-DNS 🐋 {} starting", version());
 }
 
-impl SmartDnsConfig {
+impl RuntimeConfig {
     pub async fn create_dns_client(&self) -> DnsClient {
         let servers = self.servers();
         let ca_path = self.ca_path();

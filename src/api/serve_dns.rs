@@ -34,7 +34,6 @@ async fn serve_dns(State(state): State<Arc<ServeState>>, req: Request) -> Bytes 
             .into_parts()
             .0
     } else {
-        println!("读取数据处理");
         Default::default()
     }
     .into()
