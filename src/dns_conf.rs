@@ -5,30 +5,23 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::libdns::proto::rr::Name;
-use byte_unit::Byte;
 use cfg_if::cfg_if;
 use ipnet::IpNet;
 
 pub use crate::config::*;
-use crate::dns::RecordType;
-use crate::dns_rule::{DomainRuleMap, DomainRuleTreeNode};
-use crate::infra::file_mode::FileMode;
-use crate::infra::ipset::IpSet;
-use crate::log::{debug, info, warn};
-use crate::proxy::ProxyConfig;
+use crate::{
+    dns_rule::{DomainRuleMap, DomainRuleTreeNode},
+    infra::ipset::IpSet,
+    libdns::proto::rr::{Name, RecordType},
+    log::{debug, info, warn},
+    proxy::ProxyConfig,
+};
 
 const DEFAULT_GROUP: &str = "default";
 
-pub type DomainSets = HashMap<String, HashSet<Name>>;
-pub type ForwardRules = Vec<ForwardRule>;
-pub type AddressRules = Vec<ConfigForDomain<DomainAddress>>;
-pub type DomainRules = Vec<ConfigForDomain<DomainRule>>;
-pub type CNameRules = Vec<ConfigForDomain<CName>>;
-
 #[derive(Default)]
-pub struct SmartDnsConfig {
-    inner: RawConfig,
+pub struct RuntimeConfig {
+    inner: Config,
 
     domain_rule_map: DomainRuleMap,
 
@@ -47,12 +40,12 @@ pub struct SmartDnsConfig {
     ignore_ip: Arc<IpSet>,
 }
 
-impl SmartDnsConfig {
+impl RuntimeConfig {
     pub fn load<P: AsRef<Path>>(path: Option<P>) -> Arc<Self> {
         if let Some(ref conf) = path {
             let path = conf.as_ref();
 
-            SmartDnsConfig::load_from_file(path)
+            RuntimeConfig::load_from_file(path)
         } else {
             cfg_if! {
                 if #[cfg(target_os = "android")] {
@@ -78,7 +71,7 @@ impl SmartDnsConfig {
                 .iter()
                 .map(Path::new)
                 .filter(|p| p.exists())
-                .map(SmartDnsConfig::load_from_file)
+                .map(RuntimeConfig::load_from_file)
                 .next()
                 .expect("No configuation file found.")
         }
@@ -95,19 +88,19 @@ impl SmartDnsConfig {
         builder.build().into()
     }
 
-    pub fn builder() -> SmartDnsConfigBuilder {
-        SmartDnsConfigBuilder(RawConfig {
+    pub fn builder() -> RuntimeConfigBuilder {
+        RuntimeConfigBuilder(Config {
             ..Default::default()
         })
     }
 }
 
-impl SmartDnsConfig {
+impl RuntimeConfig {
     /// Print the config summary.
     pub fn summary(&self) {
         info!(r#"whoami 👉 {}"#, self.server_name());
 
-        for server in self.servers.iter() {
+        for server in self.nameservers.iter() {
             if !server.exclude_default_group && server.group.is_empty() {
                 continue;
             }
@@ -119,7 +112,7 @@ impl SmartDnsConfig {
 
             info!(
                 "upstream server: {} [Group: {:?}] {}",
-                server.url.to_string(),
+                server.server.to_string(),
                 server.group,
                 match proxy {
                     Some(s) => format!("over {}", s),
@@ -128,10 +121,10 @@ impl SmartDnsConfig {
             );
         }
 
-        for server in self.servers.iter().filter(|s| !s.exclude_default_group) {
+        for server in self.nameservers.iter().filter(|s| !s.exclude_default_group) {
             info!(
                 "upstream server: {} [Group: {}]",
-                server.url.to_string(),
+                server.server.to_string(),
                 DEFAULT_GROUP
             );
         }
@@ -199,21 +192,28 @@ impl SmartDnsConfig {
         self.tcp_idle_time.unwrap_or(120)
     }
 
+    #[inline]
+    pub fn cache_config(&self) -> &CacheConfig {
+        &self.cache
+    }
+
     /// dns cache size
     #[inline]
     pub fn cache_size(&self) -> usize {
-        self.cache_size.unwrap_or(512)
+        self.cache.size.unwrap_or(512)
     }
+
     ///  enable persist cache when restart
     #[inline]
     pub fn cache_persist(&self) -> bool {
-        self.cache_persist.unwrap_or(false)
+        self.cache.persist.unwrap_or(false)
     }
 
     /// cache persist file
     #[inline]
     pub fn cache_file(&self) -> PathBuf {
-        self.cache_file
+        self.cache
+            .file
             .to_owned()
             .unwrap_or_else(|| std::env::temp_dir().join("smartdns.cache"))
     }
@@ -221,7 +221,7 @@ impl SmartDnsConfig {
     /// prefetch domain
     #[inline]
     pub fn prefetch_domain(&self) -> bool {
-        self.prefetch_domain.unwrap_or_default()
+        self.cache.prefetch_domain.unwrap_or_default()
     }
 
     #[inline]
@@ -232,19 +232,19 @@ impl SmartDnsConfig {
     /// cache serve expired
     #[inline]
     pub fn serve_expired(&self) -> bool {
-        self.serve_expired.unwrap_or(true)
+        self.cache.serve_expired.unwrap_or(true)
     }
 
     /// cache serve expired TTL
     #[inline]
     pub fn serve_expired_ttl(&self) -> u64 {
-        self.serve_expired_ttl.unwrap_or(0)
+        self.cache.serve_expired_ttl.unwrap_or(0)
     }
 
     /// reply TTL value to use when replying with expired data
     #[inline]
     pub fn serve_expired_reply_ttl(&self) -> u64 {
-        self.serve_expired_reply_ttl.unwrap_or(5)
+        self.cache.serve_expired_reply_ttl.unwrap_or(5)
     }
 
     /// List of hosts that supply bogus NX domain results
@@ -347,15 +347,20 @@ impl SmartDnsConfig {
     }
 
     #[inline]
+    pub fn log_config(&self) -> &LogConfig {
+        &self.log
+    }
+
+    #[inline]
     pub fn log_enabled(&self) -> bool {
         self.log_num() > 0
     }
     pub fn log_level(&self) -> crate::log::Level {
-        self.log_level.unwrap_or(crate::log::Level::ERROR)
+        self.log.level.unwrap_or(crate::log::Level::ERROR)
     }
 
     pub fn log_file(&self) -> PathBuf {
-        match self.log_file.as_ref() {
+        match self.log.file.as_ref() {
             Some(e) => e.to_owned(),
             None => {
                 cfg_if! {
@@ -376,51 +381,58 @@ impl SmartDnsConfig {
     #[inline]
     pub fn log_size(&self) -> u64 {
         use byte_unit::n_kb_bytes;
-        self.audit_size
+        self.log
+            .size
             .map(|n| n.get_bytes())
             .unwrap_or(n_kb_bytes(128)) as u64
     }
     #[inline]
     pub fn log_num(&self) -> u64 {
-        self.log_num.unwrap_or(2)
+        self.log.num.unwrap_or(2)
     }
 
     #[inline]
     pub fn log_file_mode(&self) -> u32 {
-        self.log_file_mode.map(|m| *m).unwrap_or(0o640)
+        self.log.file_mode.map(|m| *m).unwrap_or(0o640)
     }
 
     #[inline]
     pub fn log_filter(&self) -> Option<&str> {
-        self.log_filter.as_deref()
+        self.log.filter.as_deref()
+    }
+
+    #[inline]
+    pub fn audit_config(&self) -> &AuditConfig {
+        &self.audit
     }
 
     #[inline]
     pub fn audit_enable(&self) -> bool {
-        self.audit_enable.unwrap_or_default()
+        self.audit.enable.unwrap_or_default()
     }
 
     #[inline]
     pub fn audit_file(&self) -> Option<&Path> {
-        self.audit_file.as_deref()
+        self.audit.file.as_deref()
     }
 
     #[inline]
     pub fn audit_num(&self) -> usize {
-        self.audit_num.unwrap_or(2)
+        self.audit.num.unwrap_or(2)
     }
 
     #[inline]
     pub fn audit_size(&self) -> u64 {
         use byte_unit::n_kb_bytes;
-        self.audit_size
+        self.audit
+            .size
             .map(|n| n.get_bytes())
             .unwrap_or(n_kb_bytes(128)) as u64
     }
 
     #[inline]
     pub fn audit_file_mode(&self) -> u32 {
-        self.audit_file_mode.map(|m| *m).unwrap_or(0o640)
+        self.audit.file_mode.map(|m| *m).unwrap_or(0o640)
     }
     /// certificate file
     #[inline]
@@ -437,7 +449,7 @@ impl SmartDnsConfig {
     /// remote dns server list
     #[inline]
     pub fn servers(&self) -> &[NameServerInfo] {
-        &self.servers
+        &self.nameservers
     }
 
     /// specific nameserver to domain
@@ -501,8 +513,8 @@ impl SmartDnsConfig {
     }
 }
 
-impl std::ops::Deref for SmartDnsConfig {
-    type Target = RawConfig;
+impl std::ops::Deref for RuntimeConfig {
+    type Target = Config;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -510,10 +522,10 @@ impl std::ops::Deref for SmartDnsConfig {
     }
 }
 
-pub struct SmartDnsConfigBuilder(RawConfig);
+pub struct RuntimeConfigBuilder(Config);
 
-impl SmartDnsConfigBuilder {
-    pub fn build(self) -> SmartDnsConfig {
+impl RuntimeConfigBuilder {
+    pub fn build(self) -> RuntimeConfig {
         let mut cfg = self.0;
 
         if cfg.listeners.is_empty() {
@@ -550,9 +562,9 @@ impl SmartDnsConfigBuilder {
         );
 
         // set nameserver group for bootstraping
-        for server in cfg.servers.iter_mut() {
-            if server.url.ip().is_none() {
-                let host = server.url.host().to_string();
+        for server in cfg.nameservers.iter_mut() {
+            if server.server.ip().is_none() {
+                let host = server.server.host().to_string();
                 if let Ok(Some(rule)) = host
                     .as_str()
                     .parse()
@@ -634,7 +646,7 @@ impl SmartDnsConfigBuilder {
 
         std::mem::swap(&mut proxy_servers, &mut cfg.proxy_servers);
 
-        SmartDnsConfig {
+        RuntimeConfig {
             inner: cfg,
             domain_rule_map,
             bogus_nxdomain,
@@ -646,8 +658,8 @@ impl SmartDnsConfigBuilder {
     }
 }
 
-impl std::ops::Deref for SmartDnsConfigBuilder {
-    type Target = RawConfig;
+impl std::ops::Deref for RuntimeConfigBuilder {
+    type Target = Config;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -655,275 +667,11 @@ impl std::ops::Deref for SmartDnsConfigBuilder {
     }
 }
 
-impl std::ops::DerefMut for SmartDnsConfigBuilder {
+impl std::ops::DerefMut for RuntimeConfigBuilder {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
-}
-
-#[derive(Default)]
-pub struct RawConfig {
-    /// dns server name, default is host name
-    ///
-    /// ```
-    /// server-name,
-    ///
-    /// example:
-    ///   server-name smartdns
-    /// ```
-    server_name: Option<Name>,
-
-    /// The number of worker threads
-    num_workers: Option<usize>,
-
-    /// whether resolv local hostname to ip address
-    resolv_hostname: Option<bool>,
-
-    /// dns server run user
-    ///
-    /// ```
-    /// user [username]
-    ///
-    /// exmaple:
-    ///   user nobody
-    /// ```
-    user: Option<String>,
-
-    /// Local domain suffix appended to DHCP names and hosts file entries.
-    domain: Option<Name>,
-
-    /// Include another configuration options
-    ///
-    /// conf-file [file]
-    /// ```
-    /// example:
-    ///   conf-file blacklist-ip.conf
-    /// ```
-    conf_file: Option<PathBuf>,
-
-    /// listeners
-    listeners: Vec<Listener>,
-
-    /// SSL Certificate file path
-    bind_cert_file: Option<PathBuf>,
-    /// SSL Certificate key file path
-    bind_cert_key_file: Option<PathBuf>,
-    /// SSL Certificate key file password
-    bind_cert_key_pass: Option<String>,
-
-    /// tcp connection idle timeout
-    ///
-    /// tcp-idle-time [second]
-    tcp_idle_time: Option<u64>,
-
-    /// dns cache size
-    ///
-    /// ```
-    /// cache-size [number]
-    ///   0: for no cache
-    /// ```
-    cache_size: Option<usize>,
-    /// enable persist cache when restart
-    cache_persist: Option<bool>,
-    /// cache persist file
-    cache_file: Option<PathBuf>,
-
-    /// prefetch domain
-    ///
-    /// ```
-    /// prefetch-domain [yes|no]
-    ///
-    /// example:
-    ///   prefetch-domain yes
-    /// ```
-    prefetch_domain: Option<bool>,
-
-    /// cache serve expired
-    ///
-    /// serve-expired [yes|no]
-    /// ```
-    /// example:
-    ///   serve-expired yes
-    /// ```
-    serve_expired: Option<bool>,
-    /// cache serve expired TTL
-    ///
-    /// serve-expired-ttl [num]
-    /// ```
-    /// example:
-    ///   serve-expired-ttl 0
-    /// ```
-    serve_expired_ttl: Option<u64>,
-    /// reply TTL value to use when replying with expired data
-    ///
-    /// serve-expired-reply-ttl [num]
-    /// ```
-    /// example:
-    ///   serve-expired-reply-ttl 30
-    /// ```
-    serve_expired_reply_ttl: Option<u64>,
-
-    /// List of hosts that supply bogus NX domain results
-    bogus_nxdomain: IpSet,
-
-    /// List of IPs that will be filtered when nameserver is configured -blacklist-ip parameter
-    blacklist_ip: IpSet,
-
-    /// List of IPs that will be accepted when nameserver is configured -whitelist-ip parameter
-    whitelist_ip: IpSet,
-
-    /// List of IPs that will be ignored
-    ignore_ip: IpSet,
-
-    /// speed check mode
-    ///
-    /// speed-check-mode [ping|tcp:port|http:port|https:port|none|,]
-    /// ```ini
-    /// example:
-    ///   speed-check-mode ping,tcp:8080,http:80,https
-    ///   speed-check-mode tcp:443,ping
-    ///   speed-check-mode none
-    /// ```
-    speed_check_mode: SpeedCheckModeList,
-
-    /// force AAAA query return SOA
-    ///
-    /// force-AAAA-SOA [yes|no]
-    force_aaaa_soa: Option<bool>,
-
-    /// force specific qtype return soa
-    ///
-    /// force-qtype-SOA [qtypeid |...]
-    ///
-    /// qtypeid: https://en.wikipedia.org/wiki/List_of_DNS_record_types
-    /// ```ini
-    /// example:
-    ///   force-qtype-SOA 65 28
-    /// ```
-    force_qtype_soa: HashSet<RecordType>,
-
-    /// Enable IPV4, IPV6 dual stack IP optimization selection strategy
-    ///
-    /// dualstack-ip-selection [yes|no]
-    dualstack_ip_selection: Option<bool>,
-    /// dualstack-ip-selection-threshold [num] (0~1000)
-    dualstack_ip_selection_threshold: Option<u16>,
-    /// dualstack-ip-allow-force-AAAA [yes|no]
-    dualstack_ip_allow_force_aaaa: Option<bool>,
-
-    /// edns client subnet
-    ///
-    /// ```
-    /// example:
-    ///   edns-client-subnet [ip/subnet]
-    ///   edns-client-subnet 192.168.1.1/24
-    ///   edns-client-subnet 8::8/56
-    /// ```
-    edns_client_subnet: Option<IpNet>,
-
-    /// ttl for all resource record
-    rr_ttl: Option<u64>,
-    /// minimum ttl for resource record
-    rr_ttl_min: Option<u64>,
-    /// maximum ttl for resource record
-    rr_ttl_max: Option<u64>,
-    /// maximum reply ttl for resource record
-    rr_ttl_reply_max: Option<u64>,
-
-    /// ttl for local address and host (default: rr-ttl-min)
-    local_ttl: Option<u64>,
-
-    /// Maximum number of IPs returned to the client|8|number of IPs, 1~16
-    max_reply_ip_num: Option<u8>,
-
-    /// response mode
-    ///
-    /// response-mode [first-ping|fastest-ip|fastest-response]
-    response_mode: Option<ResponseMode>,
-
-    /// set log level
-    ///
-    /// log-level [level], level=fatal, error, warn, notice, info, debug
-    log_level: Option<crate::log::Level>,
-    /// file path of log file.
-    log_file: Option<PathBuf>,
-    /// size of each log file, support k,m,g
-    log_size: Option<Byte>,
-    /// number of logs, 0 means disable log
-    log_num: Option<u64>,
-    /// log file mode
-    log_file_mode: Option<FileMode>,
-    // log filter
-    log_filter: Option<String>,
-
-    /// dns audit
-    ///
-    /// enable or disable audit.
-    audit_enable: Option<bool>,
-    /// audit file
-    ///
-    /// ```
-    /// example 1:
-    ///   audit-file /var/log/smartdns-audit.log
-    ///
-    /// example 2:
-    ///   audit-file /var/log/smartdns-audit.csv
-    /// ```
-    audit_file: Option<PathBuf>,
-    /// audit-size size of each audit file, support k,m,g
-    audit_size: Option<Byte>,
-    /// number of audit files.
-    audit_num: Option<usize>,
-    /// audit file mode
-    audit_file_mode: Option<FileMode>,
-
-    /// Support reading dnsmasq dhcp file to resolve local hostname
-    dnsmasq_lease_file: Option<PathBuf>,
-
-    /// certificate file
-    ca_file: Option<PathBuf>,
-    /// certificate path
-    ca_path: Option<PathBuf>,
-
-    /// remote dns server list
-    servers: Vec<NameServerInfo>,
-
-    /// specific nameserver to domain
-    ///
-    /// nameserver /domain/[group|-]
-    ///
-    /// ```
-    /// example:
-    ///   nameserver /www.example.com/office, Set the domain name to use the appropriate server group.
-    ///   nameserver /www.example.com/-, ignore this domain
-    /// ```
-    forward_rules: Vec<ForwardRule>,
-
-    /// specific address to domain
-    ///
-    /// address /domain/[ip|-|-4|-6|#|#4|#6]
-    ///
-    /// ```
-    /// example:
-    ///   address /www.example.com/1.2.3.4, return ip 1.2.3.4 to client
-    ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
-    ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
-    /// ```
-    address_rules: AddressRules,
-
-    /// set domain rules
-    domain_rules: DomainRules,
-
-    cnames: CNameRules,
-
-    /// The proxy server for upstream querying.
-    proxy_servers: HashMap<String, ProxyConfig>,
-
-    nftsets: Vec<ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>>,
-
-    resolv_file: Option<PathBuf>,
-    domain_set_providers: HashMap<String, DomainSetProvider>,
 }
 
 mod parse {
@@ -931,7 +679,7 @@ mod parse {
     use super::*;
     use std::ffi::OsStr;
 
-    impl SmartDnsConfigBuilder {
+    impl RuntimeConfigBuilder {
         pub fn with(mut self, config: &str) -> Self {
             self.config(config);
             self
@@ -978,23 +726,23 @@ mod parse {
                     use crate::config::parser::OneConfig::*;
                     match parser::parse_config(conf_line) {
                         Ok((_, config_item)) => match config_item {
-                            AuditEnable(v) => self.audit_enable = Some(v),
-                            AuditFile(v) => self.audit_file = Some(v),
-                            AuditFileMode(v) => self.audit_file_mode = Some(v),
-                            AuditNum(v) => self.audit_num = Some(v),
-                            AuditSize(v) => self.audit_size = Some(v),
+                            AuditEnable(v) => self.audit.enable = Some(v),
+                            AuditFile(v) => self.audit.file = Some(v),
+                            AuditFileMode(v) => self.audit.file_mode = Some(v),
+                            AuditNum(v) => self.audit.num = Some(v),
+                            AuditSize(v) => self.audit.size = Some(v),
                             BindCertFile(v) => self.bind_cert_file = Some(v),
                             BindCertKeyFile(v) => self.bind_cert_key_file = Some(v),
                             BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
-                            CacheFile(v) => self.cache_file = Some(v),
-                            CachePersist(v) => self.cache_persist = Some(v),
+                            CacheFile(v) => self.cache.file = Some(v),
+                            CachePersist(v) => self.cache.persist = Some(v),
                             CName(v) => self.cnames.push(v),
                             NftSet(config) => self.nftsets.push(config),
-                            Server(server) => self.servers.push(server),
+                            Server(server) => self.nameservers.push(server),
                             ResponseMode(mode) => self.response_mode = Some(mode),
                             ResolvHostname(v) => self.resolv_hostname = Some(v),
-                            ServeExpired(v) => self.serve_expired = Some(v),
-                            PrefetchDomain(v) => self.prefetch_domain = Some(v),
+                            ServeExpired(v) => self.cache.serve_expired = Some(v),
+                            PrefetchDomain(v) => self.cache.prefetch_domain = Some(v),
                             ForceAAAASOA(v) => self.force_aaaa_soa = Some(v),
                             DualstackIpAllowForceAAAA(v) => {
                                 self.dualstack_ip_allow_force_aaaa = Some(v)
@@ -1004,9 +752,9 @@ mod parse {
                             NumWorkers(v) => self.num_workers = Some(v),
                             Domain(v) => self.domain = Some(v),
                             SpeedMode(v) => self.speed_check_mode.extend(v.0),
-                            ServeExpiredTtl(v) => self.serve_expired_ttl = Some(v),
-                            ServeExpiredReplyTtl(v) => self.serve_expired_reply_ttl = Some(v),
-                            CacheSize(v) => self.cache_size = Some(v),
+                            ServeExpiredTtl(v) => self.cache.serve_expired_ttl = Some(v),
+                            ServeExpiredReplyTtl(v) => self.cache.serve_expired_reply_ttl = Some(v),
+                            CacheSize(v) => self.cache.size = Some(v),
                             ForceQtypeSoa(v) => {
                                 self.force_qtype_soa.insert(v);
                             }
@@ -1019,12 +767,12 @@ mod parse {
                             RrTtlReplyMax(v) => self.rr_ttl_reply_max = Some(v),
                             Listener(listener) => self.listeners.push(listener),
                             LocalTtl(v) => self.local_ttl = Some(v),
-                            LogNum(v) => self.log_num = Some(v),
-                            LogLevel(v) => self.log_level = Some(v),
-                            LogFile(v) => self.log_file = Some(v),
-                            LogFileMode(v) => self.log_file_mode = Some(v),
-                            LogFilter(v) => self.log_filter = Some(v),
-                            LogSize(v) => self.log_size = Some(v),
+                            LogNum(v) => self.log.num = Some(v),
+                            LogLevel(v) => self.log.level = Some(v),
+                            LogFile(v) => self.log.file = Some(v),
+                            LogFileMode(v) => self.log.file_mode = Some(v),
+                            LogFilter(v) => self.log.filter = Some(v),
+                            LogSize(v) => self.log.size = Some(v),
                             MaxReplyIpNum(v) => self.max_reply_ip_num = Some(v),
                             BlacklistIp(v) => self.blacklist_ip += v,
                             BogusNxDomain(v) => self.bogus_nxdomain += v,
@@ -1133,7 +881,7 @@ mod parse {
 
         #[test]
         fn test_config_binds_dedup() {
-            let cfg = SmartDnsConfig::builder()
+            let cfg = RuntimeConfig::builder()
                 .with("bind-tcp 0.0.0.0:4453@eth1")
                 .with("bind-tls 0.0.0.0:4452@eth1")
                 .with("bind-https 0.0.0.0:4453@eth1")
@@ -1164,9 +912,9 @@ mod parse {
 
         #[test]
         fn test_config_bind_with_device() {
-            let cfg = SmartDnsConfig::builder()
-                .with("bind 0.0.0.0:4453@eth1")
-                .with("bind 0.0.0.0:4453@eth1")
+            let cfg = RuntimeConfig::builder()
+                .with("bind 0.0.0.0:4453@eth100")
+                .with("bind 0.0.0.0:4453@eth100")
                 .build();
 
             assert_eq!(cfg.listeners().len(), 1);
@@ -1179,12 +927,12 @@ mod parse {
             );
             assert_eq!(bind.port(), 4453);
 
-            assert_eq!(bind.device(), Some("eth1"));
+            assert_eq!(bind.device(), Some("eth100"));
         }
 
         #[test]
         fn test_config_bind_with_device_flags() {
-            let cfg = SmartDnsConfig::builder()
+            let cfg = RuntimeConfig::builder()
                 .with("bind-https 0.0.0.0:443@eth2 -no-rule-addr")
                 .build();
 
@@ -1207,7 +955,7 @@ mod parse {
 
         #[test]
         fn test_config_bind_https() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config(
                 "bind-https 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key",
@@ -1242,7 +990,7 @@ mod parse {
 
         #[test]
         fn test_config_server_0() {
-            let cfg = SmartDnsConfig::builder().with(
+            let cfg = RuntimeConfig::builder().with(
                 "server-https https://223.5.5.5/dns-query -group bootstrap -exclude-default-group",
             ).build();
 
@@ -1251,8 +999,8 @@ mod parse {
             let server_group = cfg.get_server_group("bootstrap");
             let server = server_group.first().cloned().unwrap();
 
-            assert_eq!(server.url.proto(), &Protocol::Https);
-            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(server.server.proto(), &Protocol::Https);
+            assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
 
             assert!(server.group.iter().any(|g| g == "bootstrap"));
             assert!(server.exclude_default_group);
@@ -1260,46 +1008,46 @@ mod parse {
 
         #[test]
         fn test_config_server_1() {
-            let cfg = SmartDnsConfig::builder()
+            let cfg = RuntimeConfig::builder()
                 .with("server-https https://223.5.5.5/dns-query")
                 .build();
 
-            assert_eq!(cfg.servers.len(), 1);
+            assert_eq!(cfg.nameservers.len(), 1);
 
             let server_group = cfg.get_server_group(DEFAULT_GROUP);
 
             let server = server_group.first().cloned().unwrap();
 
-            assert_eq!(server.url.proto(), &Protocol::Https);
-            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(server.server.proto(), &Protocol::Https);
+            assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
             assert!(server.group.is_empty());
             assert!(!server.exclude_default_group);
         }
 
         #[test]
         fn test_config_server_2() {
-            let cfg = SmartDnsConfig::builder().with(
+            let cfg = RuntimeConfig::builder().with(
                 "server-https https://223.5.5.5/dns-query  -bootstrap-dns -exclude-default-group",
             ).build();
 
-            let server = cfg.servers.iter().find(|s| s.bootstrap_dns).unwrap();
+            let server = cfg.nameservers.iter().find(|s| s.bootstrap_dns).unwrap();
 
-            assert_eq!(server.url.proto(), &Protocol::Https);
-            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(server.server.proto(), &Protocol::Https);
+            assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
             assert!(server.exclude_default_group);
             assert!(server.bootstrap_dns);
         }
 
         #[test]
         fn test_config_server_with_client_subnet() {
-            let cfg = SmartDnsConfig::builder().with(
+            let cfg = RuntimeConfig::builder().with(
                 "server-https https://223.5.5.5/dns-query  -bootstrap-dns -exclude-default-group -subnet 192.168.0.0/16",
             ).build();
 
-            let server = cfg.servers.iter().find(|s| s.bootstrap_dns).unwrap();
+            let server = cfg.nameservers.iter().find(|s| s.bootstrap_dns).unwrap();
 
-            assert_eq!(server.url.proto(), &Protocol::Https);
-            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(server.server.proto(), &Protocol::Https);
+            assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
             assert_eq!(
                 server.edns_client_subnet,
                 Some("192.168.0.0/16".parse().unwrap())
@@ -1310,44 +1058,44 @@ mod parse {
 
         #[test]
         fn test_config_server_with_mark_1() {
-            let cfg = SmartDnsConfig::builder()
+            let cfg = RuntimeConfig::builder()
                 .with("server-https https://223.5.5.5/dns-query -set-mark 255")
                 .build();
-            let server = cfg.servers.first().unwrap();
-            assert_eq!(server.url.proto(), &Protocol::Https);
-            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            let server = cfg.nameservers.first().unwrap();
+            assert_eq!(server.server.proto(), &Protocol::Https);
+            assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
             assert_eq!(server.so_mark, Some(255));
         }
 
         #[test]
         fn test_config_server_with_mark_2() {
-            let cfg = SmartDnsConfig::builder()
+            let cfg = RuntimeConfig::builder()
                 .with("server-https https://223.5.5.5/dns-query -set-mark 0xff")
                 .build();
 
-            let server = cfg.servers.first().unwrap();
+            let server = cfg.nameservers.first().unwrap();
 
-            assert_eq!(server.url.proto(), &Protocol::Https);
-            assert_eq!(server.url.to_string(), "https://223.5.5.5/dns-query");
+            assert_eq!(server.server.proto(), &Protocol::Https);
+            assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
             assert_eq!(server.so_mark, Some(255));
         }
 
         #[test]
         fn test_config_tls_server() {
-            let cfg = SmartDnsConfig::builder().with("server-tls 45.90.28.0 -host-name: dns.nextdns.io -tls-host-verify: dns.nextdns.io").build();
+            let cfg = RuntimeConfig::builder().with("server-tls 45.90.28.0 -host-name: dns.nextdns.io -tls-host-verify: dns.nextdns.io").build();
 
-            let server = cfg.servers.first().unwrap();
+            let server = cfg.nameservers.first().unwrap();
 
             assert!(!server.exclude_default_group);
-            assert_eq!(server.url.proto(), &Protocol::Tls);
-            assert_eq!(server.url.to_string(), "tls://dns.nextdns.io");
-            assert_eq!(server.url.ip(), "45.90.28.0".parse::<IpAddr>().ok());
-            assert_eq!(server.url.domain(), Some("dns.nextdns.io"));
+            assert_eq!(server.server.proto(), &Protocol::Tls);
+            assert_eq!(server.server.to_string(), "tls://dns.nextdns.io");
+            assert_eq!(server.server.ip(), "45.90.28.0".parse::<IpAddr>().ok());
+            assert_eq!(server.server.domain(), Some("dns.nextdns.io"));
         }
 
         #[test]
         fn test_config_address_soa() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("address /test.example.com/#");
 
@@ -1358,12 +1106,12 @@ mod parse {
                 Domain::Name("test.example.com".parse().unwrap())
             );
 
-            assert_eq!(domain_addr_rule.config, DomainAddress::SOA);
+            assert_eq!(domain_addr_rule.address, DomainAddress::SOA);
         }
 
         #[test]
         fn test_config_domain_rules_without_args() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
             cfg.config(
                 "domain-set -name domain-forwarding-list -file tests/test_confs/block-list.txt",
             );
@@ -1373,7 +1121,7 @@ mod parse {
 
         #[test]
         fn test_config_address_soa_v4() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("address /test.example.com/#4");
 
@@ -1384,12 +1132,12 @@ mod parse {
                 Domain::Name("test.example.com".parse().unwrap())
             );
 
-            assert_eq!(domain_addr_rule.config, DomainAddress::SOAv4);
+            assert_eq!(domain_addr_rule.address, DomainAddress::SOAv4);
         }
 
         #[test]
         fn test_config_address_soa_v6() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("address /test.example.com/#6");
 
@@ -1400,12 +1148,12 @@ mod parse {
                 Domain::Name("test.example.com".parse().unwrap())
             );
 
-            assert_eq!(domain_addr_rule.config, DomainAddress::SOAv6);
+            assert_eq!(domain_addr_rule.address, DomainAddress::SOAv6);
         }
 
         #[test]
         fn test_config_address_ignore() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("address /test.example.com/-");
 
@@ -1416,12 +1164,12 @@ mod parse {
                 Domain::Name("test.example.com".parse().unwrap())
             );
 
-            assert_eq!(domain_addr_rule.config, DomainAddress::IGN);
+            assert_eq!(domain_addr_rule.address, DomainAddress::IGN);
         }
 
         #[test]
         fn test_config_address_ignore_v4() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("address /test.example.com/-4");
 
@@ -1432,12 +1180,12 @@ mod parse {
                 Domain::Name("test.example.com".parse().unwrap())
             );
 
-            assert_eq!(domain_addr_rule.config, DomainAddress::IGNv4);
+            assert_eq!(domain_addr_rule.address, DomainAddress::IGNv4);
         }
 
         #[test]
         fn test_config_address_ignore_v6() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("address /test.example.com/-6");
 
@@ -1448,13 +1196,13 @@ mod parse {
                 Domain::Name("test.example.com".parse().unwrap())
             );
 
-            assert_eq!(domain_addr_rule.config, DomainAddress::IGNv6);
+            assert_eq!(domain_addr_rule.address, DomainAddress::IGNv6);
         }
 
         #[test]
         fn test_config_address_whitelist_mode() {
             use std::str::FromStr;
-            let cfg = SmartDnsConfig::builder()
+            let cfg = RuntimeConfig::builder()
                 .with("address /google.com/-")
                 .with("address /*/#")
                 .build();
@@ -1474,7 +1222,7 @@ mod parse {
 
         #[test]
         fn test_config_nameserver() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("nameserver /doh.pub/bootstrap");
 
@@ -1490,7 +1238,7 @@ mod parse {
 
         #[test]
         fn test_config_domain_rule() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("domain-rule /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
@@ -1511,7 +1259,7 @@ mod parse {
 
         #[test]
         fn test_config_domain_rule_2() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("domain-rules /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
@@ -1532,7 +1280,7 @@ mod parse {
 
         #[test]
         fn test_config_domain_rule_3() {
-            let cfg = SmartDnsConfig::builder()
+            let cfg = RuntimeConfig::builder()
                 .with("domain-rules /doh.pub/ -c ping -a # -n test -d yes")
                 .build();
 
@@ -1550,17 +1298,17 @@ mod parse {
 
         #[test]
         fn test_parse_config_log_file_mode() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
 
             cfg.config("log-file-mode 644");
-            assert_eq!(cfg.log_file_mode, Some(0o644u32.into()));
+            assert_eq!(cfg.log.file_mode, Some(0o644u32.into()));
             cfg.config("log-file-mode 0o755");
-            assert_eq!(cfg.log_file_mode, Some(0o755u32.into()));
+            assert_eq!(cfg.log.file_mode, Some(0o755u32.into()));
         }
 
         #[test]
         fn test_parse_config_speed_check_mode() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
             cfg.config("speed-check-mode ping,tcp:123");
 
             assert_eq!(cfg.speed_check_mode.len(), 2);
@@ -1574,7 +1322,7 @@ mod parse {
 
         #[test]
         fn test_parse_config_speed_check_mode_https_omit_port() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
             cfg.config("speed-check-mode http,https");
 
             assert_eq!(cfg.speed_check_mode.len(), 2);
@@ -1592,22 +1340,22 @@ mod parse {
         #[test]
         fn test_parse_config_audit_size_1() {
             use byte_unit::n_mb_bytes;
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
             cfg.config("audit-size 80mb");
-            assert_eq!(cfg.audit_size, Some(n_mb_bytes(80).into()));
+            assert_eq!(cfg.audit.size, Some(n_mb_bytes(80).into()));
         }
 
         #[test]
         fn test_parse_config_audit_size_2() {
             use byte_unit::n_gb_bytes;
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
             cfg.config("audit-size 30 gb");
-            assert_eq!(cfg.audit_size, Some(n_gb_bytes(30).into()));
+            assert_eq!(cfg.audit.size, Some(n_gb_bytes(30).into()));
         }
 
         #[test]
         fn test_parse_load_config_file_b() {
-            let cfg = SmartDnsConfig::load_from_file("tests/test_confs/b_main.conf");
+            let cfg = RuntimeConfig::load_from_file("tests/test_confs/b_main.conf");
 
             assert_eq!(cfg.server_name, "SmartDNS123".parse().ok());
             assert_eq!(
@@ -1619,7 +1367,7 @@ mod parse {
 
         #[test]
         fn test_parse_config_proxy_server() {
-            let mut cfg = SmartDnsConfig::builder();
+            let mut cfg = RuntimeConfig::builder();
             cfg.config("proxy-server socks5://127.0.0.1:1080 -n abc");
 
             assert_eq!(
@@ -1631,7 +1379,7 @@ mod parse {
         #[test]
         #[cfg(failed_tests)]
         fn test_domain_set() {
-            let cfg = SmartDnsConfig::load_from_file("tests/test_confs/b_main.conf");
+            let cfg = RuntimeConfig::load_from_file("tests/test_confs/b_main.conf");
 
             assert!(!cfg.domain_sets.is_empty());
 

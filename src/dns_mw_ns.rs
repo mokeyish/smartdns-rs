@@ -4,14 +4,12 @@ use std::sync::Arc;
 use std::{borrow::Borrow, net::IpAddr, pin::Pin, time::Duration};
 
 use crate::dns_client::{LookupOptions, NameServer};
-use crate::dns_conf::SpeedCheckModeList;
+
 use crate::infra::ipset::IpSet;
 use crate::{
-    config::ResponseMode,
+    config::{ResponseMode, SpeedCheckMode, SpeedCheckModeList},
     dns::*,
-    dns_client::GenericResolver,
-    dns_client::{DnsClient, NameServerGroup},
-    dns_conf::SpeedCheckMode,
+    dns_client::{DnsClient, GenericResolver, NameServerGroup},
     dns_error::LookupError,
     log::{debug, error},
     middleware::*,
@@ -481,7 +479,7 @@ mod tests {
     use crate::libdns::proto::rr::rdata::opt::ClientSubnet;
 
     use super::*;
-    use crate::{dns_conf::SmartDnsConfig, third_ext::FutureJoinAllExt};
+    use crate::{dns_conf::RuntimeConfig, third_ext::FutureJoinAllExt};
 
     #[test]
     fn test_edns_client_subnet() {
@@ -495,7 +493,7 @@ mod tests {
 
             let server = servers[i % servers.len()];
 
-            let cfg = SmartDnsConfig::builder().with(server).build();
+            let cfg = RuntimeConfig::builder().with(server).build();
 
             let domain = "www.bing.com";
 

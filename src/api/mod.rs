@@ -3,10 +3,18 @@ use std::{io, sync::Arc};
 use axum::{routing::get, Json, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use rustls::{Certificate, PrivateKey};
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 
+mod address;
+mod audit;
 mod cache;
+mod forward;
+mod listener;
+mod log;
+mod nameserver;
 mod serve_dns;
+mod settings;
 
 use crate::{app::App, dns_server::DnsServerHandler};
 
@@ -50,8 +58,41 @@ fn api_routes() -> StatefulRouter {
     Router::new()
         .route("/version", get(version))
         .merge(cache::routes())
+        .merge(nameserver::routes())
+        .merge(address::routes())
+        .merge(forward::routes())
+        .merge(settings::routes())
+        .merge(audit::routes())
+        .merge(listener::routes())
+        .merge(log::routes())
 }
 
 async fn version() -> Json<&'static str> {
     Json(crate::version())
+}
+
+#[derive(Deserialize, Serialize)]
+struct DataListPayload<T> {
+    count: usize,
+    data: Vec<T>,
+}
+
+impl<T> DataListPayload<T> {
+    fn new(data: Vec<T>) -> Self {
+        Self {
+            count: data.len(),
+            data,
+        }
+    }
+}
+
+trait IntoDataListPayload<T> {
+    fn into_data_list_payload(self) -> DataListPayload<T>;
+}
+
+impl<T> IntoDataListPayload<T> for Vec<T> {
+    #[inline]
+    fn into_data_list_payload(self) -> DataListPayload<T> {
+        DataListPayload::new(self)
+    }
 }

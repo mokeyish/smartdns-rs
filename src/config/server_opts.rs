@@ -1,33 +1,45 @@
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ServerOpts {
     /// set domain request to use the appropriate server group.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
 
     /// skip address rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_rule_addr: Option<bool>,
 
     /// skip nameserver rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_rule_nameserver: Option<bool>,
 
     /// skip ipset rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_rule_ipset: Option<bool>,
 
     /// do not check speed.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_speed_check: Option<bool>,
 
     /// skip cache.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_cache: Option<bool>,
 
     /// Skip address SOA(#) rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_rule_soa: Option<bool>,
 
     /// Disable dualstack ip selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_dualstack_selection: Option<bool>,
 
     /// force AAAA query return SOA.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub force_aaaa_soa: Option<bool>,
 
     /// do not serve expired
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub no_serve_expired: Option<bool>,
 }
 

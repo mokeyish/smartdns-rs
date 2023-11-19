@@ -13,7 +13,7 @@ use tokio::{
 
 use crate::{
     config::{IListener, Listener, SslConfig},
-    dns_conf::SmartDnsConfig,
+    dns_conf::RuntimeConfig,
     dns_mw::{DnsMiddlewareBuilder, DnsMiddlewareHandler},
     dns_mw_cache::DnsCache,
     dns_server::DnsServerHandler,
@@ -24,7 +24,7 @@ use crate::{
 };
 
 pub struct App {
-    cfg: RwLock<Arc<SmartDnsConfig>>,
+    cfg: RwLock<Arc<RuntimeConfig>>,
     handler: RwLock<Arc<DnsMiddlewareHandler>>,
     listener_map: Arc<RwLock<HashMap<crate::config::Listener, ServerTasks>>>,
     cache: RwLock<Option<Arc<DnsCache>>>,
@@ -34,7 +34,7 @@ pub struct App {
 
 impl App {
     fn new(conf: Option<PathBuf>) -> (Runtime, Self) {
-        let cfg = SmartDnsConfig::load(conf);
+        let cfg = RuntimeConfig::load(conf);
 
         let guard = {
             let log_guard = if cfg.log_enabled() {
@@ -109,6 +109,10 @@ impl App {
 
     pub async fn cache(&self) -> Option<Arc<DnsCache>> {
         self.cache.read().await.clone()
+    }
+
+    pub async fn cfg(&self) -> Arc<RuntimeConfig> {
+        self.cfg.read().await.clone()
     }
 
     async fn update_middleware_handler(&self) {

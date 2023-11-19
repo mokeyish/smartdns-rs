@@ -1,10 +1,14 @@
 use enum_dispatch::enum_dispatch;
+use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+
+use crate::third_ext::serde_str;
 
 use super::{ServerOpts, SslConfig};
 
 #[enum_dispatch(NomParser, IListener)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum Listener {
     Udp(UdpListener),
     Tcp(TcpListener),
@@ -32,15 +36,18 @@ pub trait IListener {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UdpListener {
     /// listen adress
+    #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
     pub port: u16,
     /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
     /// ssl config
+    #[serde(flatten)]
     pub opts: ServerOpts,
 }
 
@@ -55,57 +62,72 @@ impl Default for UdpListener {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TcpListener {
     /// listen adress
+    #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
     pub port: u16,
     /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
     /// ssl config
+    #[serde(flatten)]
     pub opts: ServerOpts,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TlsListener {
     /// listen adress
+    #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
     pub port: u16,
     /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
     /// the server options
+    #[serde(flatten)]
     pub opts: ServerOpts,
     /// ssl config
+    #[serde(flatten)]
     pub ssl_config: SslConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HttpsListener {
     /// listen adress
+    #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
     pub port: u16,
     /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
     /// the server options
+    #[serde(flatten)]
     pub opts: ServerOpts,
     /// ssl config
+    #[serde(flatten)]
     pub ssl_config: SslConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct QuicListener {
     /// listen adress
+    #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
     pub port: u16,
     /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
     /// the server options
+    #[serde(flatten)]
     pub opts: ServerOpts,
     /// ssl config
+    #[serde(flatten)]
     pub ssl_config: SslConfig,
 }
 
@@ -149,6 +171,19 @@ pub enum ListenerAddress {
     All,
     V4(Ipv4Addr),
     V6(Ipv6Addr),
+}
+
+impl ToString for ListenerAddress {
+    fn to_string(&self) -> String {
+        use ListenerAddress::*;
+
+        match self {
+            Localhost => "localhost".to_string(),
+            All => "*".to_string(),
+            V4(ip) => ip.to_string(),
+            V6(ip) => format!("[{ip}]"),
+        }
+    }
 }
 
 impl From<IpAddr> for ListenerAddress {

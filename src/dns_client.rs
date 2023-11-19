@@ -108,8 +108,8 @@ impl DnsClientBuilder {
                     .iter()
                     .filter(|info| {
                         info.bootstrap_dns && {
-                            if info.url.ip().is_none() {
-                                warn!("bootstrap-dns must use ip addess, {:?}", info.url.host());
+                            if info.server.ip().is_none() {
+                                warn!("bootstrap-dns must use ip addess, {:?}", info.server.host());
                                 false
                             } else {
                                 true
@@ -122,7 +122,7 @@ impl DnsClientBuilder {
                 if bootstrap_infos.is_empty() {
                     bootstrap_infos = server_infos
                         .iter()
-                        .filter(|info| info.url.ip().is_some() && info.proxy.is_none())
+                        .filter(|info| info.server.ip().is_some() && info.proxy.is_none())
                         .cloned()
                         .collect::<Vec<_>>()
                 }
@@ -135,7 +135,7 @@ impl DnsClientBuilder {
 
                 if !bootstrap_infos.is_empty() {
                     for info in &bootstrap_infos {
-                        info!("bootstrap-dns {}", info.url.to_string());
+                        info!("bootstrap-dns {}", info.server.to_string());
                     }
                 }
 
@@ -180,7 +180,7 @@ impl DnsClientBuilder {
                             .or_default()
                             .insert(info.clone())
                     {
-                        debug!("append {} to default group.", info.url.to_string());
+                        debug!("append {} to default group.", info.server.to_string());
                     }
 
                     map.entry(name).or_default().insert(info.clone());
@@ -556,7 +556,7 @@ impl NameServerFactory {
         let resolver = bootstrap::resolver().await;
 
         for info in infos {
-            let url = info.url.clone();
+            let url = info.server.clone();
             let verified_urls = match TryInto::<VerifiedDnsUrl>::try_into(url) {
                 Ok(url) => vec![url],
                 Err(url) => {

@@ -1,5 +1,9 @@
-use crate::dns_url::DnsUrl;
+use crate::{
+    dns_url::DnsUrl,
+    third_ext::{serde_opt_str, serde_str},
+};
 use ipnet::IpNet;
+use serde::{Deserialize, Serialize};
 
 /// remote udp dns server list
 ///
@@ -41,10 +45,11 @@ use ipnet::IpNet;
 /// default port is 443
 /// server-https https://cloudflare-dns.com/dns-query
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NameServerInfo {
     /// the nameserver url.
-    pub url: DnsUrl,
+    #[serde(with = "serde_str")]
+    pub server: DnsUrl,
 
     /// set server to group, use with nameserver /domain/group.
     pub group: Vec<String>,
@@ -78,6 +83,7 @@ pub struct NameServerInfo {
     ///   edns-client-subnet 192.168.1.1/24
     ///   edns-client-subnet 8::8/56
     /// ```
+    #[serde(with = "serde_opt_str")]
     pub edns_client_subnet: Option<IpNet>,
 
     /// The value for the SO_MARK option on socket.
@@ -87,7 +93,7 @@ pub struct NameServerInfo {
 impl From<DnsUrl> for NameServerInfo {
     fn from(url: DnsUrl) -> Self {
         Self {
-            url,
+            server: url,
             group: vec![],
             exclude_default_group: false,
             blacklist_ip: false,

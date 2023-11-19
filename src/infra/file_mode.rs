@@ -49,7 +49,13 @@ impl From<u32> for FileMode {
 
 impl Debug for FileMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0o{:o}", self.0)
+        write!(f, "{:#o}", self.0)
+    }
+}
+
+impl ToString for FileMode {
+    fn to_string(&self) -> String {
+        format!("{:o}", self.0)
     }
 }
 
@@ -69,5 +75,10 @@ mod tests {
     #[test]
     fn test_debug_display() {
         assert_eq!(format!("{:?}", FileMode::from_str("644").unwrap()), "0o644");
+    }
+
+    #[test]
+    fn test_to_string() {
+        assert_eq!(FileMode::from_str("644").unwrap().to_string(), "644");
     }
 }

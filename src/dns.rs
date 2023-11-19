@@ -8,7 +8,7 @@ use crate::dns_error::LookupError;
 use crate::dns_rule::DomainRuleTreeNode;
 
 use crate::config::ServerOpts;
-use crate::dns_conf::SmartDnsConfig;
+use crate::dns_conf::RuntimeConfig;
 
 pub use crate::libdns::proto::{
     op,
@@ -23,7 +23,7 @@ pub use crate::libdns::resolver::{
 
 #[derive(Clone)]
 pub struct DnsContext {
-    cfg: Arc<SmartDnsConfig>,
+    cfg: Arc<RuntimeConfig>,
     pub server_opts: ServerOpts,
     pub domain_rule: Option<Arc<DomainRuleTreeNode>>,
     pub fastest_speed: Duration,
@@ -33,7 +33,7 @@ pub struct DnsContext {
 }
 
 impl DnsContext {
-    pub fn new(name: &Name, cfg: Arc<SmartDnsConfig>, server_opts: ServerOpts) -> Self {
+    pub fn new(name: &Name, cfg: Arc<RuntimeConfig>, server_opts: ServerOpts) -> Self {
         let domain_rule = cfg.find_domain_rule(name);
 
         let no_cache = domain_rule
@@ -53,7 +53,7 @@ impl DnsContext {
     }
 
     #[inline]
-    pub fn cfg(&self) -> &Arc<SmartDnsConfig> {
+    pub fn cfg(&self) -> &Arc<RuntimeConfig> {
         &self.cfg
     }
 

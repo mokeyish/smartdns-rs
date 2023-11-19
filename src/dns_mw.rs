@@ -10,7 +10,7 @@ use crate::libdns::resolver::error::ResolveErrorKind;
 use crate::{
     config::ServerOpts,
     dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
-    dns_conf::SmartDnsConfig,
+    dns_conf::RuntimeConfig,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
@@ -33,7 +33,7 @@ impl BackgroundQueryTask {
 
     pub fn from_query(
         query: Query,
-        cfg: Arc<SmartDnsConfig>,
+        cfg: Arc<RuntimeConfig>,
         client: Arc<DnsMiddlewareHost>,
     ) -> Self {
         let ctx = DnsContext::new(query.name(), cfg, Default::default());
@@ -55,7 +55,7 @@ impl BackgroundQueryTask {
 }
 
 pub struct DnsMiddlewareHandler {
-    cfg: Arc<SmartDnsConfig>,
+    cfg: Arc<RuntimeConfig>,
     host: DnsMiddlewareHost,
 }
 
@@ -99,7 +99,7 @@ impl DnsMiddlewareBuilder {
         self
     }
 
-    pub fn build(self, cfg: Arc<SmartDnsConfig>) -> DnsMiddlewareHandler {
+    pub fn build(self, cfg: Arc<RuntimeConfig>) -> DnsMiddlewareHandler {
         DnsMiddlewareHandler {
             host: self.builder.build(),
             cfg,
@@ -205,7 +205,7 @@ mod tests {
             self
         }
 
-        pub fn build<T: Into<Arc<SmartDnsConfig>>>(self, cfg: T) -> DnsMiddlewareHandler {
+        pub fn build<T: Into<Arc<RuntimeConfig>>>(self, cfg: T) -> DnsMiddlewareHandler {
             let Self { map, builder } = self;
 
             builder.with(DnsMockMiddleware { map }).build(cfg.into())
@@ -288,7 +288,7 @@ mod tests {
     async fn test_mock_middleware_ip() {
         let mw = DnsMockMiddleware::builder()
             .with_a_record("qq.com", "1.5.6.7".parse().unwrap())
-            .build(SmartDnsConfig::default());
+            .build(RuntimeConfig::default());
 
         let res = mw.lookup_rdata("qq.com", RecordType::A).await.unwrap();
 
@@ -299,7 +299,7 @@ mod tests {
     async fn test_mock_middleware_soa() {
         let mw = DnsMockMiddleware::builder()
             .with_a_record("qq.com", "1.5.6.7".parse().unwrap())
-            .build(SmartDnsConfig::default());
+            .build(RuntimeConfig::default());
 
         let res = mw.lookup_rdata("baidu.com", RecordType::A).await;
 
