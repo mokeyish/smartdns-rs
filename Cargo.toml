@@ -156,7 +156,7 @@ caps = "0.5.5"
 
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.51", features = [
+windows = { version = "0.52", features = [
   "Win32_System_Console",
   "Win32_Foundation",
 ] }
