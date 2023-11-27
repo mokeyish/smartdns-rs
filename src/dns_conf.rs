@@ -1,12 +1,11 @@
+use cfg_if::cfg_if;
+use ipnet::IpNet;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-use cfg_if::cfg_if;
-use ipnet::IpNet;
 
 pub use crate::config::*;
 use crate::{
@@ -65,7 +64,7 @@ impl RuntimeConfig {
                         "/usr/local/etc/smartdns/smartdns.conf"
                     ];
                 }
-            };
+            }
 
             candidate_path
                 .iter()
@@ -380,11 +379,11 @@ impl RuntimeConfig {
 
     #[inline]
     pub fn log_size(&self) -> u64 {
-        use byte_unit::n_kb_bytes;
+        use byte_unit::{Byte, Unit};
         self.log
             .size
-            .map(|n| n.get_bytes())
-            .unwrap_or(n_kb_bytes(128)) as u64
+            .map(|n| n.as_u64())
+            .unwrap_or(Byte::from_i64_with_unit(128, Unit::KB).unwrap().as_u64())
     }
     #[inline]
     pub fn log_num(&self) -> u64 {
@@ -423,11 +422,11 @@ impl RuntimeConfig {
 
     #[inline]
     pub fn audit_size(&self) -> u64 {
-        use byte_unit::n_kb_bytes;
+        use byte_unit::{Byte, Unit};
         self.audit
             .size
-            .map(|n| n.get_bytes())
-            .unwrap_or(n_kb_bytes(128)) as u64
+            .map(|n| n.as_u64())
+            .unwrap_or(Byte::from_i64_with_unit(128, Unit::KB).unwrap().as_u64())
     }
 
     #[inline]
@@ -872,8 +871,8 @@ mod parse {
 
     #[cfg(test)]
     mod tests {
-
         use crate::libdns::resolver::config::Protocol;
+        use byte_unit::Byte;
 
         use crate::config::{HttpsListener, ListenerAddress, ServerOpts, SslConfig};
 
@@ -1339,18 +1338,18 @@ mod parse {
 
         #[test]
         fn test_parse_config_audit_size_1() {
-            use byte_unit::n_mb_bytes;
+            use byte_unit::Unit;
             let mut cfg = RuntimeConfig::builder();
             cfg.config("audit-size 80mb");
-            assert_eq!(cfg.audit.size, Some(n_mb_bytes(80).into()));
+            assert_eq!(cfg.audit.size, Byte::from_i64_with_unit(80, Unit::Mbit));
         }
 
         #[test]
         fn test_parse_config_audit_size_2() {
-            use byte_unit::n_gb_bytes;
+            use byte_unit::Unit;
             let mut cfg = RuntimeConfig::builder();
             cfg.config("audit-size 30 gb");
-            assert_eq!(cfg.audit.size, Some(n_gb_bytes(30).into()));
+            assert_eq!(cfg.audit.size, Byte::from_i64_with_unit(30, Unit::Gbit));
         }
 
         #[test]
