@@ -13,15 +13,26 @@ impl NomParser for Byte {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
-    use byte_unit::{n_gb_bytes, n_kb_bytes, n_mb_bytes};
 
     #[test]
     fn test_parse() {
-        assert_eq!(Byte::parse("12kb"), Ok(("", n_kb_bytes(12).into())));
-        assert_eq!(Byte::parse("123mb"), Ok(("", n_mb_bytes(123).into())));
-        assert_eq!(Byte::parse("80mb"), Ok(("", n_mb_bytes(80).into())));
-        assert_eq!(Byte::parse("30 gb"), Ok(("", n_gb_bytes(30).into())));
+        use byte_unit::Unit;
+        assert_eq!(
+            Byte::parse("12kb"),
+            Ok(("", Byte::from_i64_with_unit(12, Unit::Kbit).unwrap()))
+        );
+        assert_eq!(
+            Byte::parse("123mb"),
+            Ok(("", Byte::from_i64_with_unit(123, Unit::Mbit).unwrap()))
+        );
+        assert_eq!(
+            Byte::parse("80mb"),
+            Ok(("", Byte::from_i64_with_unit(80, Unit::Mbit).unwrap()))
+        );
+        assert_eq!(
+            Byte::parse("30 gb"),
+            Ok(("", Byte::from_i64_with_unit(30, Unit::Gbit).unwrap()))
+        );
     }
 }
