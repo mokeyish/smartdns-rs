@@ -382,8 +382,8 @@ impl RuntimeConfig {
         use byte_unit::{Byte, Unit};
         self.log
             .size
-            .map(|n| n.as_u64())
-            .unwrap_or(Byte::from_i64_with_unit(128, Unit::KB).unwrap().as_u64())
+            .unwrap_or_else(|| Byte::from_u64_with_unit(128, Unit::KB).unwrap())
+            .as_u64()
     }
     #[inline]
     pub fn log_num(&self) -> u64 {
@@ -425,8 +425,8 @@ impl RuntimeConfig {
         use byte_unit::{Byte, Unit};
         self.audit
             .size
-            .map(|n| n.as_u64())
-            .unwrap_or(Byte::from_i64_with_unit(128, Unit::KB).unwrap().as_u64())
+            .unwrap_or_else(|| Byte::from_u64_with_unit(128, Unit::KB).unwrap())
+            .as_u64()
     }
 
     #[inline]
@@ -1337,11 +1337,21 @@ mod parse {
         }
 
         #[test]
+        fn test_default_audit_size_1() {
+            use byte_unit::Unit;
+            let cfg = RuntimeConfig::builder().build();
+            assert_eq!(
+                cfg.audit_size(),
+                Byte::from_i64_with_unit(128, Unit::KB).unwrap().as_u64()
+            );
+        }
+
+        #[test]
         fn test_parse_config_audit_size_1() {
             use byte_unit::Unit;
             let mut cfg = RuntimeConfig::builder();
             cfg.config("audit-size 80mb");
-            assert_eq!(cfg.audit.size, Byte::from_i64_with_unit(80, Unit::Mbit));
+            assert_eq!(cfg.audit.size, Byte::from_i64_with_unit(80, Unit::MB));
         }
 
         #[test]
@@ -1349,7 +1359,7 @@ mod parse {
             use byte_unit::Unit;
             let mut cfg = RuntimeConfig::builder();
             cfg.config("audit-size 30 gb");
-            assert_eq!(cfg.audit.size, Byte::from_i64_with_unit(30, Unit::Gbit));
+            assert_eq!(cfg.audit.size, Byte::from_i64_with_unit(30, Unit::GB));
         }
 
         #[test]
