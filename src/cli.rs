@@ -1,9 +1,13 @@
 use std::ffi::OsString;
+use std::str::FromStr;
 
 use clap::Parser;
 use clap::Subcommand;
+use clap_verbosity_flag::{InfoLevel, Verbosity};
 
-use crate::log::warn;
+use crate::log::{self, warn};
+
+type LogLevelDefault = InfoLevel;
 
 /// Smart-DNS.
 ///
@@ -12,6 +16,9 @@ use crate::log::warn;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+
+    #[command(flatten)]
+    verbose: Verbosity<LogLevelDefault>,
 }
 
 impl Cli {
@@ -44,9 +51,16 @@ impl Cli {
             },
         }
     }
+
+    pub fn log_level(&self) -> Option<log::Level> {
+        self.verbose
+            .log_level()
+            .map(|s| s.to_string())
+            .and_then(|s| log::Level::from_str(&s).ok())
+    }
 }
 
-#[derive(Subcommand, PartialEq, Eq, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run the Smart-DNS server.
     Run {
@@ -57,10 +71,6 @@ pub enum Commands {
         /// Pid file
         #[arg(short = 'p', long)]
         pid: Option<std::path::PathBuf>,
-
-        /// Turn debugging information on
-        #[arg(short = 'd', long)]
-        debug: bool,
     },
 
     /// Manage the Smart-DNS service (install, uninstall, start, stop, restart).
@@ -70,7 +80,7 @@ pub enum Commands {
     },
 }
 
-#[derive(Subcommand, PartialEq, Eq, Debug)]
+#[derive(Subcommand, Debug)]
 pub enum ServiceCommands {
     /// Install the Smart-DNS as service.
     Install,
@@ -127,13 +137,26 @@ impl From<CompatibleCli> for Cli {
         if !foreground {
             warn!("not support running as a daemon, run foreground instead.")
         }
+
+        let verbose0 = if verbose {
+            Verbosity::new(10, 0)
+        } else {
+            Verbosity::new(level_value(log::Level::INFO), 0)
+        };
         Self {
-            command: Commands::Run {
-                conf,
-                pid,
-                debug: verbose,
-            },
+            command: Commands::Run { conf, pid },
+            verbose: verbose0,
         }
+    }
+}
+
+fn level_value(level: log::Level) -> u8 {
+    match level {
+        log::Level::ERROR => 0,
+        log::Level::WARN => 1,
+        log::Level::INFO => 2,
+        log::Level::DEBUG => 3,
+        log::Level::TRACE => 4,
     }
 }
 
@@ -150,7 +173,6 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: false
             }
         ));
 
@@ -160,54 +182,59 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: false
             }
         ));
     }
 
     #[test]
+    fn test_cli_args_parse_run_verbose() {
+        let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf"]);
+        assert_eq!(cli.log_level(), Some(log::Level::INFO));
+
+        let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf", "-q"]);
+        assert_eq!(cli.log_level(), Some(log::Level::WARN));
+
+        let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf", "-v"]);
+        assert_eq!(cli.log_level(), Some(log::Level::DEBUG));
+
+        let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf", "-qqqqq"]);
+        assert_eq!(cli.log_level(), None);
+    }
+
+    #[test]
     fn test_cli_args_parse_run_debug_on() {
-        let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf", "-d"]);
+        let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf", "-v"]);
         assert!(matches!(
             cli.command,
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: true
             }
         ));
 
-        let cli = Cli::parse_from(["smartdns", "run", "-c", "/etc/smartdns.conf", "--debug"]);
-        assert!(matches!(
-            cli.command,
-            Commands::Run {
-                conf: Some(_),
-                pid: None,
-                debug: true,
-            }
-        ));
+        assert_eq!(cli.log_level(), Some(log::Level::DEBUG));
     }
 
     #[test]
     fn test_cli_args_parse_install() {
         let cli = Cli::parse_from(["smartdns", "service", "install"]);
-        assert_eq!(
+        assert!(matches!(
             cli.command,
             Commands::Service {
                 command: ServiceCommands::Install
             }
-        );
+        ));
     }
 
     #[test]
     fn test_cli_args_parse_uninstall() {
         let cli = Cli::parse_from(["smartdns", "service", "uninstall"]);
-        assert_eq!(
+        assert!(matches!(
             cli.command,
             Commands::Service {
                 command: ServiceCommands::Uninstall { purge: false }
             }
-        );
+        ));
     }
 
     #[test]
@@ -218,7 +245,6 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: false
             }
         ));
 
@@ -228,7 +254,6 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: false
             }
         ));
     }
@@ -241,9 +266,10 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: true
             }
         ));
+
+        assert_eq!(cli.log_level(), Some(log::Level::TRACE));
 
         let cli = Cli::parse_from(["smartdns", "--conf", "/etc/smartdns.conf"]);
         assert!(matches!(
@@ -251,7 +277,6 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: false
             }
         ));
     }
@@ -264,7 +289,6 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                debug: false
             }
         ));
     }
