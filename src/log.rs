@@ -1,4 +1,4 @@
-use std::{env, fmt, io, path::Path};
+use std::{env, fmt, io, path::Path, sync::OnceLock};
 
 use tracing::{
     dispatcher::{set_default, set_global_default},
@@ -15,13 +15,15 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
+static CONSOLE_LEVEL: OnceLock<Level> = OnceLock::new();
+
 pub use tracing::*;
 
 type MappedFile = crate::infra::mapped_file::MutexMappedFile;
 
 pub fn init_global_default<P: AsRef<Path>>(
     path: P,
-    level: tracing::Level,
+    level: Level,
     filter: Option<&str>,
     size: u64,
     num: u64,
@@ -40,7 +42,7 @@ pub fn init_global_default<P: AsRef<Path>>(
             false
         });
 
-    let console_level = console_level();
+    let console_level = *CONSOLE_LEVEL.get_or_init(|| Level::INFO);
     let console_writer = io::stdout.with_max_level(console_level);
 
     let dispatch = if writable {
@@ -71,8 +73,8 @@ pub fn init_global_default<P: AsRef<Path>>(
     guard
 }
 
-pub fn default() -> DefaultGuard {
-    let console_level = console_level();
+pub fn default(console_level: Level) -> DefaultGuard {
+    CONSOLE_LEVEL.get_or_init(|| console_level);
     let console_writer = io::stdout.with_max_level(console_level);
     set_default(&make_dispatch(console_level, None, console_writer))
 }
@@ -92,14 +94,6 @@ fn make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send + Sync>(
             .with(layer)
             .with(make_filter(level, filter)),
     )
-}
-
-fn console_level() -> Level {
-    if std::env::args().any(|arg| arg == "-d" || arg == "--debug") {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    }
 }
 
 #[inline]

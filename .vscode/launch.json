@@ -21,7 +21,7 @@
         // "-c", "etc/smartdns/smartdns.conf",
         "-c", "tests/example/smartdns.conf",
         "-p", "./smartdns.pid",
-        "-d"
+        "-v"
       ],
       "cwd": "${workspaceFolder}"
     },

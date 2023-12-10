@@ -92,7 +92,7 @@ fn main() -> windows_service::Result<()> {
 impl Cli {
     #[inline]
     pub fn run(self) {
-        let _guard = log::default();
+        let _guard = self.log_level().map(log::default);
 
         match self.command {
             Commands::Run { conf, pid, .. } => {
