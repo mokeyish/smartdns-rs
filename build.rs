@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::Path;
 
 fn download<P: AsRef<Path> + Copy>(url: &str, file_path: P) -> bool {
@@ -35,7 +35,8 @@ fn append_text_to_file<P: AsRef<Path> + Copy, T: AsRef<[u8]>>(file_path: P, text
     file.write_all(text.as_ref()).unwrap();
 }
 
-fn main() {
+fn main() -> io::Result<()> {
+    std::fs::create_dir_all("./logs")?;
     if download(
         "https://cdn.jsdelivr.net/gh/pymumu/smartdns/etc/smartdns/smartdns.conf",
         "etc/smartdns/smartdns.conf",
@@ -52,4 +53,5 @@ fn main() {
         "https://cdn.jsdelivr.net/gh/mullvad/windows-service-rs/src/shell_escape.rs",
         "src/service/windows/shell_escape.rs",
     );
+    Ok(())
 }

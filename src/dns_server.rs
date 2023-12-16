@@ -1,12 +1,11 @@
 use cfg_if::cfg_if;
-use futures::Future;
 
 use std::{io, sync::Arc};
 
 use crate::{
     app::App,
     config::ServerOpts,
-    dns_error::LookupError,
+    dns::DnsResponse,
     log::{debug, error, info, warn},
 };
 
@@ -17,12 +16,8 @@ use crate::libdns::{
         xfer::SerialMessage,
     },
     server::{
-        authority::{
-            AuthLookup, EmptyLookup, LookupObject, LookupOptions, MessageResponse,
-            MessageResponseBuilder, ZoneType,
-        },
+        authority::{LookupOptions, MessageResponse, MessageResponseBuilder, ZoneType},
         server::{Protocol, Request, RequestHandler, ResponseHandler, ResponseInfo},
-        store::forwarder::ForwardLookup,
     },
 };
 
@@ -111,7 +106,7 @@ impl RequestHandler for DnsServerHandler {
 
                         let request_header = request.header();
 
-                        let (response_header, sections) = async {
+                        let (response_header, dns_response) = async {
                             let lookup_options = lookup_options_for_edns(request.edns());
 
                             // log algorithms being requested
@@ -134,32 +129,50 @@ impl RequestHandler for DnsServerHandler {
 
                                 let handler = self.app.get_dns_handler().await;
 
-                                let lookup_result: Result<Box<dyn LookupObject>, LookupError> =
-                                    match handler.search(req, &self.server_opts).await {
-                                        Ok(lookup) => Ok(Box::new(ForwardLookup(lookup))),
-                                        Err(err) => Err(err),
-                                    };
-
-                                lookup_result
+                                handler.search(req, &self.server_opts).await
                             };
 
-                            let sections = send_forwarded_response(
-                                future,
-                                request_header,
-                                &mut response_header,
-                            )
-                            .await;
+                            // send_forwarded_response
+                            response_header.set_recursion_available(true);
+                            response_header.set_authoritative(false);
 
-                            (response_header, sections)
+                            let dns_response = if !request_header.recursion_desired() {
+                                drop(future);
+                                info!(
+                                    "request disabled recursion, returning no records: {}",
+                                    request_header.id()
+                                );
+                                DnsResponse::empty()
+                            } else {
+                                match future.await {
+                                    Ok(rsp) => rsp,
+                                    Err(e) => {
+                                        if e.is_nx_domain() {
+                                            response_header
+                                                .set_response_code(ResponseCode::NXDomain);
+                                        }
+
+                                        match e.as_soa() {
+                                            Some(soa) => soa,
+                                            None => {
+                                                debug!("error resolving: {}", e);
+                                                DnsResponse::empty()
+                                            }
+                                        }
+                                    }
+                                }
+                            };
+
+                            (response_header, dns_response)
                         }
                         .await;
 
                         let response = MessageResponseBuilder::from_message_request(request).build(
                             response_header,
-                            sections.answers.iter(),
-                            sections.ns.iter(),
-                            sections.soa.iter(),
-                            sections.additionals.iter(),
+                            dns_response.answers(),
+                            dns_response.name_servers(),
+                            Box::new(None.into_iter()),
+                            dns_response.additionals(),
                         );
 
                         let result =
@@ -212,65 +225,9 @@ impl RequestHandler for DnsServerHandler {
     }
 }
 
-async fn send_forwarded_response(
-    future: impl Future<Output = Result<Box<dyn LookupObject>, LookupError>>,
-    request_header: &Header,
-    response_header: &mut Header,
-) -> LookupSections {
-    response_header.set_recursion_available(true);
-    response_header.set_authoritative(false);
-
-    // Don't perform the recursive query if this is disabled...
-    let answers = if !request_header.recursion_desired() {
-        // cancel the future??
-        // future.cancel();
-        drop(future);
-
-        info!(
-            "request disabled recursion, returning no records: {}",
-            request_header.id()
-        );
-
-        Box::new(EmptyLookup)
-    } else {
-        match future.await {
-            Err(e) => {
-                if e.is_nx_domain() {
-                    response_header.set_response_code(ResponseCode::NXDomain);
-                }
-
-                let res: Box<dyn LookupObject> = match e.as_soa() {
-                    Some(soa) => Box::new(ForwardLookup(soa)),
-                    None => {
-                        debug!("error resolving: {}", e);
-                        Box::new(EmptyLookup)
-                    }
-                };
-
-                res
-            }
-            Ok(rsp) => rsp,
-        }
-    };
-
-    LookupSections {
-        answers,
-        ns: Box::<AuthLookup>::default(),
-        soa: Box::<AuthLookup>::default(),
-        additionals: Box::<AuthLookup>::default(),
-    }
-}
-
-struct LookupSections {
-    answers: Box<dyn LookupObject>,
-    ns: Box<dyn LookupObject>,
-    soa: Box<dyn LookupObject>,
-    additionals: Box<dyn LookupObject>,
-}
-
 async fn send_response<'a, R: ResponseHandler>(
-    _response_edns: Option<Edns>,
-    response: MessageResponse<
+    #[allow(unused_variables)] response_edns: Option<Edns>,
+    #[allow(unused_mut)] mut response: MessageResponse<
         '_,
         'a,
         impl Iterator<Item = &'a Record> + Send + 'a,
@@ -282,6 +239,10 @@ async fn send_response<'a, R: ResponseHandler>(
 ) -> io::Result<ResponseInfo> {
     #[cfg(feature = "dnssec")]
     if let Some(mut resp_edns) = response_edns {
+        use crate::libdns::proto::rr::{
+            dnssec::{Algorithm, SupportedAlgorithms},
+            rdata::opt::EdnsOption,
+        };
         // set edns DAU and DHU
         // send along the algorithms which are supported by this authority
         let mut algorithms = SupportedAlgorithms::default();
@@ -310,6 +271,10 @@ fn lookup_options_for_edns(edns: Option<&Edns>) -> LookupOptions {
 
     cfg_if! {
         if #[cfg(feature = "dnssec")] {
+            use crate::libdns::proto::rr::{
+                dnssec::SupportedAlgorithms,
+                rdata::opt::{EdnsOption, EdnsCode}
+            };
             let supported_algorithms = if let Some(&EdnsOption::DAU(algs)) = edns.option(EdnsCode::DAU)
             {
                algs
@@ -383,41 +348,33 @@ impl DnsServerHandler {
                 let request_header = request.header();
                 let mut response_header = Header::response_from_request(request_header);
 
-                let answers = {
+                let dns_response = {
                     let req = &DnsRequest::from(&request);
                     let handler = self.app.get_dns_handler().await;
                     match handler.search(req, &self.server_opts).await {
-                        Ok(lookup) => Box::new(ForwardLookup(lookup)),
+                        Ok(lookup) => lookup,
                         Err(e) => {
                             if e.is_nx_domain() {
                                 response_header.set_response_code(ResponseCode::NXDomain);
                             }
 
-                            let res: Box<dyn LookupObject> = match e.as_soa() {
-                                Some(soa) => Box::new(ForwardLookup(soa)),
+                            match e.as_soa() {
+                                Some(soa) => soa,
                                 None => {
                                     debug!("error resolving: {}", e);
-                                    Box::new(EmptyLookup)
+                                    DnsResponse::empty()
                                 }
-                            };
-                            res
+                            }
                         }
                     }
                 };
 
-                let sections = LookupSections {
-                    answers,
-                    ns: Box::<AuthLookup>::default(),
-                    soa: Box::<AuthLookup>::default(),
-                    additionals: Box::<AuthLookup>::default(),
-                };
-
                 let response = MessageResponseBuilder::from_message_request(&request).build(
                     response_header,
-                    sections.answers.iter(),
-                    sections.ns.iter(),
-                    sections.soa.iter(),
-                    sections.additionals.iter(),
+                    dns_response.answers(),
+                    dns_response.name_servers(),
+                    Box::new(None.into_iter()),
+                    dns_response.additionals(),
                 );
 
                 let mut bytes = Vec::with_capacity(512);

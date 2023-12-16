@@ -82,7 +82,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
             }
 
             if is_current_server {
-                return Ok(Lookup::from_rdata(
+                return Ok(DnsResponse::from_rdata(
                     req.query().original().to_owned(),
                     RData::PTR(PTR(ctx.cfg().server_name())),
                 ));
@@ -98,7 +98,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                 if !records.is_empty() {
                     return Ok(DnsResponse::new_with_max_ttl(
                         query.original().to_owned(),
-                        records.into(),
+                        records,
                     ));
                 }
             }

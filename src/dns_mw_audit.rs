@@ -108,7 +108,8 @@ impl DnsAuditRecord {
             let mut out = String::new();
 
             for (i, record) in lookup
-                .record_iter()
+                .records()
+                .iter()
                 .filter(|r| r.data().is_some())
                 .enumerate()
             {
@@ -235,7 +236,7 @@ mod tests {
     fn test_dns_audit_to_string() {
         let now = "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap();
         let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
-        let result = Ok(Lookup::from_rdata(
+        let result = Ok(DnsResponse::from_rdata(
             query.to_owned(),
             RData::A("93.184.216.34".parse().unwrap()),
         ));
@@ -259,7 +260,7 @@ mod tests {
         let now = "2022-11-11 20:18:11.099966887 +08:00".parse().unwrap();
 
         let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
-        let result = Ok(Lookup::from_rdata(
+        let result = Ok(DnsResponse::from_rdata(
             query.to_owned(),
             RData::A("93.184.216.34".parse().unwrap()),
         ));
@@ -282,7 +283,7 @@ mod tests {
     fn test_record_audit_to_file() {
         let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
 
-        let result = Ok(Lookup::from_rdata(
+        let result = Ok(DnsResponse::from_rdata(
             query.to_owned(),
             RData::A("93.184.216.34".parse().unwrap()),
         ));
@@ -329,7 +330,7 @@ mod tests {
     fn test_record_audit_to_csv_file() {
         let query = Query::query(Name::from_str("www.example.com").unwrap(), RecordType::A);
 
-        let result = Ok(Lookup::from_rdata(
+        let result = Ok(DnsResponse::from_rdata(
             query.to_owned(),
             RData::A("93.184.216.34".parse().unwrap()),
         ));
