@@ -1,8 +1,6 @@
+use crate::dns::DnsResponse;
 use crate::libdns::proto::{error::ProtoError, op::ResponseCode};
-use crate::libdns::resolver::{
-    error::{ResolveError, ResolveErrorKind},
-    lookup::Lookup,
-};
+use crate::libdns::resolver::error::{ResolveError, ResolveErrorKind};
 use std::{io, sync::Arc};
 use thiserror::Error;
 
@@ -40,7 +38,7 @@ impl LookupError {
         self.as_soa().is_some()
     }
 
-    pub fn as_soa(&self) -> Option<Lookup> {
+    pub fn as_soa(&self) -> Option<DnsResponse> {
         if let Self::ResolveError(err) = self {
             if let ResolveErrorKind::NoRecordsFound {
                 query,
@@ -48,10 +46,10 @@ impl LookupError {
                 ..
             } = err.kind()
             {
-                return Some(Lookup::new_with_max_ttl(
+                return Some(DnsResponse::new_with_max_ttl(
                     query.as_ref().to_owned(),
-                    vec![record.as_ref().to_owned().into_record_of_rdata()].into(),
-                ));
+                    vec![record.as_ref().to_owned().into_record_of_rdata()],
+                )); // todo:// SOA nameservers
             }
         }
         None

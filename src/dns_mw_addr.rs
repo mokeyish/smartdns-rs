@@ -33,9 +33,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
             let name = query.name().to_owned();
             let valid_until = Instant::now() + Duration::from_secs(local_ttl);
 
-            let lookup = Lookup::new_with_deadline(
+            let lookup = DnsResponse::new_with_deadline(
                 query,
-                vec![Record::from_rdata(name, local_ttl as u32, rdata)].into(),
+                vec![Record::from_rdata(name, local_ttl as u32, rdata)],
                 valid_until,
             );
 
@@ -74,9 +74,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
                 }
 
                 match records {
-                    Cow::Owned(records) => Lookup::new_with_deadline(
+                    Cow::Owned(records) => DnsResponse::new_with_deadline(
                         lookup.query().clone(),
-                        records.to_vec().into(),
+                        records,
                         lookup.valid_until(),
                     ),
                     Cow::Borrowed(_) => lookup,
@@ -145,7 +145,6 @@ mod tests {
     use crate::{
         dns_conf::{DomainAddress, RuntimeConfig},
         dns_mw::*,
-        libdns::resolver::LookupTtl,
     };
 
     #[tokio::test(flavor = "multi_thread")]

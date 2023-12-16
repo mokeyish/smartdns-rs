@@ -1,0 +1,12 @@
+diff --git a/src/op/message.rs b/src/op/message.rs
+index 443f953..0559b57 100644
+--- a/src/op/message.rs
++++ b/src/op/message.rs
+@@ -620,7 +620,6 @@ impl Message {
+     // TODO: only necessary in tests, should it be removed?
+     /// this is necessary to match the counts in the header from the record sections
+     ///  this happens implicitly on write_to, so no need to call before write_to
+-    #[cfg(test)]
+     pub fn update_counts(&mut self) -> &mut Self {
+         self.header = update_header_counts(
+             &self.header,

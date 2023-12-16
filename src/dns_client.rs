@@ -5,10 +5,12 @@ use std::{
     path::PathBuf,
     slice::Iter,
     sync::Arc,
-    time::{Duration, Instant},
 };
 
-use crate::libdns::proto::rr::rdata::opt::{ClientSubnet, EdnsOption};
+use crate::{
+    dns::DnsResponse,
+    libdns::proto::rr::rdata::opt::{ClientSubnet, EdnsOption},
+};
 use tokio::sync::RwLock;
 
 use crate::{
@@ -29,8 +31,6 @@ use crate::{
 
 use crate::libdns::resolver::{
     config::{NameServerConfig, Protocol, ResolverOpts, TlsClientConfig},
-    lookup::Lookup,
-    lookup_ip::LookupIp,
     name_server::GenericConnector,
     TryParseIp,
 };
@@ -261,7 +261,11 @@ impl DnsClient {
         }
     }
 
-    pub async fn lookup_nameserver(&self, name: Name, record_type: RecordType) -> Option<Lookup> {
+    pub async fn lookup_nameserver(
+        &self,
+        name: Name,
+        record_type: RecordType,
+    ) -> Option<DnsResponse> {
         bootstrap::resolver()
             .await
             .local_lookup(name, record_type)
@@ -280,7 +284,7 @@ impl GenericResolver for DnsClient {
         &self,
         name: N,
         options: O,
-    ) -> Result<Lookup, LookupError> {
+    ) -> Result<DnsResponse, LookupError> {
         let ns = self.default().await;
         GenericResolver::lookup(ns.as_ref(), name, options).await
     }
@@ -403,7 +407,7 @@ impl GenericResolver for NameServerGroup {
         &self,
         name: N,
         options: O,
-    ) -> Result<Lookup, LookupError> {
+    ) -> Result<DnsResponse, LookupError> {
         use futures_util::future::select_all;
         let name = name.into_name()?;
         let mut tasks = self
@@ -563,6 +567,7 @@ impl NameServerFactory {
                     if let Some(domain) = url.domain() {
                         match resolver.lookup_ip(domain).await {
                             Ok(lookup_ip) => lookup_ip
+                                .ips()
                                 .into_iter()
                                 .map_while(|ip| {
                                     let mut url = url.clone();
@@ -652,7 +657,7 @@ impl GenericResolver for NameServer {
         &self,
         name: N,
         options: O,
-    ) -> Result<Lookup, LookupError> {
+    ) -> Result<DnsResponse, LookupError> {
         let name = name.into_name()?;
         let options: LookupOptions = options.into();
 
@@ -669,7 +674,7 @@ impl GenericResolver for NameServer {
         let client_subnet = options.client_subnet.or(self.opts.client_subnet);
 
         let req = DnsRequest::new(
-            build_message(query, request_options, client_subnet),
+            build_message(query, request_options, client_subnet, options.is_dnssec),
             request_options,
         );
 
@@ -677,24 +682,11 @@ impl GenericResolver for NameServer {
 
         let res = ns.send(req).first_answer().await?;
 
-        let valid_until = Instant::now()
-            + Duration::from_secs(
-                res.answers()
-                    .iter()
-                    .map(|r| r.ttl())
-                    .min()
-                    .unwrap_or(MAX_TTL) as u64,
-            );
-
-        Ok(Lookup::new_with_deadline(
-            res.query().unwrap().clone(),
-            res.answers().into(),
-            valid_until,
-        ))
+        Ok(From::<Message>::from(res.into()))
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct NameServerOpts {
     /// filter result with blacklist ip
     pub blacklist_ip: bool,
@@ -734,6 +726,21 @@ impl NameServerOpts {
     }
 }
 
+impl Default for NameServerOpts {
+    fn default() -> Self {
+        let mut resolver_opts = ResolverOpts::default();
+        resolver_opts.edns0 = true;
+
+        Self {
+            blacklist_ip: Default::default(),
+            whitelist_ip: Default::default(),
+            check_edns: Default::default(),
+            client_subnet: Default::default(),
+            resolver_opts,
+        }
+    }
+}
+
 impl Deref for NameServerOpts {
     type Target = ResolverOpts;
 
@@ -760,7 +767,7 @@ pub trait GenericResolver {
         &self,
         name: N,
         options: O,
-    ) -> Result<Lookup, LookupError>;
+    ) -> Result<DnsResponse, LookupError>;
 }
 
 #[async_trait::async_trait]
@@ -790,7 +797,7 @@ pub trait GenericResolverExt {
     async fn lookup_ip<N: IntoName + TryParseIp + Send>(
         &self,
         host: N,
-    ) -> Result<LookupIp, LookupError>;
+    ) -> Result<DnsResponse, LookupError>;
 }
 
 #[async_trait::async_trait]
@@ -802,7 +809,7 @@ where
     async fn lookup_ip<N: IntoName + TryParseIp + Send>(
         &self,
         host: N,
-    ) -> Result<LookupIp, LookupError> {
+    ) -> Result<DnsResponse, LookupError> {
         let mut finally_ip_addr: Option<Record> = None;
         let maybe_ip = host.try_parse_ip();
         let maybe_name: ProtoResult<Name> = host.into_name();
@@ -820,8 +827,8 @@ where
                 finally_ip_addr = Some(record);
             } else {
                 let query = Query::query(name, ip_addr.record_type());
-                let lookup = Lookup::new_with_max_ttl(query, Arc::from([record]));
-                return Ok(lookup.into());
+                let lookup = DnsResponse::new_with_max_ttl(query, vec![record]);
+                return Ok(lookup);
             }
         }
 
@@ -830,8 +837,8 @@ where
             (Err(_), Some(ip_addr)) => {
                 // it was a valid IP, return that...
                 let query = Query::query(ip_addr.name().clone(), ip_addr.record_type());
-                let lookup = Lookup::new_with_max_ttl(query, Arc::from([ip_addr.clone()]));
-                return Ok(lookup.into());
+                let lookup = DnsResponse::new_with_max_ttl(query, vec![ip_addr.clone()]);
+                return Ok(lookup);
             }
             (Err(err), None) => {
                 return Err(err.into());
@@ -865,7 +872,6 @@ where
                 Err(_err) => self.lookup(name.clone(), RecordType::AAAA).await,
             },
         }
-        .map(|lookup| lookup.into())
     }
 }
 
@@ -904,6 +910,7 @@ impl std::convert::TryFrom<DnsUrl> for VerifiedDnsUrl {
 
 #[derive(Clone)]
 pub struct LookupOptions {
+    pub is_dnssec: bool,
     pub record_type: RecordType,
     pub client_subnet: Option<ClientSubnet>,
 }
@@ -911,6 +918,7 @@ pub struct LookupOptions {
 impl Default for LookupOptions {
     fn default() -> Self {
         Self {
+            is_dnssec: false,
             record_type: RecordType::A,
             client_subnet: Default::default(),
         }
@@ -934,6 +942,7 @@ fn build_message(
     query: Query,
     request_options: DnsRequestOptions,
     client_subnet: Option<ClientSubnet>,
+    is_dnssec: bool,
 ) -> Message {
     // build the message
     let mut message: Message = Message::new();
@@ -948,7 +957,7 @@ fn build_message(
         .set_recursion_desired(request_options.recursion_desired);
 
     // Extended dns
-    if client_subnet.is_some() || request_options.use_edns {
+    if client_subnet.is_some() || request_options.use_edns || is_dnssec {
         message
             .extensions_mut()
             .get_or_insert_with(Edns::new)
@@ -957,6 +966,10 @@ fn build_message(
 
         if let (Some(client_subnet), Some(edns)) = (client_subnet, message.extensions_mut()) {
             edns.options_mut().insert(EdnsOption::Subnet(client_subnet));
+        }
+
+        if let (true, Some(edns)) = (is_dnssec, message.extensions_mut()) {
+            edns.set_dnssec_ok(is_dnssec);
         }
     }
     message
@@ -1086,13 +1099,17 @@ mod bootstrap {
             }
         }
 
-        pub async fn local_lookup(&self, name: Name, record_type: RecordType) -> Option<Lookup> {
+        pub async fn local_lookup(
+            &self,
+            name: Name,
+            record_type: RecordType,
+        ) -> Option<DnsResponse> {
             let query = Query::query(name.clone(), record_type);
             let store = self.ip_store.read().await;
 
             let lookup = store.get(&query).cloned();
 
-            lookup.map(|records| Lookup::new_with_max_ttl(query, records))
+            lookup.map(|records| DnsResponse::new_with_max_ttl(query, records.to_vec()))
         }
     }
 
@@ -1151,7 +1168,7 @@ mod bootstrap {
             &self,
             name: N,
             options: O,
-        ) -> Result<Lookup, LookupError> {
+        ) -> Result<DnsResponse, LookupError> {
             let name = name.into_name()?;
             let options: LookupOptions = options.into();
             let record_type = options.record_type;
@@ -1213,7 +1230,7 @@ mod tests {
     use crate::{
         dns_url::DnsUrl,
         preset_ns::{ALIDNS_IPS, CLOUDFLARE_IPS},
-        third_ext::FutureJoinAllExt,
+        third_ext::{FutureJoinAllExt, FutureTimeoutExt},
     };
     use std::net::IpAddr;
     use std::str::FromStr;
@@ -1225,9 +1242,11 @@ mod tests {
             .lookup("dns.alidns.com", RecordType::A)
             .await
             .unwrap();
-        assert!(lookup_ip.into_iter().any(|i| i.ip_addr()
-            == Some("223.5.5.5".parse::<IpAddr>().unwrap())
-            || i.ip_addr() == Some("223.6.6.6".parse::<IpAddr>().unwrap())));
+        assert!(lookup_ip
+            .ips()
+            .into_iter()
+            .any(|i| i == "223.5.5.5".parse::<IpAddr>().unwrap()
+                || i == "223.6.6.6".parse::<IpAddr>().unwrap()));
     }
 
     #[test]
@@ -1242,12 +1261,18 @@ mod tests {
 
     async fn query_google(client: &DnsClient) -> bool {
         let name = "dns.google";
-        let addrs = match client.lookup_ip(name).await {
-            Ok(lookup) => lookup
+        let addrs = match client
+            .lookup_ip(name)
+            .timeout(std::time::Duration::from_secs(5))
+            .await
+        {
+            Ok(Ok(lookup)) => lookup
+                .ips()
                 .iter()
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()
                 .join(" "),
+            Ok(Err(e)) => e.to_string(),
             Err(e) => e.to_string(),
         };
         // println!("name: {} addrs => {}", name, addrs);
@@ -1256,12 +1281,18 @@ mod tests {
 
     async fn query_alidns(client: &DnsClient) -> bool {
         let name = "dns.alidns.com";
-        let addrs = match client.lookup_ip(name).await {
-            Ok(lookup) => lookup
+        let addrs = match client
+            .lookup_ip(name)
+            .timeout(std::time::Duration::from_secs(5))
+            .await
+        {
+            Ok(Ok(lookup)) => lookup
+                .ips()
                 .iter()
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()
                 .join(" "),
+            Ok(Err(e)) => e.to_string(),
             Err(e) => e.to_string(),
         };
 

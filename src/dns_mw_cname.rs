@@ -42,11 +42,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddl
                         RData::CNAME(CNAME(cname.clone())),
                     )];
 
-                    Ok(Lookup::new_with_deadline(
-                        query,
-                        records.into(),
-                        valid_until,
-                    ))
+                    Ok(DnsResponse::new_with_deadline(query, records, valid_until))
                 } else {
                     let mut ctx =
                         DnsContext::new(&cname, ctx.cfg().clone(), ctx.server_opts().clone());

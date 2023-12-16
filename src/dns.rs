@@ -93,39 +93,44 @@ impl Default for LookupFrom {
 
 mod request {
 
-    use std::net::SocketAddr;
+    use std::{net::SocketAddr, ops::Deref, sync::Arc};
 
-    use crate::libdns::proto::{
-        op::{LowerQuery, Query},
-        rr::{Name, RecordType},
+    use crate::libdns::{
+        proto::{
+            op::{LowerQuery, Message, Query},
+            rr::{Name, RecordType},
+        },
+        server::{
+            authority::MessageRequest,
+            server::{Protocol, Request as OriginRequest},
+        },
     };
-    use crate::libdns::server::server::Protocol;
-
-    use crate::libdns::server::server::Request as OriginRequest;
 
     #[derive(Clone)]
-    pub struct Request {
+    pub struct DnsRequest {
         id: u16,
         /// Message with the associated query or update data
         query: LowerQuery,
+        message: Arc<MessageRequest>,
         /// Source address of the Client
         src: SocketAddr,
         /// Protocol of the request
         protocol: Protocol,
     }
 
-    impl From<&OriginRequest> for Request {
+    impl From<&OriginRequest> for DnsRequest {
         fn from(req: &OriginRequest) -> Self {
             Self {
                 id: req.id(),
                 query: req.query().to_owned(),
+                message: req.deref().clone().into(),
                 src: req.src(),
                 protocol: req.protocol(),
             }
         }
     }
 
-    impl Request {
+    impl DnsRequest {
         /// see `Header::id()`
         pub fn id(&self) -> u16 {
             self.id
@@ -155,6 +160,7 @@ mod request {
             Self {
                 id: self.id,
                 query: LowerQuery::from(Query::query(name, self.query().query_type())),
+                message: self.message.clone(),
                 src: self.src,
                 protocol: self.protocol,
             }
@@ -165,15 +171,31 @@ mod request {
             query.set_query_type(query_type);
             self.query = LowerQuery::from(query)
         }
+
+        pub fn is_dnssec(&self) -> bool {
+            let rtype = self.query().query_type();
+            self.edns()
+                .map(|e| e.dnssec_ok())
+                .unwrap_or(rtype.is_dnssec())
+        }
     }
 
-    impl From<Query> for Request {
+    impl std::ops::Deref for DnsRequest {
+        type Target = MessageRequest;
+
+        fn deref(&self) -> &Self::Target {
+            self.message.as_ref()
+        }
+    }
+
+    impl From<Query> for DnsRequest {
         fn from(query: Query) -> Self {
             use std::net::{Ipv4Addr, SocketAddrV4};
 
             Self {
                 id: rand::random(),
                 query: query.into(),
+                message: Arc::new(MessageRequest::default()),
                 src: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)),
                 protocol: Protocol::Udp,
             }
@@ -181,8 +203,181 @@ mod request {
     }
 }
 
-pub type DnsRequest = request::Request;
-pub type DnsResponse = Lookup;
+mod response {
+    use crate::dns_client::MAX_TTL;
+    use crate::libdns::proto::{
+        op::{Message, Query},
+        rr::{RData, Record},
+    };
+    use crate::libdns::resolver::TtlClip as _;
+
+    use std::net::IpAddr;
+    use std::ops::Deref;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    static DEFAULT_QUERY: once_cell::sync::Lazy<Query> = once_cell::sync::Lazy::new(Query::default);
+
+    #[derive(Debug, Clone, Eq, PartialEq)]
+    pub struct DnsResponse {
+        message: Arc<Message>,
+        valid_until: Instant,
+    }
+
+    impl DnsResponse {
+        pub fn new_with_max_ttl<R, I>(query: Query, records: R) -> Self
+        where
+            R: IntoIterator<Item = Record, IntoIter = I>,
+            I: Iterator<Item = Record>,
+        {
+            let valid_until = Instant::now() + Duration::from_secs(u64::from(MAX_TTL));
+            Self::new_with_deadline(query, records, valid_until)
+        }
+
+        pub fn new_with_deadline<R, I>(query: Query, records: R, valid_until: Instant) -> Self
+        where
+            R: IntoIterator<Item = Record, IntoIter = I>,
+            I: Iterator<Item = Record>,
+        {
+            let mut message = Message::new();
+            message.add_query(query.clone());
+            message.add_answers(records);
+            message.update_counts();
+
+            Self {
+                message: message.into(),
+                valid_until,
+            }
+        }
+
+        pub fn empty() -> Self {
+            Self {
+                message: Default::default(),
+                valid_until: Instant::now(),
+            }
+        }
+
+        /// Return new instance with given rdata and the maximum TTL.
+        pub fn from_rdata(query: Query, rdata: RData) -> Self {
+            let record = Record::from_rdata(query.name().clone(), MAX_TTL, rdata);
+            Self::new_with_max_ttl(query, vec![record])
+        }
+
+        pub fn query(&self) -> &Query {
+            self.deref().query().unwrap_or(&DEFAULT_QUERY)
+        }
+
+        pub fn message(&self) -> &Message {
+            &self.message
+        }
+
+        pub fn valid_until(&self) -> Instant {
+            self.valid_until
+        }
+
+        pub fn with_valid_until(mut self, valid_until: Instant) -> Self {
+            self.valid_until = valid_until;
+            self
+        }
+
+        pub fn records(&self) -> &[Record] {
+            self.message.answers()
+        }
+
+        pub fn record_iter(&self) -> std::slice::Iter<'_, Record> {
+            self.records().iter()
+        }
+
+        pub fn ips(&self) -> Vec<IpAddr> {
+            self.message()
+                .answers()
+                .iter()
+                .flat_map(|r| r.data().and_then(|d| d.ip_addr()))
+                .collect()
+        }
+    }
+
+    impl std::ops::Deref for DnsResponse {
+        type Target = Message;
+
+        fn deref(&self) -> &Self::Target {
+            &self.message
+        }
+    }
+
+    impl From<Message> for DnsResponse {
+        fn from(message: Message) -> Self {
+            let valid_until = Instant::now()
+                + Duration::from_secs(
+                    message
+                        .answers()
+                        .iter()
+                        .map(|r| r.ttl())
+                        .min()
+                        .unwrap_or(MAX_TTL) as u64,
+                );
+            Self {
+                message: message.into(),
+                valid_until,
+            }
+        }
+    }
+
+    impl DnsResponse {
+        pub fn max_ttl(&self) -> Option<u32> {
+            self.records().iter().map(|record| record.ttl()).max()
+        }
+
+        pub fn min_ttl(&self) -> Option<u32> {
+            self.records().iter().map(|record| record.ttl()).min()
+        }
+
+        pub fn with_new_ttl(&self, ttl: u32) -> Self {
+            let records = self
+                .records()
+                .iter()
+                .map(|record| {
+                    let mut record = record.clone();
+                    record.set_ttl(ttl);
+                    record
+                })
+                .collect::<Vec<_>>();
+
+            Self::new_with_deadline(self.query().clone(), records, self.valid_until())
+        }
+
+        pub fn with_max_ttl(&self, ttl: u32) -> Self {
+            let records = self
+                .records()
+                .iter()
+                .map(|record| {
+                    let mut record = record.clone();
+                    record.set_max_ttl(ttl);
+                    record
+                })
+                .collect::<Vec<_>>();
+
+            Self::new_with_deadline(self.query().clone(), records, self.valid_until())
+        }
+
+        pub fn with_min_ttl(&self, ttl: u32) -> Self {
+            let records = self
+                .records()
+                .iter()
+                .map(|record| {
+                    let mut record = record.clone();
+                    record.set_min_ttl(ttl);
+                    record
+                })
+                .collect::<Vec<_>>();
+
+            Self::new_with_deadline(self.query().clone(), records, self.valid_until())
+        }
+    }
+}
+
+pub type DnsRequest = request::DnsRequest;
+pub type DnsResponse = response::DnsResponse;
 pub type DnsError = LookupError;
 
 #[derive(Debug, Clone, Copy, Default)]

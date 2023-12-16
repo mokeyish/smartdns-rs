@@ -18,13 +18,13 @@ license = "GPL-v3.0"
 readme = "README.md"
 
 [package.metadata.patch]
-# crates = ["boomphf"]
+crates = ["hickory-server", "hickory-proto"]
 
 [features]
 
 default = ["dns-over-tls", "dns-over-https", "dns-over-quic"]
 
-homebrew = ["dns-over-tls", "dns-over-https", "dns-over-quic"]
+homebrew = ["default"]
 
 failed_tests = []
 disable_icmp_ping = []
@@ -39,6 +39,8 @@ dns-over-https-rustls = [
   "hickory-server/dns-over-https-rustls",
 ]
 
+dnssec = ["hickory-proto/dnssec"]
+
 experimental = ["experimental-trie", "experimental-phf"]
 
 experimental-trie = []
@@ -50,10 +52,9 @@ experimental-phf = [
 
 [patch.crates-io]
 # rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
-# quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
-# hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
 # hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
-# hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
+hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
+hickory-proto = { path = "./target/patch/hickory-proto-0.24.0" }
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
@@ -130,7 +131,7 @@ rand = "0.8.5"
 smallvec = "1.10.0"
 csv = "1.1"
 hostname = "0.3"
-byte-unit = "5.0.3"
+byte-unit = { version = "5.0.3", features = ["serde"]}
 ipnet = "2.7"
 which = "5.0.0"
 

@@ -35,9 +35,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsmasqMiddle
             let name = query.name().to_owned();
             let valid_until = Instant::now() + Duration::from_secs(local_ttl);
 
-            let lookup = Lookup::new_with_deadline(
+            let lookup = DnsResponse::new_with_deadline(
                 query,
-                vec![Record::from_rdata(name, local_ttl as u32, rdata)].into(),
+                vec![Record::from_rdata(name, local_ttl as u32, rdata)],
                 valid_until,
             );
 
