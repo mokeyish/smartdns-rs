@@ -23,6 +23,7 @@ pub trait IDomainSetProvider {
 pub struct DomainSetFileProvider {
     pub name: String,
     pub file: PathBuf,
+    pub content_type: DomainSetContentType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,13 @@ pub struct DomainSetHttpProvider {
     pub name: String,
     pub url: Url,
     pub interval: Option<usize>,
+    pub content_type: DomainSetContentType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DomainSetContentType {
+    #[default]
+    List,
 }
 
 impl IDomainSetProvider for DomainSetFileProvider {

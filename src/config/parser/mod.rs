@@ -11,7 +11,7 @@ mod config_for_domain;
 mod domain;
 mod domain_policy;
 mod domain_rule;
-mod domain_set_provider;
+mod domain_set;
 mod file_mode;
 mod forward_rule;
 mod ipnet;
@@ -313,7 +313,8 @@ mod tests {
                 "",
                 OneConfig::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
                     name: "outbound".to_string(),
-                    file: Path::new("/etc/smartdns/geoip.txt").to_path_buf()
+                    file: Path::new("/etc/smartdns/geoip.txt").to_path_buf(),
+                    content_type: Default::default(),
                 }))
             )
         );
