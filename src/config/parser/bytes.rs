@@ -26,6 +26,10 @@ mod tests {
             Ok(("", Byte::from_u64_with_unit(123, Unit::MB).unwrap()))
         );
         assert_eq!(
+            Byte::parse("123m"),
+            Ok(("", Byte::from_u64_with_unit(123, Unit::MB).unwrap()))
+        );
+        assert_eq!(
             Byte::parse("80mb"),
             Ok(("", Byte::from_u64_with_unit(80, Unit::MB).unwrap()))
         );
