@@ -2,10 +2,13 @@ use super::*;
 
 impl NomParser for SpeedCheckModeList {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map(
-            separated_list1(delimited(space0, char(','), space0), NomParser::parse),
-            SpeedCheckModeList,
-        )(input)
+        alt((
+            value(Default::default(), tag_no_case("none")),
+            map(
+                separated_list1(delimited(space0, char(','), space0), NomParser::parse),
+                SpeedCheckModeList,
+            ),
+        ))(input)
     }
 }
 
@@ -60,6 +63,14 @@ mod tests {
         assert_eq!(
             SpeedCheckModeList::parse("ping,tcp:96"),
             Ok(("", vec![Ping, Tcp(96)].into()))
+        );
+    }
+
+    #[test]
+    fn test_speed_mode_none() {
+        assert_eq!(
+            SpeedCheckModeList::parse("none"),
+            Ok(("", Default::default()))
         );
     }
 }

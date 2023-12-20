@@ -150,6 +150,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("bind-cert-file"), OneConfig::BindCertFile),
         map(parse_item("bind-cert-key-file"), OneConfig::BindCertKeyFile),
         map(parse_item("bind-cert-key-pass"), OneConfig::BindCertKeyPass),
+        map(parse_item("blacklist-ip"), OneConfig::BlacklistIp),
         map(parse_item("cache-file"), OneConfig::CacheFile),
         map(parse_item("cache-persist"), OneConfig::CachePersist),
         map(parse_item("ca-file"), OneConfig::CaFile),
@@ -191,6 +192,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("log-filter"), OneConfig::LogFilter),
         map(parse_item("log-level"), OneConfig::LogLevel),
         map(parse_item("log-num"), OneConfig::LogNum),
+        map(parse_item("log-size"), OneConfig::LogSize),
         map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
         map(parse_item("nameserver"), OneConfig::ForwardRule),
     ));
@@ -202,6 +204,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("rr-ttl-max"), OneConfig::RrTtlMax),
         map(parse_item("rr-ttl"), OneConfig::RrTtl),
         map(parse_item("resolv-file"), OneConfig::ResolvFile),
+        map(parse_item("response-mode"), OneConfig::ResponseMode),
         map(parse_item("server-name"), OneConfig::ServerName),
         map(parse_item("speed-check-mode"), OneConfig::SpeedMode),
         map(
@@ -210,6 +213,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         ),
         map(parse_item("serve-expired-ttl"), OneConfig::ServeExpiredTtl),
         map(parse_item("serve-expired"), OneConfig::ServeExpired),
+        map(parse_item("resolv-hostname"), OneConfig::ResolvHostname),
         map(parse_item("tcp-idle-time"), OneConfig::TcpIdleTime),
         map(parse_item("nftset"), OneConfig::NftSet),
         map(parse_item("user"), OneConfig::User),
@@ -221,6 +225,8 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -252,6 +258,63 @@ mod tests {
                         name: "dns4".to_string()
                     })]
                 })
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_blacklist_ip() {
+        assert_eq!(
+            parse_config("blacklist-ip  243.185.187.39").unwrap(),
+            (
+                "",
+                OneConfig::BlacklistIp("243.185.187.39/32".parse().unwrap())
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_log_size() {
+        assert_eq!(
+            parse_config("log-size 1M").unwrap(),
+            ("", OneConfig::LogSize("1M".parse().unwrap()))
+        );
+    }
+
+    #[test]
+    fn test_parse_speed_check_mode() {
+        assert_eq!(
+            parse_config("speed-check-mode none").unwrap(),
+            ("", OneConfig::SpeedMode(Default::default()))
+        );
+    }
+
+    #[test]
+    fn test_parse_response_mode() {
+        assert_eq!(
+            parse_config("response-mode fastest-response").unwrap(),
+            ("", OneConfig::ResponseMode(ResponseMode::FastestResponse))
+        );
+    }
+
+    #[test]
+    fn test_parse_resolv_hostname() {
+        assert_eq!(
+            parse_config("resolv-hostname no").unwrap(),
+            ("", OneConfig::ResolvHostname(false))
+        );
+    }
+
+    #[test]
+    fn test_parse_domain_set() {
+        assert_eq!(
+            parse_config("domain-set -name outbound -file /etc/smartdns/geoip.txt").unwrap(),
+            (
+                "",
+                OneConfig::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
+                    name: "outbound".to_string(),
+                    file: Path::new("/etc/smartdns/geoip.txt").to_path_buf()
+                }))
             )
         );
     }

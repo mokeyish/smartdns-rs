@@ -52,7 +52,7 @@ impl NomParser for DomainSetFileProvider {
 
         let (rest_input, _) = separated_list1(space1, one)(input)?;
 
-        if is_file_provider {
+        if is_file_provider || file.is_some() {
             if let (Some(name), Some(file)) = (name, file) {
                 return Ok((rest_input, DomainSetFileProvider { name, file }));
             }
@@ -138,6 +138,17 @@ mod tests {
 
     #[test]
     fn test_parse_file_provider() {
+        assert_eq!(
+            DomainSetProvider::parse("-name set -file /path/to/list"),
+            Ok((
+                "",
+                DomainSetProvider::File(DomainSetFileProvider {
+                    name: "set".to_string(),
+                    file: PathBuf::from("/path/to/list")
+                })
+            ))
+        );
+
         assert_eq!(
             DomainSetProvider::parse("-type list -name set -file /path/to/list"),
             Ok((
