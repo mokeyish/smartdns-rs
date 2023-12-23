@@ -8,7 +8,11 @@ use std::{
 use rustls::ClientConfig;
 use rustls_native_certs::Certificate;
 
-use crate::log::warn;
+use crate::{
+    config::SslConfig,
+    error::Error,
+    log::{self, warn},
+};
 
 #[derive(Clone)]
 pub struct TlsClientConfigBundle {
@@ -148,4 +152,48 @@ fn load_pem_certs(path: &Path) -> Result<Vec<Certificate>, io::Error> {
             format!("Could not load PEM file {:?}", path),
         )),
     }
+}
+
+pub fn load_certificate_and_key(
+    ssl_config: &SslConfig,
+    cert_file: Option<&Path>,
+    key_file: Option<&Path>,
+    typ: &'static str,
+) -> Result<(Vec<rustls::Certificate>, rustls::PrivateKey), Error> {
+    use crate::libdns::proto::rustls::tls_server::{read_cert, read_key};
+
+    let certificate_path = ssl_config
+        .certificate
+        .as_deref()
+        .or(cert_file)
+        .ok_or_else(|| Error::CertificatePathNotDefined(typ))?;
+
+    let certificate_key_path = ssl_config
+        .certificate_key
+        .as_deref()
+        .or(key_file)
+        .ok_or_else(|| Error::CertificateKeyPathNotDefined(typ))?;
+
+    if let Some(server_name) = ssl_config.server_name.as_deref() {
+        log::info!(
+            "loading cert for DNS over Https named {} from {:?}",
+            server_name,
+            certificate_path
+        );
+    } else {
+        log::info!(
+            "loading cert for DNS over Https from {:?}",
+            certificate_path
+        );
+    }
+
+    let certificate = read_cert(certificate_path).map_err(|err| {
+        Error::LoadCertificateFailed(certificate_path.to_path_buf(), err.to_string())
+    })?;
+
+    let certificate_key = read_key(certificate_key_path).map_err(|err| {
+        Error::LoadCertificateKeyFailed(certificate_key_path.to_path_buf(), err.to_string())
+    })?;
+
+    Ok((certificate, certificate_key))
 }

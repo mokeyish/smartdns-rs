@@ -91,6 +91,52 @@ impl Default for LookupFrom {
     }
 }
 
+mod serial_message {
+    use crate::libdns::proto::xfer::SerialMessage as OriginalSerialMessage;
+    use crate::libdns::Protocol;
+    use std::net::SocketAddr;
+
+    pub struct SerialMessage {
+        pub message: Vec<u8>,
+        pub addr: SocketAddr,
+        pub protocol: Protocol,
+        pub fmt: SerialMessageFormat,
+    }
+
+    impl SerialMessage {
+        pub fn binary(bytes: Vec<u8>, addr: SocketAddr, protocol: Protocol) -> Self {
+            Self {
+                message: bytes,
+                addr,
+                protocol,
+                fmt: SerialMessageFormat::Binary,
+            }
+        }
+        pub fn json(bytes: Vec<u8>, addr: SocketAddr, protocol: Protocol) -> Self {
+            Self {
+                message: bytes,
+                addr,
+                protocol,
+                fmt: SerialMessageFormat::Json,
+            }
+        }
+    }
+
+    impl From<SerialMessage> for OriginalSerialMessage {
+        fn from(val: SerialMessage) -> Self {
+            assert_eq!(val.fmt, SerialMessageFormat::Binary);
+            OriginalSerialMessage::new(val.message, val.addr)
+        }
+    }
+
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub enum SerialMessageFormat {
+        #[default]
+        Binary,
+        Json,
+    }
+}
+
 mod request {
 
     use std::{net::SocketAddr, ops::Deref, sync::Arc};
@@ -100,37 +146,36 @@ mod request {
             op::{LowerQuery, Message, Query},
             rr::{Name, RecordType},
         },
-        server::{
-            authority::MessageRequest,
-            server::{Protocol, Request as OriginRequest},
-        },
+        Protocol,
     };
+
+    use super::DnsError;
 
     #[derive(Clone)]
     pub struct DnsRequest {
         id: u16,
         /// Message with the associated query or update data
         query: LowerQuery,
-        message: Arc<MessageRequest>,
+        message: Arc<Message>,
         /// Source address of the Client
         src: SocketAddr,
         /// Protocol of the request
         protocol: Protocol,
     }
 
-    impl From<&OriginRequest> for DnsRequest {
-        fn from(req: &OriginRequest) -> Self {
+    impl DnsRequest {
+        pub fn new(message: Message, src_addr: SocketAddr, protocol: Protocol) -> Self {
+            let id = message.id();
+            let query = message.query().cloned().unwrap_or_default();
             Self {
-                id: req.id(),
-                query: req.query().to_owned(),
-                message: req.deref().clone().into(),
-                src: req.src(),
-                protocol: req.protocol(),
+                id,
+                query: query.into(),
+                message: Arc::new(message),
+                src: src_addr,
+                protocol,
             }
         }
-    }
 
-    impl DnsRequest {
         /// see `Header::id()`
         pub fn id(&self) -> u16 {
             self.id
@@ -174,14 +219,15 @@ mod request {
 
         pub fn is_dnssec(&self) -> bool {
             let rtype = self.query().query_type();
-            self.edns()
+            self.extensions()
+                .as_ref()
                 .map(|e| e.dnssec_ok())
                 .unwrap_or(rtype.is_dnssec())
         }
     }
 
     impl std::ops::Deref for DnsRequest {
-        type Target = MessageRequest;
+        type Target = Message;
 
         fn deref(&self) -> &Self::Target {
             self.message.as_ref()
@@ -195,7 +241,7 @@ mod request {
             Self {
                 id: rand::random(),
                 query: query.into(),
-                message: Arc::new(MessageRequest::default()),
+                message: Arc::new(Message::default()),
                 src: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)),
                 protocol: Protocol::Udp,
             }
@@ -204,9 +250,10 @@ mod request {
 }
 
 mod response {
+
     use crate::dns_client::MAX_TTL;
     use crate::libdns::proto::{
-        op::{Message, Query},
+        op::{Header, Message, Query},
         rr::{RData, Record},
     };
     use crate::libdns::resolver::TtlClip as _;
@@ -215,6 +262,8 @@ mod response {
     use std::ops::Deref;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
+
+    use super::DnsRequest;
 
     static DEFAULT_QUERY: once_cell::sync::Lazy<Query> = once_cell::sync::Lazy::new(Query::default);
 
@@ -294,6 +343,14 @@ mod response {
                 .iter()
                 .flat_map(|r| r.data().and_then(|d| d.ip_addr()))
                 .collect()
+        }
+
+        pub fn into_message(self, header: Option<Header>) -> Message {
+            let mut message = self.message.as_ref().clone();
+            if let Some(header) = header {
+                message.set_header(header);
+            }
+            message
         }
     }
 
@@ -379,6 +436,7 @@ mod response {
 pub type DnsRequest = request::DnsRequest;
 pub type DnsResponse = response::DnsResponse;
 pub type DnsError = LookupError;
+pub use serial_message::{SerialMessage, SerialMessageFormat};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum LookupResponseStrategy {

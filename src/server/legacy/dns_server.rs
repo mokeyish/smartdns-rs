@@ -13,11 +13,10 @@ use crate::libdns::{
     proto::{
         op::{Edns, Header, MessageType, OpCode, ResponseCode},
         rr::Record,
-        xfer::SerialMessage,
     },
     server::{
         authority::{LookupOptions, MessageResponse, MessageResponseBuilder, ZoneType},
-        server::{Protocol, Request, RequestHandler, ResponseHandler, ResponseInfo},
+        server::{Request, RequestHandler, ResponseHandler, ResponseInfo},
     },
 };
 
@@ -125,7 +124,7 @@ impl RequestHandler for DnsServerHandler {
                             // let future = self.dns_server.search(request_info, lookup_options);
 
                             let future = async {
-                                let req: &DnsRequest = &request.into();
+                                let req = &DnsRequest::from(request);
 
                                 let handler = self.app.get_dns_handler().await;
 
@@ -302,134 +301,18 @@ impl ServeFaild for ResponseInfo {
     }
 }
 
-impl DnsServerHandler {
-    pub async fn handle<'a>(&self, message: SerialMessage, protocol: Protocol) -> SerialMessage {
-        use crate::libdns::proto::error::ProtoError;
-        use crate::libdns::proto::op::{message, LowerQuery, Query};
-        use crate::libdns::proto::serialize::binary::{BinDecodable, BinDecoder, BinEncoder};
-        use crate::libdns::server::authority::MessageRequest;
-
-        let mut decoder = BinDecoder::new(message.bytes());
-        let src_addr = message.addr();
-
-        match MessageRequest::read(&mut decoder) {
-            Ok(message) if message.message_type() != MessageType::Response => {
-                let id = message.id();
-                let qflags = message.header().flags();
-                let qop_code = message.op_code();
-                let message_type = message.message_type();
-                let is_dnssec = message.edns().map_or(false, Edns::dnssec_ok);
-
-                let request = Request::new(message, src_addr, protocol);
-
-                {
-                    let info = request.request_info();
-                    let query = info.query;
-                    let query_name = query.name();
-                    let query_type = query.query_type();
-                    let query_class = query.query_class();
-                    debug!(
-                        "request:{id} src:{proto}://{addr}#{port} type:{message_type} dnssec:{is_dnssec} {op}:{query}:{qtype}:{class} qflags:{qflags}",
-                        id = id,
-                        proto = protocol,
-                        addr = src_addr.ip(),
-                        port = src_addr.port(),
-                        message_type= message_type,
-                        is_dnssec = is_dnssec,
-                        op = qop_code,
-                        query = query_name,
-                        qtype = query_type,
-                        class = query_class,
-                        qflags = qflags,
-                    );
-                }
-
-                // start process
-                let request_header = request.header();
-                let mut response_header = Header::response_from_request(request_header);
-
-                let dns_response = {
-                    let req = &DnsRequest::from(&request);
-                    let handler = self.app.get_dns_handler().await;
-                    match handler.search(req, &self.server_opts).await {
-                        Ok(lookup) => lookup,
-                        Err(e) => {
-                            if e.is_nx_domain() {
-                                response_header.set_response_code(ResponseCode::NXDomain);
-                            }
-
-                            match e.as_soa() {
-                                Some(soa) => soa,
-                                None => {
-                                    debug!("error resolving: {}", e);
-                                    DnsResponse::empty()
-                                }
-                            }
-                        }
-                    }
-                };
-
-                let response = MessageResponseBuilder::from_message_request(&request).build(
-                    response_header,
-                    dns_response.answers(),
-                    dns_response.name_servers(),
-                    Box::new(None.into_iter()),
-                    dns_response.additionals(),
-                );
-
-                let mut bytes = Vec::with_capacity(512);
-                // mut block
-                {
-                    let mut encoder = BinEncoder::new(&mut bytes);
-                    let _ = response.destructive_emit(&mut encoder);
-                };
-
-                SerialMessage::new(bytes, src_addr)
-            }
-
-            Err(ProtoError { kind, .. }) if kind.as_form_error().is_some() => {
-                // We failed to parse the request due to some issue in the message, but the header is available, so we can respond
-                let (request_header, error) = kind
-                    .into_form_error()
-                    .expect("as form_error already confirmed this is a FormError");
-
-                let query = LowerQuery::query(Query::default());
-
-                // debug for more info on why the message parsing failed
-                debug!(
-                    "request:{id} src:{proto}://{addr}#{port} type:{message_type} {op}:FormError:{error}",
-                    id = request_header.id(),
-                    proto = protocol,
-                    addr = src_addr.ip(),
-                    port = src_addr.port(),
-                    message_type= request_header.message_type(),
-                    op = request_header.op_code(),
-                    error = error,
-                );
-
-                let mut response_header = Header::response_from_request(&request_header);
-                response_header.set_response_code(ResponseCode::FormErr);
-
-                let mut bytes = Vec::with_capacity(512);
-
-                {
-                    let mut encoder = BinEncoder::new(&mut bytes);
-
-                    let _ = message::emit_message_parts(
-                        &response_header,
-                        &mut Box::new([&query].into_iter()),
-                        &mut Box::new(None::<&Record>.into_iter()),
-                        &mut Box::new(None::<&Record>.into_iter()),
-                        &mut Box::new(None::<&Record>.into_iter()),
-                        Default::default(),
-                        Default::default(),
-                        &mut encoder,
-                    );
-                }
-
-                SerialMessage::new(bytes, src_addr)
-            }
-            _ => SerialMessage::new(Vec::with_capacity(0), src_addr),
-        }
+impl From<&Request> for crate::dns::DnsRequest {
+    fn from(value: &Request) -> Self {
+        use crate::libdns::proto::op::MessageParts;
+        let message_parts = MessageParts {
+            header: value.header().clone(),
+            queries: vec![value.query().original().clone()],
+            answers: value.answers().into_iter().cloned().collect(),
+            name_servers: value.name_servers().into_iter().cloned().collect(),
+            additionals: value.additionals().into_iter().cloned().collect(),
+            sig0: value.sig0().into_iter().cloned().collect(),
+            edns: value.edns().cloned(),
+        };
+        DnsRequest::new(message_parts.into(), value.src(), value.protocol())
     }
 }

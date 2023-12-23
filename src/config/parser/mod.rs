@@ -100,7 +100,7 @@ pub enum OneConfig {
     ForceQtypeSoa(RecordType),
     ForwardRule(ForwardRule),
     IgnoreIp(IpNet),
-    Listener(Listener),
+    Listener(ListenerConfig),
     LocalTtl(u64),
     LogNum(u64),
     LogSize(Byte),

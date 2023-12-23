@@ -149,7 +149,7 @@ impl RuntimeConfig {
         self.num_workers
     }
 
-    pub fn listeners(&self) -> &[Listener] {
+    pub fn listeners(&self) -> &[ListenerConfig] {
         &self.listeners
     }
 
@@ -528,7 +528,7 @@ impl RuntimeConfigBuilder {
         let mut cfg = self.0;
 
         if cfg.listeners.is_empty() {
-            cfg.listeners.push(UdpListener::default().into())
+            cfg.listeners.push(UdpListenerConfig::default().into())
         }
 
         let bogus_nxdomain: Arc<IpSet> = cfg.bogus_nxdomain.compact().into();
@@ -626,7 +626,7 @@ impl RuntimeConfigBuilder {
             let mut remove_idx = vec![];
             for (idx, listener) in cfg.listeners.iter().enumerate().rev() {
                 let addr = listener.sock_addr();
-                if matches!(listener, Listener::Udp(_) | Listener::Quic(_)) {
+                if matches!(listener, ListenerConfig::Udp(_) | ListenerConfig::Quic(_)) {
                     if !udp_addr.insert(addr) {
                         remove_idx.push(idx)
                     }
@@ -874,7 +874,7 @@ mod parse {
         use crate::libdns::resolver::config::Protocol;
         use byte_unit::Byte;
 
-        use crate::config::{HttpsListener, ListenerAddress, ServerOpts, SslConfig};
+        use crate::config::{HttpsListenerConfig, ListenerAddress, ServerOpts, SslConfig};
 
         use super::*;
 
@@ -889,21 +889,21 @@ mod parse {
             assert_eq!(
                 cfg.listeners()
                     .iter()
-                    .filter(|x| matches!(x, Listener::Tcp(_)))
+                    .filter(|x| matches!(x, ListenerConfig::Tcp(_)))
                     .count(),
                 0
             );
             assert_eq!(
                 cfg.listeners()
                     .iter()
-                    .filter(|x| matches!(x, Listener::Tls(_)))
+                    .filter(|x| matches!(x, ListenerConfig::Tls(_)))
                     .count(),
                 1
             );
             assert_eq!(
                 cfg.listeners()
                     .iter()
-                    .filter(|x| matches!(x, Listener::Https(_)))
+                    .filter(|x| matches!(x, ListenerConfig::Https(_)))
                     .count(),
                 1
             );
@@ -939,7 +939,7 @@ mod parse {
 
             assert_eq!(
                 listener,
-                &Listener::Https(HttpsListener {
+                &ListenerConfig::Https(HttpsListenerConfig {
                     listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
                     port: 443,
                     device: Some("eth2".to_string()),
@@ -968,7 +968,7 @@ mod parse {
 
             assert_eq!(
                 listener,
-                &Listener::Https(HttpsListener {
+                &ListenerConfig::Https(HttpsListenerConfig {
                     listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
                     port: 4453,
                     ssl_config: SslConfig {

@@ -6,19 +6,19 @@ use crate::third_ext::serde_str;
 
 use super::{ServerOpts, SslConfig};
 
-#[enum_dispatch(NomParser, IListener)]
+#[enum_dispatch(NomParser, IListenerConfig)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum Listener {
-    Udp(UdpListener),
-    Tcp(TcpListener),
-    Tls(TlsListener),
-    Https(HttpsListener),
-    Quic(QuicListener),
+pub enum ListenerConfig {
+    Udp(UdpListenerConfig),
+    Tcp(TcpListenerConfig),
+    Tls(TlsListenerConfig),
+    Https(HttpsListenerConfig),
+    Quic(QuicListenerConfig),
 }
 
 #[enum_dispatch]
-pub trait IListener {
+pub trait IListenerConfig {
     fn listen(&self) -> ListenerAddress;
     fn mut_listen(&mut self) -> &mut ListenerAddress;
     fn port(&self) -> u16;
@@ -37,7 +37,7 @@ pub trait IListener {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct UdpListener {
+pub struct UdpListenerConfig {
     /// listen adress
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
@@ -51,7 +51,7 @@ pub struct UdpListener {
     pub opts: ServerOpts,
 }
 
-impl Default for UdpListener {
+impl Default for UdpListenerConfig {
     fn default() -> Self {
         Self {
             listen: ListenerAddress::V4(Ipv4Addr::UNSPECIFIED),
@@ -63,7 +63,7 @@ impl Default for UdpListener {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TcpListener {
+pub struct TcpListenerConfig {
     /// listen adress
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
@@ -78,25 +78,7 @@ pub struct TcpListener {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TlsListener {
-    /// listen adress
-    #[serde(with = "serde_str")]
-    pub listen: ListenerAddress,
-    /// listen port
-    pub port: u16,
-    /// bind network device.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device: Option<String>,
-    /// the server options
-    #[serde(flatten)]
-    pub opts: ServerOpts,
-    /// ssl config
-    #[serde(flatten)]
-    pub ssl_config: SslConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct HttpsListener {
+pub struct TlsListenerConfig {
     /// listen adress
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
@@ -114,7 +96,25 @@ pub struct HttpsListener {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct QuicListener {
+pub struct HttpsListenerConfig {
+    /// listen adress
+    #[serde(with = "serde_str")]
+    pub listen: ListenerAddress,
+    /// listen port
+    pub port: u16,
+    /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    /// the server options
+    #[serde(flatten)]
+    pub opts: ServerOpts,
+    /// ssl config
+    #[serde(flatten)]
+    pub ssl_config: SslConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct QuicListenerConfig {
     /// listen adress
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
@@ -134,7 +134,7 @@ pub struct QuicListener {
 macro_rules! impl_listener {
     ($($name:ident),+) => {
         $(
-            impl IListener for $name {
+            impl IListenerConfig for $name {
                 fn listen(&self) -> ListenerAddress {
                     self.listen
                 }
@@ -158,11 +158,11 @@ macro_rules! impl_listener {
 }
 
 impl_listener!(
-    UdpListener,
-    TcpListener,
-    TlsListener,
-    HttpsListener,
-    QuicListener
+    UdpListenerConfig,
+    TcpListenerConfig,
+    TlsListenerConfig,
+    HttpsListenerConfig,
+    QuicListenerConfig
 );
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]

@@ -41,38 +41,38 @@ fn parse_listen_address(input: &str) -> IResult<&str, ListenerAddress> {
     alt((ip, any))(input)
 }
 
-impl NomParser for Listener {
+impl NomParser for ListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
         parse(input)
     }
 }
 
-impl NomParser for UdpListener {
+impl NomParser for UdpListenerConfig {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Self> {
         map_res(parse, TryInto::try_into)(input)
     }
 }
 
-impl NomParser for TcpListener {
+impl NomParser for TcpListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
         map_res(parse, TryInto::try_into)(input)
     }
 }
 
-impl NomParser for TlsListener {
+impl NomParser for TlsListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
         map_res(parse, TryInto::try_into)(input)
     }
 }
 
-impl NomParser for QuicListener {
+impl NomParser for QuicListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
         map_res(parse, TryInto::try_into)(input)
     }
 }
 
-impl NomParser for HttpsListener {
+impl NomParser for HttpsListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
         map_res(parse, TryInto::try_into)(input)
     }
@@ -100,7 +100,7 @@ impl NomParser for HttpsListener {
 ///  IPV6:
 ///    bind [::]:53
 ///    bind-tcp [::]:53
-fn parse(input: &str) -> IResult<&str, Listener> {
+fn parse(input: &str) -> IResult<&str, ListenerConfig> {
     let proto = alt((
         value(Protocol::Tcp, tag_no_case("bind-tcp")),
         value(Protocol::Tls, tag_no_case("bind-tls")),
@@ -146,29 +146,21 @@ fn parse(input: &str) -> IResult<&str, Listener> {
     }
 
     let listener = match proto {
-        Protocol::Udp => UdpListener {
+        Protocol::Udp => UdpListenerConfig {
             listen,
             port,
             device,
             opts,
         }
         .into(),
-        Protocol::Tcp => TcpListener {
+        Protocol::Tcp => TcpListenerConfig {
             listen,
             port,
             device,
             opts,
         }
         .into(),
-        Protocol::Tls => TlsListener {
-            listen,
-            port,
-            device,
-            opts,
-            ssl_config,
-        }
-        .into(),
-        Protocol::Https => HttpsListener {
+        Protocol::Tls => TlsListenerConfig {
             listen,
             port,
             device,
@@ -176,7 +168,15 @@ fn parse(input: &str) -> IResult<&str, Listener> {
             ssl_config,
         }
         .into(),
-        Protocol::Quic => QuicListener {
+        Protocol::Https => HttpsListenerConfig {
+            listen,
+            port,
+            device,
+            opts,
+            ssl_config,
+        }
+        .into(),
+        Protocol::Quic => QuicListenerConfig {
             listen,
             port,
             device,
@@ -261,10 +261,10 @@ mod tests {
     #[test]
     fn test_parse_udp_listener() {
         assert_eq!(
-            UdpListener::parse("bind 0.0.0.0:5353").unwrap(),
+            UdpListenerConfig::parse("bind 0.0.0.0:5353").unwrap(),
             (
                 "",
-                UdpListener {
+                UdpListenerConfig {
                     listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
                     port: 5353,
                     device: None,
@@ -274,10 +274,10 @@ mod tests {
         );
 
         assert_eq!(
-            UdpListener::parse("bind [::1]:5353@eth0").unwrap(),
+            UdpListenerConfig::parse("bind [::1]:5353@eth0").unwrap(),
             (
                 "",
-                UdpListener {
+                UdpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -287,10 +287,10 @@ mod tests {
         );
 
         assert_eq!(
-            UdpListener::parse("bind [::1]:5353@eth0 -no-cache").unwrap(),
+            UdpListenerConfig::parse("bind [::1]:5353@eth0 -no-cache").unwrap(),
             (
                 "",
-                UdpListener {
+                UdpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -303,10 +303,10 @@ mod tests {
         );
 
         assert_eq!(
-            UdpListener::parse("bind [::1]:5353@eth0 --no-rule-addr").unwrap(),
+            UdpListenerConfig::parse("bind [::1]:5353@eth0 --no-rule-addr").unwrap(),
             (
                 "",
-                UdpListener {
+                UdpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -319,10 +319,10 @@ mod tests {
         );
 
         assert_eq!(
-            UdpListener::parse("bind [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
+            UdpListenerConfig::parse("bind [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
             (
                 "",
-                UdpListener {
+                UdpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -335,10 +335,10 @@ mod tests {
         );
 
         assert_eq!(
-            UdpListener::parse("bind :5353@eth0 -qq --no-rule-addr -w123").unwrap(),
+            UdpListenerConfig::parse("bind :5353@eth0 -qq --no-rule-addr -w123").unwrap(),
             (
                 "",
-                UdpListener {
+                UdpListenerConfig {
                     listen: ListenerAddress::V4(Ipv4Addr::UNSPECIFIED),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -354,10 +354,10 @@ mod tests {
     #[test]
     fn test_parse_tcp_listener() {
         assert_eq!(
-            TcpListener::parse("bind-tcp 0.0.0.0:5353").unwrap(),
+            TcpListenerConfig::parse("bind-tcp 0.0.0.0:5353").unwrap(),
             (
                 "",
-                TcpListener {
+                TcpListenerConfig {
                     listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
                     port: 5353,
                     device: None,
@@ -367,10 +367,10 @@ mod tests {
         );
 
         assert_eq!(
-            TcpListener::parse("bind-tcp [::1]:5353@eth0").unwrap(),
+            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0").unwrap(),
             (
                 "",
-                TcpListener {
+                TcpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -380,10 +380,10 @@ mod tests {
         );
 
         assert_eq!(
-            TcpListener::parse("bind-tcp [::1]:5353@eth0 -no-cache").unwrap(),
+            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0 -no-cache").unwrap(),
             (
                 "",
-                TcpListener {
+                TcpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -396,10 +396,10 @@ mod tests {
         );
 
         assert_eq!(
-            TcpListener::parse("bind-tcp [::1]:5353@eth0 --no-rule-addr").unwrap(),
+            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0 --no-rule-addr").unwrap(),
             (
                 "",
-                TcpListener {
+                TcpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -412,10 +412,10 @@ mod tests {
         );
 
         assert_eq!(
-            TcpListener::parse("bind-tcp [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
+            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
             (
                 "",
-                TcpListener {
+                TcpListenerConfig {
                     listen: ListenerAddress::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
@@ -431,10 +431,10 @@ mod tests {
     #[test]
     fn test_parse_tls_listener() {
         assert_eq!(
-            TlsListener::parse("bind-tls 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key").unwrap(),
+            TlsListenerConfig::parse("bind-tls 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key").unwrap(),
             (
                 "", 
-                TlsListener {
+                TlsListenerConfig {
                     listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
                     port: 4453,
                     device: None,

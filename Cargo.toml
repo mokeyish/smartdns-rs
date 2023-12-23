@@ -41,6 +41,8 @@ dns-over-https-rustls = [
 
 dnssec = ["hickory-proto/dnssec"]
 
+legacy_dns_server = ["dep:hickory-server"]
+
 experimental = ["experimental-trie", "experimental-phf"]
 
 experimental-trie = []
@@ -58,7 +60,7 @@ hickory-proto = { path = "./target/patch/hickory-proto-0.24.0" }
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
-axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
+# axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 # boomphf ={ path = "./target/patch/boomphf-0.6.0"}
 
 [dependencies]
@@ -73,8 +75,8 @@ enum_dispatch = "0.3.12"
 
 
 # api
-axum = { version = "0.6.16" }
-axum-server = { version = "0.5.1", features = ["tls-rustls"] }
+axum = { version = "0.7.2" }
+axum-server = { version = "0.6.0", features = ["tls-rustls"] }
 
 # serde
 serde = { version = "1.0", features = ["derive"]}
@@ -94,6 +96,7 @@ tokio = { version = "1.28", features = [
   "parking_lot",
 ] }
 tokio-rustls = "0.24.0"
+tokio-util = "0.7.10"
 socket2 = { version = "0.5", features = ["all"] }
 reqwest = { version = "0.11", default-features = false, features = [
   "blocking",
@@ -115,7 +118,7 @@ hickory-resolver = { version = "0.24", features = [
   "serde-config",
   "system-config",
 ] }
-hickory-server = { version = "0.24", features = ["resolver"] }
+hickory-server = { version = "0.24", features = ["resolver"], optional = true }
 
 # ssl
 webpki-roots = "0.25.2"

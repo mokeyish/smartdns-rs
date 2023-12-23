@@ -1,39 +1,36 @@
 use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
+    collections::HashMap, net::SocketAddr, ops::DerefMut, path::PathBuf, sync::Arc, time::Duration,
 };
-
-use rustls::{Certificate, PrivateKey};
 use tokio::{
     runtime::{Handle, Runtime},
     sync::RwLock,
+    task::JoinSet,
 };
 
 use crate::{
-    config::{IListener, Listener, SslConfig},
+    config::ServerOpts,
+    dns::{DnsRequest, DnsResponse, SerialMessage, SerialMessageFormat},
     dns_conf::RuntimeConfig,
     dns_mw::{DnsMiddlewareBuilder, DnsMiddlewareHandler},
     dns_mw_cache::DnsCache,
-    dns_server::DnsServerHandler,
-    error::Error,
-    libdns::{proto::error::ProtoError, server::ServerFuture},
+    libdns::Protocol,
     log,
-    third_ext::FutureJoinAllExt,
+    server::{DnsHandle, IncomingDnsRequest, ServerHandle},
+    third_ext::FutureJoinAllExt as _,
 };
 
 pub struct App {
     cfg: RwLock<Arc<RuntimeConfig>>,
-    handler: RwLock<Arc<DnsMiddlewareHandler>>,
-    listener_map: Arc<RwLock<HashMap<crate::config::Listener, ServerTasks>>>,
+    mw_handler: RwLock<Arc<DnsMiddlewareHandler>>,
+    dns_handle: DnsHandle,
+    listener_map: Arc<RwLock<HashMap<crate::config::ListenerConfig, ServerHandle>>>,
     cache: RwLock<Option<Arc<DnsCache>>>,
     runtime: Handle,
     guard: AppGuard,
 }
 
 impl App {
-    fn new(conf: Option<PathBuf>) -> (Runtime, Self) {
+    fn new(conf: Option<PathBuf>) -> (Runtime, IncomingDnsRequest, Self) {
         let cfg = RuntimeConfig::load(conf);
 
         let guard = {
@@ -89,12 +86,15 @@ impl App {
         let handler = DnsMiddlewareBuilder::new().build(cfg.clone());
 
         let runtime_handle = runtime.handle().clone();
+        let (rx, dns_server_handle) = DnsHandle::new(Default::default());
 
         (
             runtime,
+            rx,
             Self {
+                dns_handle: dns_server_handle,
                 cfg: RwLock::new(cfg),
-                handler: RwLock::new(Arc::new(handler)),
+                mw_handler: RwLock::new(Arc::new(handler)),
                 runtime: runtime_handle,
                 listener_map: Default::default(),
                 cache: RwLock::const_new(None),
@@ -104,7 +104,7 @@ impl App {
     }
 
     pub async fn get_dns_handler(&self) -> Arc<DnsMiddlewareHandler> {
-        self.handler.read().await.clone()
+        self.mw_handler.read().await.clone()
     }
 
     pub async fn cache(&self) -> Option<Arc<DnsCache>> {
@@ -126,7 +126,7 @@ impl App {
         #[cfg(target_os = "linux")]
         use crate::dns_mw_nftset::DnsNftsetMiddleware;
         use crate::dns_mw_ns::NameServerMiddleware;
-        use crate::dns_mw_zone::DnsZoneMiddleware;
+        // use crate::dns_mw_zone::DnsZoneMiddleware;
 
         let cfg = self.cfg.read().await.clone();
 
@@ -147,7 +147,7 @@ impl App {
                 middleware_builder = middleware_builder.with(DnsCNameMiddleware);
             }
 
-            middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
+            // middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
 
             middleware_builder = middleware_builder.with(AddressMiddleware);
 
@@ -212,12 +212,12 @@ impl App {
             middleware_builder.build(cfg.clone())
         };
 
-        *self.handler.write().await = Arc::new(middleware_handler);
+        *self.mw_handler.write().await = Arc::new(middleware_handler);
     }
 }
 
 pub fn bootstrap(conf: Option<PathBuf>) {
-    let (runtime, app) = App::new(conf);
+    let (runtime, mut incoming_request, app) = App::new(conf);
     let app = Arc::new(app);
 
     let _guarad = runtime.enter();
@@ -233,6 +233,26 @@ pub fn bootstrap(conf: Option<PathBuf>) {
 
     log::info!("server starting up");
 
+    {
+        let app = app.clone();
+        runtime.spawn(async move {
+            use crate::server::reap_tasks;
+
+            // todo:// manage concurrent requests.
+
+            let mut inner_join_set = JoinSet::new();
+
+            while let Some((message, server_opts, sender)) = incoming_request.recv().await {
+                let handler = app.mw_handler.read().await.clone();
+
+                inner_join_set.spawn(async move {
+                    let _ = sender.send(process(handler, message, server_opts).await);
+                });
+                reap_tasks(&mut inner_join_set);
+            }
+        });
+    }
+
     let listeners = app.listener_map.clone();
 
     let shutdown_timeout = Duration::from_secs(5);
@@ -241,14 +261,13 @@ pub fn bootstrap(conf: Option<PathBuf>) {
         use crate::signal;
         let _ = signal::terminate().await;
         // close all servers.
-        let mut listeners = listeners.write().await;
-        let shutdown_tasks = listeners.iter_mut().map(|(_, server)| async move {
-            match server.shutdown(shutdown_timeout).await {
-                Ok(_) => (),
-                Err(err) => log::warn!("{:?}", err),
-            }
-        });
-        shutdown_tasks.join_all().await;
+        let mut shutdown_listeners = Default::default();
+        std::mem::swap(listeners.write().await.deref_mut(), &mut shutdown_listeners);
+        shutdown_listeners
+            .into_values()
+            .map(|server| server.shutdown())
+            .join_all()
+            .await;
     });
 
     runtime.shutdown_timeout(shutdown_timeout);
@@ -268,13 +287,13 @@ async fn register_listeners(app: &Arc<App>) {
     };
 
     for listener in listeners {
-        match create_listener(app, listener).await {
+        match serve(app, listener).await {
             Ok(server) => {
-                if let Some(mut prev_server) =
+                if let Some(prev_server) =
                     listener_map.write().await.insert(listener.clone(), server)
                 {
                     tokio::spawn(async move {
-                        let _ = prev_server.shutdown(Duration::from_secs(5)).await;
+                        prev_server.shutdown().await;
                     });
                 }
             }
@@ -285,188 +304,29 @@ async fn register_listeners(app: &Arc<App>) {
     }
 }
 
-async fn create_listener(
+async fn serve(
     app: &Arc<App>,
-    listener: &crate::config::Listener,
-) -> Result<ServerTasks, crate::Error> {
-    use crate::{bind_to, tcp, udp};
+    listener: &crate::config::ListenerConfig,
+) -> Result<ServerHandle, crate::Error> {
+    use crate::server::serve;
 
-    let server_handler = DnsServerHandler::new(app.clone(), listener.server_opts().clone());
+    let dns_handle = &app.dns_handle;
 
     let cfg = app.cfg.read().await.clone();
 
-    let tcp_idle_time = cfg.tcp_idle_time();
+    let idle_time = cfg.tcp_idle_time();
+    let certificate_file = cfg.bind_cert_file();
+    let certificate_key_file = cfg.bind_cert_key_file();
 
-    let server = match listener {
-        Listener::Udp(listener) => {
-            let udp_socket = bind_to(udp, listener.sock_addr(), listener.device(), "UDP");
-            let mut server = ServerFuture::new(server_handler);
-            server.register_socket(udp_socket);
-            ServerTasks::Future(server)
-        }
-        Listener::Tcp(listener) => {
-            let tcp_listener = bind_to(tcp, listener.sock_addr(), listener.device(), "TCP");
-            let mut server = ServerFuture::new(server_handler);
-            server.register_listener(tcp_listener, Duration::from_secs(tcp_idle_time));
-
-            ServerTasks::Future(server)
-        }
-        #[cfg(feature = "dns-over-tls")]
-        Listener::Tls(listener) => {
-            const LISTENER_TYPE: &str = "DNS over TLS";
-            let ssl_config = &listener.ssl_config;
-
-            let (certificate, certificate_key) = load_certificate_and_key(
-                ssl_config,
-                cfg.bind_cert_file(),
-                cfg.bind_cert_key_file(),
-                LISTENER_TYPE,
-            )?;
-
-            let tls_listener = bind_to(tcp, listener.sock_addr(), listener.device(), LISTENER_TYPE);
-
-            let mut server = ServerFuture::new(server_handler);
-            server
-                .register_tls_listener(
-                    tls_listener,
-                    Duration::from_secs(tcp_idle_time),
-                    (certificate.clone(), certificate_key.clone()),
-                )
-                .map_err(|err| {
-                    crate::Error::RegisterListenerFailed(
-                        LISTENER_TYPE,
-                        listener.sock_addr(),
-                        err.to_string(),
-                    )
-                })?;
-
-            ServerTasks::Future(server)
-        }
-        #[cfg(feature = "dns-over-https")]
-        Listener::Https(listener) => {
-            const LISTENER_TYPE: &str = "DNS over HTTPS";
-            let ssl_config = &listener.ssl_config;
-
-            let (certificate, certificate_key) = load_certificate_and_key(
-                ssl_config,
-                cfg.bind_cert_file(),
-                cfg.bind_cert_key_file(),
-                LISTENER_TYPE,
-            )?;
-
-            let https_listener =
-                bind_to(tcp, listener.sock_addr(), listener.device(), LISTENER_TYPE);
-
-            let handle = axum_server::Handle::new();
-            {
-                let handle = handle.clone();
-                let app = app.clone();
-                tokio::spawn(async move {
-                    let _ = crate::api::register_https(
-                        app,
-                        server_handler,
-                        https_listener,
-                        certificate,
-                        certificate_key,
-                        handle,
-                    )
-                    .await
-                    .map_err(crate::libdns::proto::error::ProtoError::from);
-                });
-            }
-            ServerTasks::Handle(handle)
-        }
-        #[cfg(feature = "dns-over-quic")]
-        Listener::Quic(listener) => {
-            const LISTENER_TYPE: &str = "DNS over QUIC";
-            let ssl_config = &listener.ssl_config;
-
-            let (certificate, certificate_key) = load_certificate_and_key(
-                ssl_config,
-                cfg.bind_cert_file(),
-                cfg.bind_cert_key_file(),
-                LISTENER_TYPE,
-            )?;
-
-            let quic_listener = bind_to(udp, listener.sock_addr(), listener.device(), "QUIC");
-
-            let mut server = ServerFuture::new(server_handler);
-            server
-                .register_quic_listener(
-                    quic_listener,
-                    Duration::from_secs(tcp_idle_time),
-                    (certificate.clone(), certificate_key.clone()),
-                    ssl_config.server_name.clone(),
-                )
-                .map_err(|err| {
-                    crate::Error::RegisterListenerFailed(
-                        LISTENER_TYPE,
-                        listener.sock_addr(),
-                        err.to_string(),
-                    )
-                })?;
-
-            ServerTasks::Future(server)
-        }
-        #[cfg(not(feature = "dns-over-tls"))]
-        Listener::Tls(listener) => {
-            warn!("Bind DoT not enabled")
-        }
-        #[cfg(not(feature = "dns-over-https"))]
-        Listener::Https(listener) => {
-            warn!("Bind DoH not enabled")
-        }
-        #[cfg(not(feature = "dns-over-quic"))]
-        Listener::Quic(listener) => {
-            warn!("Bind DoQ not enabled")
-        }
-    };
-
-    fn load_certificate_and_key(
-        ssl_config: &SslConfig,
-        cert_file: Option<&Path>,
-        key_file: Option<&Path>,
-        typ: &'static str,
-    ) -> Result<(Vec<Certificate>, PrivateKey), Error> {
-        use crate::libdns::proto::rustls::tls_server::{read_cert, read_key};
-
-        let certificate_path = ssl_config
-            .certificate
-            .as_deref()
-            .or(cert_file)
-            .ok_or_else(|| Error::CertificatePathNotDefined(typ))?;
-
-        let certificate_key_path = ssl_config
-            .certificate_key
-            .as_deref()
-            .or(key_file)
-            .ok_or_else(|| Error::CertificateKeyPathNotDefined(typ))?;
-
-        if let Some(server_name) = ssl_config.server_name.as_deref() {
-            log::info!(
-                "loading cert for DNS over Https named {} from {:?}",
-                server_name,
-                certificate_path
-            );
-        } else {
-            log::info!(
-                "loading cert for DNS over Https from {:?}",
-                certificate_path
-            );
-        }
-
-        let certificate = read_cert(certificate_path).map_err(|err| {
-            Error::LoadCertificateFailed(certificate_path.to_path_buf(), err.to_string())
-        })?;
-
-        let certificate_key = read_key(certificate_key_path).map_err(|err| {
-            Error::LoadCertificateKeyFailed(certificate_key_path.to_path_buf(), err.to_string())
-        })?;
-
-        Ok((certificate, certificate_key))
-    }
-
-    Ok(server)
+    serve(
+        app,
+        listener,
+        dns_handle,
+        idle_time,
+        certificate_file,
+        certificate_key_file,
+    )
+    .await
 }
 
 struct AppGuard {
@@ -475,22 +335,158 @@ struct AppGuard {
     user_guard: Option<users::switch::SwitchUserGuard>,
 }
 
-enum ServerTasks {
-    Future(ServerFuture<DnsServerHandler>),
-    Handle(axum_server::Handle),
-}
+async fn process(
+    handler: Arc<DnsMiddlewareHandler>,
+    SerialMessage {
+        message: bytes,
+        addr: src_addr,
+        protocol,
+        fmt,
+    }: SerialMessage,
+    server_opts: ServerOpts,
+) -> SerialMessage {
+    use crate::libdns::proto::error::ProtoError;
+    use crate::libdns::proto::op::{Edns, Header, Message, MessageType, OpCode, ResponseCode};
+    use crate::libdns::proto::serialize::binary::{
+        BinDecodable, BinDecoder, BinEncodable, BinEncoder,
+    };
 
-impl ServerTasks {
-    async fn shutdown(&mut self, shutdown_timeout: Duration) -> Result<(), ProtoError> {
-        match self {
-            ServerTasks::Future(s) => {
-                let _ = s.block_until_done().await;
-                Ok(())
+    return match deserialize_request(&bytes, src_addr, protocol) {
+        Ok(request) => {
+            match request.message_type() {
+                MessageType::Query => {
+                    match request.op_code() {
+                        OpCode::Query => {
+                            let id = request.id();
+                            let qflags = request.header().flags();
+                            let qop_code = request.op_code();
+                            let message_type = request.message_type();
+                            let is_dnssec =
+                                request.extensions().as_ref().map_or(false, Edns::dnssec_ok);
+
+                            {
+                                let src_addr = request.src();
+                                let protocol = request.protocol();
+                                let query = request.query();
+                                let query_name = query.name();
+                                let query_type = query.query_type();
+                                let query_class = query.query_class();
+                                log::debug!(
+                            "request:{id} src:{proto}://{addr}#{port} type:{message_type} dnssec:{is_dnssec} {op}:{query}:{qtype}:{class} qflags:{qflags}",
+                            id = id,
+                            proto = protocol,
+                            addr = src_addr.ip(),
+                            port = src_addr.port(),
+                            message_type= message_type,
+                            is_dnssec = is_dnssec,
+                            op = qop_code,
+                            query = query_name,
+                            qtype = query_type,
+                            class = query_class,
+                            qflags = qflags,
+                        );
+                            }
+
+                            // start process
+                            let request_header = request.header();
+                            let mut response_header = Header::response_from_request(request_header);
+
+                            response_header.set_recursion_available(true);
+                            response_header.set_authoritative(false);
+
+                            let response = {
+                                match handler.search(&request, &server_opts).await {
+                                    Ok(lookup) => lookup,
+                                    Err(e) => {
+                                        if e.is_nx_domain() {
+                                            response_header
+                                                .set_response_code(ResponseCode::NXDomain);
+                                        }
+                                        match e.as_soa() {
+                                            Some(soa) => soa,
+                                            None => {
+                                                log::debug!("error resolving: {}", e);
+                                                DnsResponse::empty()
+                                            }
+                                        }
+                                    }
+                                }
+                            };
+
+                            let response_message: Message =
+                                response.into_message(Some(response_header));
+                            serialize_response(fmt, &response_message, src_addr, protocol)
+                        }
+                        OpCode::Status => todo!(),
+                        OpCode::Notify => todo!(),
+                        OpCode::Update => todo!(),
+                    }
+                }
+                MessageType::Response => todo!(),
             }
-            ServerTasks::Handle(s) => {
-                s.graceful_shutdown(Some(shutdown_timeout));
-                Ok(())
+        }
+        Err(ProtoError { kind, .. }) if kind.as_form_error().is_some() => {
+            // We failed to parse the request due to some issue in the message, but the header is available, so we can respond
+            let (request_header, error) = kind
+                .into_form_error()
+                .expect("as form_error already confirmed this is a FormError");
+
+            // debug for more info on why the message parsing failed
+            log::debug!(
+                "request:{id} src:{proto}://{addr}#{port} type:{message_type} {op}:FormError:{error}",
+                id = request_header.id(),
+                proto = protocol,
+                addr = src_addr.ip(),
+                port = src_addr.port(),
+                message_type= request_header.message_type(),
+                op = request_header.op_code(),
+                error = error,
+            );
+
+            let mut response_header = Header::response_from_request(&request_header);
+            response_header.set_response_code(ResponseCode::FormErr);
+            let mut response_message = Message::new();
+            response_message.set_header(response_header);
+            serialize_response(fmt, &response_message, src_addr, protocol)
+        }
+        _ => SerialMessage {
+            message: Vec::with_capacity(0),
+            addr: src_addr,
+            protocol,
+            fmt,
+        },
+    };
+
+    fn deserialize_request(
+        bytes: &[u8],
+        src_addr: SocketAddr,
+        protocol: Protocol,
+    ) -> Result<DnsRequest, ProtoError> {
+        let mut decoder = BinDecoder::new(bytes);
+        let message = Message::read(&mut decoder)?;
+        Ok(DnsRequest::new(message, src_addr, protocol))
+    }
+    fn serialize_response(
+        fmt: SerialMessageFormat,
+        message: &Message,
+        addr: SocketAddr,
+        protocol: Protocol,
+    ) -> SerialMessage {
+        match fmt {
+            SerialMessageFormat::Binary => {
+                let mut bytes = Vec::with_capacity(512);
+                // mut block
+                {
+                    let _ = message.emit(&mut BinEncoder::new(&mut bytes));
+                };
+                SerialMessage {
+                    message: bytes,
+                    addr,
+                    protocol,
+                    fmt,
+                }
             }
+            SerialMessageFormat::Json => todo!(),
         }
     }
 }
