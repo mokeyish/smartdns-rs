@@ -90,10 +90,10 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/s
   2. 前台运行，方便查看运行状况
 
      ```shell
-     ./smartdns run -c ./smartdns.conf -d
+     ./smartdns run -c ./smartdns.conf -v
      ```
 
-     - `-d` 是开启打印调试日志
+     - `-v` 是开启打印调试日志
 
   3. 后台服务运行，开机自动运行
 
