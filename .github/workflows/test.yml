@@ -36,7 +36,9 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
-      
+
+      - uses: extractions/setup-just@v1
+
       - name: cargo install patch-crate
         uses: baptiste0928/cargo-install@v2
         with:
@@ -75,6 +77,8 @@ jobs:
           components: rustfmt, clippy
           target: ${{ matrix.target }}
           override: true
+
+      - uses: extractions/setup-just@v1
 
       - name: cargo install patch-crate
         uses: baptiste0928/cargo-install@v2
@@ -154,6 +158,8 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
+
+      - uses: extractions/setup-just@v1
 
       - name: cargo install patch-crate
         uses: baptiste0928/cargo-install@v2

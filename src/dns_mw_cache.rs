@@ -17,7 +17,6 @@ use crate::dns_conf::RuntimeConfig;
 use crate::dns_mw::BackgroundQueryTask;
 use crate::dns_mw::DnsMiddlewareHost;
 use crate::libdns::proto::error::ProtoResult;
-use crate::libdns::resolver::LookupTtl;
 use crate::{
     dns::*,
     libdns::proto::{op::Query, rr::DNSClass},
@@ -314,7 +313,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
         next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
     ) -> Result<DnsResponse, DnsError> {
         // skip cache
-        if ctx.server_opts.no_cache() || ctx.no_cache {
+        if ctx.server_opts.no_cache() || ctx.no_cache || req.is_dnssec() {
             return next.run(ctx, req).await;
         }
 
@@ -456,7 +455,7 @@ impl DnsCache {
         query: Query,
         records_and_ttl: Vec<(Record, u32)>,
         now: Instant,
-    ) -> Lookup {
+    ) -> DnsResponse {
         let len = records_and_ttl.len();
         // collapse the values, we're going to take the Minimum TTL as the correct one
         let (records, ttl): (Vec<Record>, Duration) = records_and_ttl.into_iter().fold(
@@ -477,7 +476,7 @@ impl DnsCache {
         let valid_until = now + ttl;
 
         // insert into the LRU
-        let lookup = Lookup::new_with_deadline(query.clone(), Arc::from(records), valid_until);
+        let lookup = DnsResponse::new_with_deadline(query.clone(), records, valid_until);
 
         if let Ok(mut cache) = self.cache.try_lock() {
             cache.put(
@@ -510,7 +509,7 @@ impl DnsCache {
         original_query: Query,
         records: impl Iterator<Item = Record>,
         now: Instant,
-    ) -> Option<Lookup> {
+    ) -> Option<DnsResponse> {
         let mut is_cname_query = false;
         // collect all records by name
         let records = records.fold(
@@ -576,7 +575,7 @@ impl DnsCache {
         &self,
         query: &Query,
         now: Instant,
-    ) -> Option<(OutOfDate, Result<Lookup, DnsError>)> {
+    ) -> Option<(OutOfDate, Result<DnsResponse, DnsError>)> {
         let mut cache = match self.cache.try_lock() {
             Ok(t) => t,
             Err(err) => {
@@ -719,7 +718,7 @@ enum OutOfDate {
 }
 
 struct DnsCacheEntry {
-    lookup: Result<Lookup, DnsError>,
+    lookup: Result<DnsResponse, DnsError>,
     valid_until: Instant,
 }
 
@@ -736,17 +735,18 @@ impl DnsCacheEntry {
 }
 
 mod lookup {
+
+    use crate::dns::DnsResponse;
+    use std::ops::Deref;
     use std::time::Instant;
 
-    use crate::libdns::proto::error::ProtoResult;
     use crate::libdns::proto::{
-        op::Query,
-        rr::Record,
+        error::ProtoResult,
+        op::Message,
         serialize::binary::{BinDecodable, BinDecoder, BinEncodable, BinEncoder},
     };
-    use crate::libdns::resolver::lookup::Lookup;
 
-    pub fn serialize(lookups: &[Lookup], writer: &mut impl std::io::Write) -> ProtoResult<()> {
+    pub fn serialize(lookups: &[DnsResponse], writer: &mut impl std::io::Write) -> ProtoResult<()> {
         let mut buf = vec![];
         for lookup in lookups {
             {
@@ -760,7 +760,7 @@ mod lookup {
         Ok(())
     }
 
-    pub fn deserialize(data: &[u8]) -> ProtoResult<Vec<Lookup>> {
+    pub fn deserialize(data: &[u8]) -> ProtoResult<Vec<DnsResponse>> {
         let mut lookups = vec![];
         let mut offset = 0;
 
@@ -772,45 +772,27 @@ mod lookup {
 
         Ok(lookups)
     }
-    pub fn serialize_one(lookup: &Lookup, encoder: &mut BinEncoder<'_>) -> ProtoResult<()> {
-        lookup.query().emit(encoder)?;
-
+    pub fn serialize_one(res: &DnsResponse, encoder: &mut BinEncoder<'_>) -> ProtoResult<()> {
         let valid_until_bytes = unsafe {
             std::slice::from_raw_parts(
-                (&lookup.valid_until() as *const Instant) as *const u8,
+                (&res.valid_until() as *const Instant) as *const u8,
                 ::std::mem::size_of::<Instant>(),
             )
         };
         encoder.emit_vec(valid_until_bytes)?;
-
-        encoder.emit_u8(lookup.records().len() as u8)?;
-
-        for record in lookup.records() {
-            record.emit(encoder)?
-        }
-
+        res.deref().emit(encoder)?;
         Ok(())
     }
 
-    pub fn deserialize_one(decoder: &mut BinDecoder<'_>) -> ProtoResult<Lookup> {
-        let query = Query::read(decoder)?;
-
+    pub fn deserialize_one(decoder: &mut BinDecoder<'_>) -> ProtoResult<DnsResponse> {
         let valid_until_bytes = decoder
             .read_slice(std::mem::size_of::<Instant>())?
             .unverified();
-
         let valid_until = unsafe { std::ptr::read(valid_until_bytes.as_ptr() as *const Instant) };
 
-        let count = decoder.read_u8()?.unverified();
-        let mut records = vec![];
-        for _ in 0..count {
-            records.push(Record::read(decoder)?);
-        }
-        Ok(Lookup::new_with_deadline(
-            query,
-            records.into(),
-            valid_until,
-        ))
+        let message = Message::read(decoder)?;
+        let res: DnsResponse = message.into();
+        Ok(res.with_valid_until(valid_until))
     }
 }
 
@@ -823,7 +805,7 @@ trait PersistCache {
 impl PersistCache for LruCache<Query, DnsCacheEntry> {
     fn persist<P: AsRef<Path>>(&self, path: P) {
         let path = path.as_ref();
-        fn cache_to_file(lookups: &[Lookup], path: &Path) -> ProtoResult<()> {
+        fn cache_to_file(lookups: &[DnsResponse], path: &Path) -> ProtoResult<()> {
             let mut file = File::options()
                 .create(true)
                 .truncate(true)
@@ -850,7 +832,7 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
         info!("reading DNS cache from file: {:?}", path);
         let now = Instant::now();
 
-        fn read_from_cache_file(path: &Path) -> ProtoResult<Vec<Lookup>> {
+        fn read_from_cache_file(path: &Path) -> ProtoResult<Vec<DnsResponse>> {
             let mut file = File::options().read(true).open(path)?;
             let mut data = vec![];
             file.read_to_end(&mut data)?;
@@ -888,13 +870,13 @@ mod tests {
 
     use super::*;
 
-    fn create_lookup(name: &str, rr_type: RecordType, ttl: u64) -> Lookup {
+    fn create_lookup(name: &str, rr_type: RecordType, ttl: u64) -> DnsResponse {
         let name: Name = name.parse().unwrap();
         let ttl = Duration::from_secs(ttl);
         let query = Query::query(name.clone(), rr_type);
         let records = vec![Record::with(name, rr_type, ttl.as_secs() as u32)];
         let valid_until = Instant::now() + ttl;
-        Lookup::new_with_deadline(query, records.into(), valid_until)
+        DnsResponse::new_with_deadline(query, records, valid_until)
     }
 
     #[test]

@@ -4,7 +4,7 @@ use super::*;
 
 ///
 /// domain-set -type list -file /path/to/list
-/// domain-set -type http -url https://example.com/list
+/// domain-set -type list -url https://example.com/list
 impl NomParser for DomainSetProvider {
     fn parse(input: &str) -> IResult<&str, Self> {
         use DomainSetProvider::*;
@@ -18,7 +18,7 @@ impl NomParser for DomainSetFileProvider {
     fn parse(input: &str) -> IResult<&str, Self> {
         let mut name = None;
         let mut file = None;
-        let mut is_file_provider = false;
+        let mut content_type = Default::default();
 
         let one = alt((
             map(
@@ -42,20 +42,25 @@ impl NomParser for DomainSetFileProvider {
             map(
                 options::parse_value(
                     alt((tag_no_case("type"), tag_no_case("t"))),
-                    tag_no_case("list"),
+                    DomainSetContentType::parse,
                 ),
-                |_| {
-                    is_file_provider = true;
+                |t| {
+                    content_type = t;
                 },
             ),
         ));
 
         let (rest_input, _) = separated_list1(space1, one)(input)?;
 
-        if is_file_provider {
-            if let (Some(name), Some(file)) = (name, file) {
-                return Ok((rest_input, DomainSetFileProvider { name, file }));
-            }
+        if let (Some(name), Some(file)) = (name, file) {
+            return Ok((
+                rest_input,
+                DomainSetFileProvider {
+                    name,
+                    file,
+                    content_type,
+                },
+            ));
         }
 
         Err(nom::Err::Error(nom::error::Error::new(
@@ -65,14 +70,14 @@ impl NomParser for DomainSetFileProvider {
     }
 }
 
-/// domain-set -type http -url https://example.com/list
-/// domain-set -type http -u https://example.com/list
+/// domain-set -type list -url https://example.com/list
+/// domain-set -type list -u https://example.com/list
 impl NomParser for DomainSetHttpProvider {
     fn parse(input: &str) -> IResult<&str, Self> {
         let mut name = None;
         let mut url = None;
         let mut interval = None;
-        let mut is_url_provider = false;
+        let mut content_type = Default::default();
 
         let one = alt((
             map(
@@ -102,33 +107,39 @@ impl NomParser for DomainSetHttpProvider {
             map(
                 options::parse_value(
                     alt((tag_no_case("type"), tag_no_case("t"))),
-                    tag_no_case("list"),
+                    DomainSetContentType::parse,
                 ),
-                |_| {
-                    is_url_provider = true;
+                |t| {
+                    content_type = t;
                 },
             ),
         ));
 
         let (rest_input, _) = separated_list1(space1, one)(input)?;
 
-        if is_url_provider && name.is_some() && url.is_some() {
-            if let (Some(name), Some(url)) = (name, url) {
-                return Ok((
-                    rest_input,
-                    DomainSetHttpProvider {
-                        name,
-                        url,
-                        interval,
-                    },
-                ));
-            }
+        if let (Some(name), Some(url)) = (name, url) {
+            return Ok((
+                rest_input,
+                DomainSetHttpProvider {
+                    name,
+                    url,
+                    interval,
+                    content_type,
+                },
+            ));
         }
 
         Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Verify,
         )))
+    }
+}
+
+impl NomParser for DomainSetContentType {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        use DomainSetContentType::*;
+        alt((value(List, tag_no_case("list")),))(input)
     }
 }
 
@@ -139,12 +150,25 @@ mod tests {
     #[test]
     fn test_parse_file_provider() {
         assert_eq!(
+            DomainSetProvider::parse("-name set -file /path/to/list"),
+            Ok((
+                "",
+                DomainSetProvider::File(DomainSetFileProvider {
+                    name: "set".to_string(),
+                    file: PathBuf::from("/path/to/list"),
+                    content_type: Default::default(),
+                })
+            ))
+        );
+
+        assert_eq!(
             DomainSetProvider::parse("-type list -name set -file /path/to/list"),
             Ok((
                 "",
                 DomainSetProvider::File(DomainSetFileProvider {
                     name: "set".to_string(),
-                    file: PathBuf::from("/path/to/list")
+                    file: PathBuf::from("/path/to/list"),
+                    content_type: Default::default(),
                 })
             ))
         );
@@ -155,7 +179,8 @@ mod tests {
                 "",
                 DomainSetProvider::File(DomainSetFileProvider {
                     name: "set".to_string(),
-                    file: PathBuf::from("/path/to/list")
+                    file: PathBuf::from("/path/to/list"),
+                    content_type: Default::default(),
                 })
             ))
         );
@@ -166,7 +191,8 @@ mod tests {
                 "",
                 DomainSetProvider::File(DomainSetFileProvider {
                     name: "set".to_string(),
-                    file: PathBuf::from("/path/to/list")
+                    file: PathBuf::from("/path/to/list"),
+                    content_type: Default::default(),
                 })
             ))
         );
@@ -181,21 +207,21 @@ mod tests {
                 DomainSetProvider::Http(DomainSetHttpProvider {
                     name: "set".to_string(),
                     url: Url::parse("https://example.com/ads.txt").unwrap(),
-                    interval: None
+                    interval: None,
+                    content_type: Default::default(),
                 })
             ))
         );
 
         assert_eq!(
-            DomainSetProvider::parse(
-                "-type list -name set -url https://example.com/ads.txt -i 3600"
-            ),
+            DomainSetProvider::parse("-name set -url https://example.com/ads.txt -i 3600"),
             Ok((
                 "",
                 DomainSetProvider::Http(DomainSetHttpProvider {
                     name: "set".to_string(),
                     url: Url::parse("https://example.com/ads.txt").unwrap(),
-                    interval: Some(3600)
+                    interval: Some(3600),
+                    content_type: Default::default(),
                 })
             ))
         );
@@ -209,7 +235,8 @@ mod tests {
                 DomainSetProvider::Http(DomainSetHttpProvider {
                     name: "set".to_string(),
                     url: Url::parse("https://example.com/ads.txt").unwrap(),
-                    interval: Some(3600)
+                    interval: Some(3600),
+                    content_type: Default::default(),
                 })
             ))
         );

@@ -74,6 +74,8 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
+      - uses: extractions/setup-just@v1
+
       - name: cargo install patch-crate
         uses: baptiste0928/cargo-install@v2
         with:
@@ -130,7 +132,7 @@ jobs:
         shell: bash
     
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: smartdns-${{ matrix.target }}
           retention-days: 30

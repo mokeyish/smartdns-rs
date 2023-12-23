@@ -140,7 +140,6 @@ pub use tests::*;
 mod tests {
 
     use crate::libdns::proto::rr::RData;
-    use crate::libdns::resolver::lookup::Lookup;
     use std::{
         collections::HashMap,
         fmt::Debug,
@@ -245,17 +244,15 @@ mod tests {
             self.with_multi_records(record.name().clone(), vec![record])
         }
 
-        pub fn with_multi_records<Name: IntoName + Debug, Records: Into<Arc<[Record]>>>(
+        pub fn with_multi_records<Name: IntoName + Debug>(
             mut self,
             name: Name,
-            records: Records,
+            records: Vec<Record>,
         ) -> Self {
             let name = match name.into_name() {
                 Ok(name) => name,
                 Err(err) => panic!("invalid Name {}", err),
             };
-
-            let records: Arc<[Record]> = records.into();
 
             let query = Query::query(
                 name,
@@ -265,8 +262,10 @@ mod tests {
                     .record_type(),
             );
 
-            self.map
-                .insert(query.clone(), Ok(Lookup::new_with_max_ttl(query, records)));
+            self.map.insert(
+                query.clone(),
+                Ok(DnsResponse::new_with_max_ttl(query, records)),
+            );
 
             self
         }
@@ -278,9 +277,13 @@ mod tests {
             name: N,
             query_type: RecordType,
         ) -> Result<Vec<RData>, DnsError> {
-            self.lookup(name, query_type)
-                .await
-                .map(|lookup| lookup.into_iter().collect())
+            self.lookup(name, query_type).await.map(|lookup| {
+                lookup
+                    .record_iter()
+                    .flat_map(|s| s.data())
+                    .cloned()
+                    .collect()
+            })
         }
     }
 

@@ -90,10 +90,10 @@ Please refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md
   2. Run as foreground, easy to check the running status
 
      ```shell
-     ./smartdns run -c ./smartdns.conf -d
+     ./smartdns run -c ./smartdns.conf -v
      ```
 
-     - `-d` or `--debug` is enabled to print debug logs.
+     - `-v` is enabled to print debug logs.
 
   3. Run as background service, run automatically at startup
 

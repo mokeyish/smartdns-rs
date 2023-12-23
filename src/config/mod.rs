@@ -89,7 +89,7 @@ pub struct Config {
     pub conf_file: Option<PathBuf>,
 
     /// listeners
-    pub listeners: Vec<Listener>,
+    pub listeners: Vec<ListenerConfig>,
 
     /// SSL Certificate file path
     pub bind_cert_file: Option<PathBuf>,

@@ -18,13 +18,13 @@ license = "GPL-v3.0"
 readme = "README.md"
 
 [package.metadata.patch]
-# crates = ["boomphf"]
+crates = ["hickory-server", "hickory-proto"]
 
 [features]
 
 default = ["dns-over-tls", "dns-over-https", "dns-over-quic"]
 
-homebrew = ["dns-over-tls", "dns-over-https", "dns-over-quic"]
+homebrew = ["default"]
 
 failed_tests = []
 disable_icmp_ping = []
@@ -39,6 +39,10 @@ dns-over-https-rustls = [
   "hickory-server/dns-over-https-rustls",
 ]
 
+dnssec = ["hickory-proto/dnssec"]
+
+legacy_dns_server = ["dep:hickory-server"]
+
 experimental = ["experimental-trie", "experimental-phf"]
 
 experimental-trie = []
@@ -50,14 +54,13 @@ experimental-phf = [
 
 [patch.crates-io]
 # rustls = { git = "https://github.com/mokeyish/rustls.git", branch = "patched_main"}
-# quinn-proto = { git = "https://github.com/mokeyish/quinn.git", branch = "patched_main"}
-# hickory-proto = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
 # hickory-resolver = { git = "https://github.com/hickory-dns/hickory-dns.git", rev = "41b6e33"}
-# hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
+hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
+hickory-proto = { path = "./target/patch/hickory-proto-0.24.0" }
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
 hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
-axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
+# axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 # boomphf ={ path = "./target/patch/boomphf-0.6.0"}
 
 [dependencies]
@@ -69,11 +72,12 @@ anyhow = "1.0"
 once_cell = "1.16.0"
 nom = "7.1.3"
 enum_dispatch = "0.3.12"
+bytes = "1.5.0"
 
 
 # api
-axum = { version = "0.6.16" }
-axum-server = { version = "0.5.1", features = ["tls-rustls"] }
+axum = { version = "0.7.2" }
+axum-server = { version = "0.6.0", features = ["tls-rustls"] }
 
 # serde
 serde = { version = "1.0", features = ["derive"]}
@@ -93,6 +97,7 @@ tokio = { version = "1.28", features = [
   "parking_lot",
 ] }
 tokio-rustls = "0.25.0"
+tokio-util = "0.7.10"
 socket2 = { version = "0.5", features = ["all"] }
 reqwest = { version = "0.11", default-features = false, features = [
   "blocking",
@@ -114,7 +119,7 @@ hickory-resolver = { version = "0.24", features = [
   "serde-config",
   "system-config",
 ] }
-hickory-server = { version = "0.24", features = ["resolver"] }
+hickory-server = { version = "0.24", features = ["resolver"], optional = true }
 
 # ssl
 webpki-roots = "0.25.2"
@@ -130,7 +135,7 @@ rand = "0.8.5"
 smallvec = "1.10.0"
 csv = "1.1"
 hostname = "0.3"
-byte-unit = "5.0.3"
+byte-unit = { version = "5.0.3", features = ["serde"]}
 ipnet = "2.7"
 which = "5.0.0"
 

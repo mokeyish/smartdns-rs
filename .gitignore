@@ -22,5 +22,5 @@ dist
 
 etc/smartdns/smartdns.yaml
 
-localhost.crt
-localhost.key
+# localhost.crt
+# localhost.key

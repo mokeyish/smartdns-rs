@@ -2,8 +2,7 @@
 // #![feature(test)]
 
 use cli::*;
-use std::{io, net::SocketAddr, path::PathBuf};
-use tokio::net::{TcpListener, UdpSocket};
+use std::path::PathBuf;
 
 mod api;
 mod app;
@@ -25,9 +24,8 @@ mod dns_mw_dualstack;
 #[cfg(target_os = "linux")]
 mod dns_mw_nftset;
 mod dns_mw_ns;
-mod dns_mw_zone;
+// mod dns_mw_zone;
 mod dns_rule;
-mod dns_server;
 mod dns_url;
 mod dnsmasq;
 mod error;
@@ -38,17 +36,18 @@ mod log;
 mod preset_ns;
 mod proxy;
 mod rustls;
+mod server;
 mod service;
 mod third_ext;
 
 use error::Error;
 use infra::middleware;
 
-use crate::{dns_client::DnsClient, dns_conf::RuntimeConfig};
-
 use crate::{
+    dns_client::DnsClient,
+    dns_conf::RuntimeConfig,
     infra::process_guard::ProcessGuardError,
-    log::{debug, error, info, warn},
+    log::{error, info, warn},
 };
 
 fn banner() {
@@ -153,93 +152,7 @@ impl Cli {
 fn run_server(conf: Option<PathBuf>) {
     hello_starting();
     app::bootstrap(conf);
-    log::info!("{} {} shutdown", crate::NAME, crate::version());
-}
-
-fn bind_to<T>(
-    func: impl Fn(SocketAddr, Option<&str>, &str) -> io::Result<T>,
-    sock_addr: SocketAddr,
-    bind_device: Option<&str>,
-    bind_type: &str,
-) -> T {
-    func(sock_addr, bind_device, bind_type).unwrap_or_else(|err| {
-        panic!("cound not bind to {bind_type}: {sock_addr}, {err}");
-    })
-}
-
-fn tcp(
-    sock_addr: SocketAddr,
-    bind_device: Option<&str>,
-    bind_type: &str,
-) -> io::Result<TcpListener> {
-    let device_note = bind_device
-        .map(|device| format!("@{device}"))
-        .unwrap_or_default();
-
-    debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
-    let tcp_listener = std::net::TcpListener::bind(sock_addr)?;
-
-    {
-        let sock_ref = socket2::SockRef::from(&tcp_listener);
-        sock_ref.set_nonblocking(true)?;
-        sock_ref.set_reuse_address(true)?;
-
-        #[cfg(target_os = "macos")]
-        sock_ref.set_reuse_port(true)?;
-
-        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        if let Some(device) = bind_device {
-            sock_ref.bind_device(Some(device.as_bytes()))?;
-        }
-    }
-
-    let tcp_listener = TcpListener::from_std(tcp_listener)?;
-
-    info!(
-        "listening for {} on {:?}{}",
-        bind_type,
-        tcp_listener
-            .local_addr()
-            .expect("could not lookup local address"),
-        device_note
-    );
-
-    Ok(tcp_listener)
-}
-
-fn udp(sock_addr: SocketAddr, bind_device: Option<&str>, bind_type: &str) -> io::Result<UdpSocket> {
-    let device_note = bind_device
-        .map(|device| format!("@{device}"))
-        .unwrap_or_default();
-
-    debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
-    let udp_socket = std::net::UdpSocket::bind(sock_addr)?;
-
-    {
-        let sock_ref = socket2::SockRef::from(&udp_socket);
-        sock_ref.set_nonblocking(true)?;
-        sock_ref.set_reuse_address(true)?;
-
-        #[cfg(target_os = "macos")]
-        sock_ref.set_reuse_port(true)?;
-
-        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        if let Some(device) = bind_device {
-            sock_ref.bind_device(Some(device.as_bytes()))?;
-        }
-    }
-
-    let udp_socket = UdpSocket::from_std(udp_socket)?;
-
-    info!(
-        "listening for {} on {:?}{}",
-        bind_type,
-        udp_socket
-            .local_addr()
-            .expect("could not lookup local address"),
-        device_note
-    );
-    Ok(udp_socket)
+    info!("{} {} shutdown", crate::NAME, crate::version());
 }
 
 #[inline]
