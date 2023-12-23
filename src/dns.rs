@@ -92,48 +92,78 @@ impl Default for LookupFrom {
 }
 
 mod serial_message {
-    use crate::libdns::proto::xfer::SerialMessage as OriginalSerialMessage;
+
+    use crate::libdns::proto::op::Message;
     use crate::libdns::Protocol;
+    use bytes::Bytes;
     use std::net::SocketAddr;
 
-    pub struct SerialMessage {
-        pub message: Vec<u8>,
-        pub addr: SocketAddr,
-        pub protocol: Protocol,
-        pub fmt: SerialMessageFormat,
+    pub enum SerialMessage {
+        Raw(Message, SocketAddr, Protocol),
+        Bytes(Vec<u8>, SocketAddr, Protocol),
     }
 
     impl SerialMessage {
         pub fn binary(bytes: Vec<u8>, addr: SocketAddr, protocol: Protocol) -> Self {
-            Self {
-                message: bytes,
-                addr,
-                protocol,
-                fmt: SerialMessageFormat::Binary,
+            Self::Bytes(bytes, addr, protocol)
+        }
+        pub fn raw(message: Message, addr: SocketAddr, protocol: Protocol) -> Self {
+            Self::Raw(message, addr, protocol)
+        }
+
+        pub fn is_binray(&self) -> bool {
+            matches!(self, SerialMessage::Bytes(_, _, _))
+        }
+
+        pub fn protocol(&self) -> Protocol {
+            match self {
+                SerialMessage::Raw(_, _, p) => *p,
+                SerialMessage::Bytes(_, _, p) => *p,
             }
         }
-        pub fn json(bytes: Vec<u8>, addr: SocketAddr, protocol: Protocol) -> Self {
-            Self {
-                message: bytes,
-                addr,
-                protocol,
-                fmt: SerialMessageFormat::Json,
+
+        pub fn addr(&self) -> SocketAddr {
+            match self {
+                SerialMessage::Raw(_, a, _) => *a,
+                SerialMessage::Bytes(_, a, _) => *a,
             }
         }
     }
 
-    impl From<SerialMessage> for OriginalSerialMessage {
+    impl From<SerialMessage> for crate::libdns::proto::xfer::SerialMessage {
         fn from(val: SerialMessage) -> Self {
-            assert_eq!(val.fmt, SerialMessageFormat::Binary);
-            OriginalSerialMessage::new(val.message, val.addr)
+            match val {
+                SerialMessage::Bytes(bytes, addr, _) => Self::new(bytes, addr),
+                SerialMessage::Raw(message, addr, _) => {
+                    use crate::libdns::proto::serialize::binary::{BinEncodable, BinEncoder};
+                    let mut bytes = Vec::with_capacity(512);
+                    // mut block
+                    {
+                        let _ = message.emit(&mut BinEncoder::new(&mut bytes));
+                    };
+                    Self::new(bytes, addr)
+                }
+            }
         }
     }
 
-    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-    pub enum SerialMessageFormat {
-        #[default]
-        Binary,
-        Json,
+    impl From<SerialMessage> for Vec<u8> {
+        #[inline]
+        fn from(val: SerialMessage) -> Self {
+            crate::libdns::proto::xfer::SerialMessage::from(val)
+                .into_parts()
+                .0
+        }
+    }
+
+    impl From<SerialMessage> for Bytes {
+        #[inline]
+        fn from(val: SerialMessage) -> Self {
+            crate::libdns::proto::xfer::SerialMessage::from(val)
+                .into_parts()
+                .0
+                .into()
+        }
     }
 }
 
@@ -143,13 +173,14 @@ mod request {
 
     use crate::libdns::{
         proto::{
+            error::ProtoError,
             op::{LowerQuery, Message, Query},
             rr::{Name, RecordType},
         },
         Protocol,
     };
 
-    use super::DnsError;
+    use super::{DnsError, SerialMessage};
 
     #[derive(Clone)]
     pub struct DnsRequest {
@@ -244,6 +275,24 @@ mod request {
                 message: Arc::new(Message::default()),
                 src: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)),
                 protocol: Protocol::Udp,
+            }
+        }
+    }
+
+    impl TryFrom<SerialMessage> for DnsRequest {
+        type Error = ProtoError;
+
+        fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
+            match value {
+                SerialMessage::Raw(message, src_addr, protocol) => {
+                    Ok(DnsRequest::new(message, src_addr, protocol))
+                }
+                SerialMessage::Bytes(bytes, src_addr, protocol) => {
+                    use crate::libdns::proto::serialize::binary::{BinDecodable, BinDecoder};
+                    let mut decoder = BinDecoder::new(&bytes);
+                    let message = Message::read(&mut decoder)?;
+                    Ok(DnsRequest::new(message, src_addr, protocol))
+                }
             }
         }
     }
@@ -436,7 +485,7 @@ mod response {
 pub type DnsRequest = request::DnsRequest;
 pub type DnsResponse = response::DnsResponse;
 pub type DnsError = LookupError;
-pub use serial_message::{SerialMessage, SerialMessageFormat};
+pub use serial_message::SerialMessage;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum LookupResponseStrategy {

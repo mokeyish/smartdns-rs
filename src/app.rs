@@ -1,6 +1,4 @@
-use std::{
-    collections::HashMap, net::SocketAddr, ops::DerefMut, path::PathBuf, sync::Arc, time::Duration,
-};
+use std::{collections::HashMap, ops::DerefMut, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     runtime::{Handle, Runtime},
     sync::RwLock,
@@ -9,11 +7,10 @@ use tokio::{
 
 use crate::{
     config::ServerOpts,
-    dns::{DnsRequest, DnsResponse, SerialMessage, SerialMessageFormat},
+    dns::{DnsRequest, DnsResponse, SerialMessage},
     dns_conf::RuntimeConfig,
     dns_mw::{DnsMiddlewareBuilder, DnsMiddlewareHandler},
     dns_mw_cache::DnsCache,
-    libdns::Protocol,
     log,
     server::{DnsHandle, IncomingDnsRequest, ServerHandle},
     third_ext::FutureJoinAllExt as _,
@@ -337,21 +334,16 @@ struct AppGuard {
 
 async fn process(
     handler: Arc<DnsMiddlewareHandler>,
-    SerialMessage {
-        message: bytes,
-        addr: src_addr,
-        protocol,
-        fmt,
-    }: SerialMessage,
+    message: SerialMessage,
     server_opts: ServerOpts,
 ) -> SerialMessage {
     use crate::libdns::proto::error::ProtoError;
     use crate::libdns::proto::op::{Edns, Header, Message, MessageType, OpCode, ResponseCode};
-    use crate::libdns::proto::serialize::binary::{
-        BinDecodable, BinDecoder, BinEncodable, BinEncoder,
-    };
 
-    return match deserialize_request(&bytes, src_addr, protocol) {
+    let addr = message.addr();
+    let protocol = message.protocol();
+
+    return match DnsRequest::try_from(message) {
         Ok(request) => {
             match request.message_type() {
                 MessageType::Query => {
@@ -415,7 +407,8 @@ async fn process(
 
                             let response_message: Message =
                                 response.into_message(Some(response_header));
-                            serialize_response(fmt, &response_message, src_addr, protocol)
+
+                            SerialMessage::raw(response_message, addr, protocol)
                         }
                         OpCode::Status => todo!(),
                         OpCode::Notify => todo!(),
@@ -436,8 +429,8 @@ async fn process(
                 "request:{id} src:{proto}://{addr}#{port} type:{message_type} {op}:FormError:{error}",
                 id = request_header.id(),
                 proto = protocol,
-                addr = src_addr.ip(),
-                port = src_addr.port(),
+                addr = addr.ip(),
+                port = addr.port(),
                 message_type= request_header.message_type(),
                 op = request_header.op_code(),
                 error = error,
@@ -447,46 +440,8 @@ async fn process(
             response_header.set_response_code(ResponseCode::FormErr);
             let mut response_message = Message::new();
             response_message.set_header(response_header);
-            serialize_response(fmt, &response_message, src_addr, protocol)
+            SerialMessage::raw(response_message, addr, protocol)
         }
-        _ => SerialMessage {
-            message: Vec::with_capacity(0),
-            addr: src_addr,
-            protocol,
-            fmt,
-        },
+        _ => SerialMessage::raw(Default::default(), addr, protocol),
     };
-
-    fn deserialize_request(
-        bytes: &[u8],
-        src_addr: SocketAddr,
-        protocol: Protocol,
-    ) -> Result<DnsRequest, ProtoError> {
-        let mut decoder = BinDecoder::new(bytes);
-        let message = Message::read(&mut decoder)?;
-        Ok(DnsRequest::new(message, src_addr, protocol))
-    }
-    fn serialize_response(
-        fmt: SerialMessageFormat,
-        message: &Message,
-        addr: SocketAddr,
-        protocol: Protocol,
-    ) -> SerialMessage {
-        match fmt {
-            SerialMessageFormat::Binary => {
-                let mut bytes = Vec::with_capacity(512);
-                // mut block
-                {
-                    let _ = message.emit(&mut BinEncoder::new(&mut bytes));
-                };
-                SerialMessage {
-                    message: bytes,
-                    addr,
-                    protocol,
-                    fmt,
-                }
-            }
-            SerialMessageFormat::Json => todo!(),
-        }
-    }
 }

@@ -1,6 +1,11 @@
-use std::{io, sync::Arc};
+use std::{io, net::SocketAddr, sync::Arc};
 
-use axum::{routing::get, Json, Router};
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use rustls::{Certificate, PrivateKey};
 use serde::{Deserialize, Serialize};
@@ -41,7 +46,8 @@ pub async fn serve(
     let app = Router::new()
         .merge(serve_dns::routes())
         .nest("/api", api_routes())
-        .with_state(state.clone());
+        .with_state(state.clone())
+        .into_make_service_with_connect_info::<SocketAddr>();
 
     let certificate = certificate.into_iter().map(|c| c.0).collect::<Vec<_>>();
     let certificate_key = certificate_key.0;
@@ -59,7 +65,7 @@ pub async fn serve(
                 rustls_config,
             )
             .handle(shutdown_handle.clone())
-            .serve(app.into_make_service()) => match result {
+            .serve(app) => match result {
                 Ok(()) => (),
                 Err(e) => {
                     log::debug!("error receiving quic connection: {e}");
@@ -90,6 +96,40 @@ fn api_routes() -> StatefulRouter {
 
 async fn version() -> Json<&'static str> {
     Json(crate::version())
+}
+
+struct ApiError(anyhow::Error);
+
+// Tell axum how to convert `AppError` into a response.
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Something went wrong: {}", self.0),
+        )
+            .into_response()
+    }
+}
+
+// This enables using `?` on functions that return `Result<_, anyhow::Error>` to turn them into
+// `Result<_, AppError>`. That way you don't need to do that manually.
+impl<E> From<E> for ApiError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self(err.into())
+    }
+}
+
+impl IntoResponse for crate::dns::DnsError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(r#"{{ "error": "{0}" }}"#, self),
+        )
+            .into_response()
+    }
 }
 
 #[derive(Deserialize, Serialize)]
