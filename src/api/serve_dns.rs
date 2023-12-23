@@ -8,7 +8,7 @@ use axum::{
 };
 
 use super::{ServeState, StatefulRouter};
-use crate::libdns::{proto::xfer::SerialMessage, server::server::Protocol};
+use crate::{dns::SerialMessage, libdns::Protocol};
 
 pub fn routes() -> StatefulRouter {
     Router::new().route("/dns-query", any(serve_dns))
@@ -24,15 +24,10 @@ async fn serve_dns(State(state): State<Arc<ServeState>>, req: Request) -> Bytes 
     println!("{}", s.join("\n"));
 
     if let Ok(bytes) = Bytes::from_request(req, &state).await {
-        state
-            .dns_handler
-            .handle(
-                SerialMessage::new(bytes.into(), "0.0.0.0:0".parse().unwrap()),
-                Protocol::Https,
-            )
-            .await
-            .into_parts()
-            .0
+        let req_msg =
+            SerialMessage::binary(bytes.into(), "0.0.0.0:0".parse().unwrap(), Protocol::Https);
+        let res_msg = state.dns_handle.send(req_msg).await;
+        res_msg.message
     } else {
         Default::default()
     }

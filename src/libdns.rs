@@ -3,8 +3,8 @@ pub mod proto {
 }
 
 pub mod resolver {
+    use super::proto::rr::Record;
     pub use hickory_resolver::*;
-    use proto::rr::Record;
 
     pub trait TtlClip {
         fn set_max_ttl(&mut self, ttl: u32);
@@ -34,6 +34,9 @@ pub mod resolver {
     }
 }
 
+#[cfg(feature = "legacy_dns_server")]
 pub mod server {
     pub use hickory_server::*;
 }
+
+pub use crate::server::Protocol;
