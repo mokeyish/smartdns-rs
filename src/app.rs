@@ -363,19 +363,19 @@ async fn process(
                                 let query_type = query.query_type();
                                 let query_class = query.query_class();
                                 log::debug!(
-                            "request:{id} src:{proto}://{addr}#{port} type:{message_type} dnssec:{is_dnssec} {op}:{query}:{qtype}:{class} qflags:{qflags}",
-                            id = id,
-                            proto = protocol,
-                            addr = src_addr.ip(),
-                            port = src_addr.port(),
-                            message_type= message_type,
-                            is_dnssec = is_dnssec,
-                            op = qop_code,
-                            query = query_name,
-                            qtype = query_type,
-                            class = query_class,
-                            qflags = qflags,
-                        );
+                                    "request:{id} src:{proto}://{addr}#{port} type:{message_type} dnssec:{is_dnssec} {op}:{query}:{qtype}:{class} qflags:{qflags}",
+                                    id = id,
+                                    proto = protocol,
+                                    addr = src_addr.ip(),
+                                    port = src_addr.port(),
+                                    message_type= message_type,
+                                    is_dnssec = is_dnssec,
+                                    op = qop_code,
+                                    query = query_name,
+                                    qtype = query_type,
+                                    class = query_class,
+                                    qflags = qflags,
+                                );
                             }
 
                             // start process
