@@ -22,7 +22,7 @@ crates = ["hickory-server", "hickory-proto"]
 
 [features]
 
-default = ["dns-over-tls", "dns-over-https", "dns-over-quic"]
+default = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3"]
 
 homebrew = ["default"]
 
@@ -32,6 +32,7 @@ disable_icmp_ping = []
 dns-over-tls = []
 dns-over-https = ["dns-over-https-rustls"]
 dns-over-quic = ["hickory-server/dns-over-quic"]
+dns-over-h3 = ["hickory-proto/dns-over-h3", "hickory-resolver/dns-over-h3"]
 
 dns-over-https-rustls = [
   "hickory-proto/dns-over-https-rustls",

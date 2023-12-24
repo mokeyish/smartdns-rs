@@ -521,6 +521,7 @@ impl NameServerFactory {
                 trust_negative_responses: true,
                 bind_addr: None,
             },
+            #[cfg(feature = "dns-over-https")]
             Https => NameServerConfig {
                 socket_addr: addr,
                 protocol: Protocol::Https,
@@ -529,6 +530,7 @@ impl NameServerFactory {
                 bind_addr: None,
                 tls_config,
             },
+            #[cfg(feature = "dns-over-quic")]
             Quic => NameServerConfig {
                 socket_addr: addr,
                 protocol: Protocol::Quic,
@@ -537,9 +539,19 @@ impl NameServerFactory {
                 bind_addr: None,
                 tls_config,
             },
-            Protocol::Tls => NameServerConfig {
+            #[cfg(feature = "dns-over-tls")]
+            Tls => NameServerConfig {
                 socket_addr: addr,
                 protocol: Protocol::Tls,
+                tls_dns_name,
+                trust_negative_responses: true,
+                bind_addr: None,
+                tls_config,
+            },
+            #[cfg(feature = "dns-over-h3")]
+            H3 => NameServerConfig {
+                socket_addr: addr,
+                protocol: Protocol::H3,
                 tls_dns_name,
                 trust_negative_responses: true,
                 bind_addr: None,
@@ -1301,6 +1313,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "dns-over-tls")]
     async fn test_nameserver_tls_resolve() {
         let urls = [
             DnsUrl::from_str("tls://dns.google?enable_sni=false").unwrap(),
@@ -1326,6 +1339,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "dns-over-https")]
     async fn test_nameserver_https_resolve() {
         let urls = [
             DnsUrl::from_str("https://dns.cloudflare.com/dns-query").unwrap(),
@@ -1335,6 +1349,23 @@ mod tests {
             DnsUrl::from_str("https://dns.adguard-dns.com/dns-query").unwrap(),
             DnsUrl::from_str("https://dns.quad9.net/dns-query").unwrap(),
         ];
+
+        let results = urls
+            .into_iter()
+            .map(|url| async move {
+                let client = DnsClient::builder().add_server(url).build().await;
+                query_google(&client).await && query_alidns(&client).await
+            })
+            .join_all()
+            .await;
+
+        assert!(results.into_iter().all(|r| r));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "dns-over-h3")]
+    async fn test_nameserver_h3_resolve() {
+        let urls = [DnsUrl::from_str("h3://dns.adguard-dns.com/dns-query").unwrap()];
 
         let results = urls
             .into_iter()

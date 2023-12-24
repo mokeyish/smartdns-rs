@@ -10,11 +10,12 @@ use std::{
 use url::{Host, Url};
 
 /// alias: system、google、cloudflare、quad9
-/// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => traditional dns server
-/// tcp://8.8.8.8:53                            => dns over tcp
-/// tls://8.8.8.8:853                           => DOT: dns over tls
-/// quic://8.8.8.8:853                          => DOT: dns over QUIC
-/// https://1.1.1.1/dns-query                   => DOH: dns over https
+/// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => traditional DNS server
+/// tcp://8.8.8.8:53                            => DNS over tcp
+/// tls://8.8.8.8:853                           => DoT:  DNS over tls
+/// quic://8.8.8.8:853                          => DoT:  DNS over QUIC
+/// https://1.1.1.1/dns-query                   => DoH:  DNS over https
+/// h3://1.1.1.1/dns-query                      => DoH3: DNS over HTTP/3
 #[derive(Debug, Clone, Eq)]
 pub struct DnsUrl {
     proto: Protocol,
@@ -47,7 +48,7 @@ impl DnsUrl {
 
     pub fn path(&self) -> &str {
         match self.proto {
-            Protocol::Https => match self.path.as_ref() {
+            Protocol::Https | Protocol::H3 => match self.path.as_ref() {
                 Some(p) => p,
                 None => "/dns-query",
             },
@@ -138,8 +139,12 @@ impl FromStr for DnsUrl {
             "udp" => Protocol::Udp,
             "tcp" => Protocol::Tcp,
             "tls" => Protocol::Tls,
+            #[cfg(feature = "dns-over-https")]
             "https" => Protocol::Https,
+            #[cfg(feature = "dns-over-quic")]
             "quic" => Protocol::Quic,
+            #[cfg(feature = "dns-over-h3")]
+            "h3" => Protocol::H3,
             schema => return Err(DnsUrlParseErr::ProtocolNotSupport(schema.to_string())),
         };
 
@@ -185,15 +190,19 @@ impl FromStr for DnsUrl {
 impl ToString for DnsUrl {
     fn to_string(&self) -> String {
         let mut out = String::new();
-
+        use Protocol::*;
         // schema
         out += match self.proto {
-            Protocol::Udp => "udp://",
-            Protocol::Tcp => "tcp://",
-            Protocol::Tls => "tls://",
-            Protocol::Https => "https://",
-            Protocol::Quic => "quic://",
-            _ => todo!(),
+            Udp => "udp://",
+            Tcp => "tcp://",
+            Tls => "tls://",
+            #[cfg(feature = "dns-over-https")]
+            Https => "https://",
+            #[cfg(feature = "dns-over-quic")]
+            Quic => "quic://",
+            #[cfg(feature = "dns-over-h3")]
+            H3 => "h3://",
+            _ => unimplemented!(),
         };
 
         // host
@@ -261,12 +270,16 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
         Udp => 53,
         Tcp => 53,
         Tls => 853,
+        #[cfg(feature = "dns-over-https")]
         Https => 443,
+        #[cfg(feature = "dns-over-h3")]
+        H3 => 443,
+        #[cfg(feature = "dns-over-quic")]
         Quic => 853,
         #[cfg(feature = "mdns")]
         #[cfg_attr(docsrs, doc(cfg(feature = "mdns")))]
         Mdns => 5353,
-        _ => todo!(),
+        _ => unimplemented!(),
     }
 }
 
@@ -396,6 +409,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-tls")]
     fn test_parse_tls_1() {
         let url = DnsUrl::from_str("tls://8.8.8.8").unwrap();
         assert_eq!(url.proto, Protocol::Tls);
@@ -406,6 +420,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-tls")]
     fn test_parse_tls_2() {
         let url = DnsUrl::from_str("tls://8.8.8.8:953").unwrap();
         assert_eq!(url.proto, Protocol::Tls);
@@ -416,6 +431,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-tls")]
     fn test_parse_tls_3() {
         let mut url = DnsUrl::from_str("tls://8.8.8.8:953").unwrap();
         url.set_host("dns.google");
@@ -428,6 +444,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-https")]
     fn test_parse_https() {
         let url = DnsUrl::from_str("https://dns.google/dns-query").unwrap();
         assert_eq!(url.proto, Protocol::Https);
@@ -439,6 +456,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-https")]
     fn test_parse_https_1() {
         let url = DnsUrl::from_str("https://dns.google/dns-query1").unwrap();
         assert_eq!(url.proto, Protocol::Https);
@@ -450,6 +468,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-https")]
     fn test_parse_https_2() {
         let url = DnsUrl::from_str("https://dns.google").unwrap();
 
@@ -462,6 +481,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-quic")]
     fn test_parse_quic() {
         let url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
 
@@ -474,6 +494,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "dns-over-h3")]
+    fn test_parse_h3() {
+        let url = DnsUrl::from_str("h3://dns.adguard-dns.com").unwrap();
+
+        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.port(), 443);
+        assert_eq!(url.path(), "");
+        assert_eq!(url.to_string(), "h3://dns.adguard-dns.com");
+        assert!(url.ip().is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "dns-over-https")]
     fn test_url_params_equal() {
         let url1 = DnsUrl::from_str("https://dns.adguard-dns.com?a=1&b=2&c=3").unwrap();
         let url2 = DnsUrl::from_str("https://dns.adguard-dns.com?b=2&a=1&c=3").unwrap();
@@ -504,21 +538,21 @@ mod tests {
 
     #[test]
     fn test_parse_enable_sni_false() {
-        let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
+        let url = DnsUrl::from_str("udp://cloudflare-dns.com?enable_sni=false").unwrap();
         assert!(url.sni_off());
         assert!(url.ip().is_none());
     }
 
     #[test]
     fn test_parse_enable_sni_true() {
-        let url = DnsUrl::from_str("tls://cloudflare-dns.com?enable_sni=false").unwrap();
+        let url = DnsUrl::from_str("udp://cloudflare-dns.com?enable_sni=false").unwrap();
         assert!(url.sni_off());
         assert!(url.ip().is_none());
     }
 
     #[test]
     fn test_parse_params_ip() {
-        let url = DnsUrl::from_str("tls://cloudflare-dns.com?ip=1.1.1.1").unwrap();
+        let url = DnsUrl::from_str("udp://cloudflare-dns.com?ip=1.1.1.1").unwrap();
         assert_eq!(url.ip(), Some("1.1.1.1".parse().unwrap()));
     }
 }

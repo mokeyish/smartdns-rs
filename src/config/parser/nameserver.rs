@@ -13,9 +13,14 @@ impl NomParser for NameServerInfo {
                 opt(alt((
                     tag_no_case("udp://"),
                     tag_no_case("tcp://"),
+                    #[cfg(feature = "dns-over-tls")]
                     tag_no_case("tls://"),
+                    #[cfg(feature = "dns-over-https")]
                     tag_no_case("https://"),
+                    #[cfg(feature = "dns-over-quic")]
                     tag_no_case("quic://"),
+                    #[cfg(feature = "dns-over-h3")]
+                    tag_no_case("h3://"),
                 ))),
                 move |p| p.unwrap_or(default_proto),
             );
@@ -38,14 +43,19 @@ impl NomParser for NameServerInfo {
                 tag_no_case("server-tcp"),
                 preceded(space1, dns_url("tcp://")),
             ),
+            #[cfg(feature = "dns-over-tls")]
             preceded(
                 tag_no_case("server-tls"),
                 preceded(space1, dns_url("tls://")),
             ),
+            #[cfg(feature = "dns-over-https")]
             preceded(
                 tag_no_case("server-https"),
                 preceded(space1, dns_url("https://")),
             ),
+            #[cfg(feature = "dns-over-h3")]
+            preceded(tag_no_case("server-h3"), preceded(space1, dns_url("h3://"))),
+            #[cfg(feature = "dns-over-quic")]
             preceded(
                 tag_no_case("server-quic"),
                 preceded(space1, dns_url("quic://")),
@@ -177,6 +187,7 @@ mod tests {
                     tag_no_case("tls://"),
                     tag_no_case("https://"),
                     tag_no_case("quic://"),
+                    tag_no_case("h3://"),
                 ))),
                 move |p| p.unwrap_or(default_proto),
             )(input)
