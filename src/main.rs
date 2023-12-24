@@ -21,7 +21,7 @@ mod dns_mw_cache;
 mod dns_mw_cname;
 mod dns_mw_dnsmasq;
 mod dns_mw_dualstack;
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "nft", target_os = "linux"))]
 mod dns_mw_nftset;
 mod dns_mw_ns;
 // mod dns_mw_zone;
@@ -37,6 +37,7 @@ mod preset_ns;
 mod proxy;
 mod rustls;
 mod server;
+#[cfg(feature = "service")]
 mod service;
 mod third_ext;
 
@@ -113,6 +114,7 @@ impl Cli {
 
                 run_server(conf);
             }
+            #[cfg(feature = "service")]
             Commands::Service {
                 command: service_command,
             } => {
@@ -144,6 +146,10 @@ impl Cli {
                     },
                 }
                 .unwrap();
+            }
+            #[cfg(not(feature = "service"))]
+            Commands::Service { command: _ } => {
+                warn!("please enable feature: service")
             }
         }
     }
