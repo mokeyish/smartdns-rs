@@ -10,11 +10,11 @@ use std::{
 use url::{Host, Url};
 
 /// alias: system、google、cloudflare、quad9
-/// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => traditional DNS server
-/// tcp://8.8.8.8:53                            => DNS over tcp
-/// tls://8.8.8.8:853                           => DoT:  DNS over tls
+/// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => DNS over UDP
+/// tcp://8.8.8.8:53                            => DNS over TCP
+/// tls://8.8.8.8:853                           => DoT:  DNS over TLS
 /// quic://8.8.8.8:853                          => DoT:  DNS over QUIC
-/// https://1.1.1.1/dns-query                   => DoH:  DNS over https
+/// https://1.1.1.1/dns-query                   => DoH:  DNS over HTTPS
 /// h3://1.1.1.1/dns-query                      => DoH3: DNS over HTTP/3
 #[derive(Debug, Clone, Eq)]
 pub struct DnsUrl {

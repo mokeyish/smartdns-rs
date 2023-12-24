@@ -72,8 +72,6 @@ impl TlsClientConfigBundle {
     fn create_tls_client_config(paths: &[PathBuf]) -> ClientConfig {
         use rustls::{OwnedTrustAnchor, RootCertStore};
 
-        const ALPN_H2: &[u8] = b"h2";
-
         let mut root_store = RootCertStore::empty();
         root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
             OwnedTrustAnchor::from_subject_spki_name_constraints(
@@ -111,17 +109,13 @@ impl TlsClientConfigBundle {
                 })
         }
 
-        let mut client_config = ClientConfig::builder()
+        ClientConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
             .with_safe_default_protocol_versions()
             .unwrap()
             .with_root_certificates(root_store)
-            .with_no_client_auth();
-
-        client_config.alpn_protocols.push(ALPN_H2.to_vec());
-
-        client_config
+            .with_no_client_auth()
     }
 }
 

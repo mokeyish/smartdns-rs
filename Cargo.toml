@@ -9,7 +9,7 @@ keywords = ["DNS", "BIND", "dig", "named", "dnssec", "SmartDNS", "Dnsmasq"]
 categories = ["network-programming"]
 
 description = """
-A cross platform local DNS server written in rust to obtain the fastest website IP for the best Internet experience, support DoT, DoH. 
+A cross platform local DNS server written in rust to obtain the fastest website IP for the best Internet experience, support DoT, DoQ, DoH, DoH3.
 """
 
 homepage = "https://github.com/mokeyish/smartdns-rs"
@@ -31,8 +31,15 @@ disable_icmp_ping = []
 
 dns-over-tls = []
 dns-over-https = ["dns-over-https-rustls"]
-dns-over-quic = ["hickory-server/dns-over-quic"]
-dns-over-h3 = ["hickory-proto/dns-over-h3", "hickory-resolver/dns-over-h3"]
+dns-over-quic = [
+  "hickory-proto/dns-over-quic",
+  "hickory-resolver/dns-over-quic",
+  "hickory-server/dns-over-quic"
+]
+dns-over-h3 = [
+  "hickory-proto/dns-over-h3",
+  "hickory-resolver/dns-over-h3"
+]
 
 dns-over-https-rustls = [
   "hickory-proto/dns-over-https-rustls",
