@@ -1,0 +1,150 @@
+# .github/workflows/release.yml
+name: Nightly builds
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron:  '30 5,17 * * *'
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: x86_64-pc-windows-gnu
+            os: windows-latest
+            archive: zip
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: zip
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: zip
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          # - target: arch64-unknown-linux-musl
+          #   archive: tar.gz tar.xz tar.zst
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          - target: arm-unknown-linux-musleabi
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          - target: arm-unknown-linux-musleabihf
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          # - target: mips-unknown-linux-musl
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: mips-unknown-linux-musl
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: mips64-unknown-linux-muslabi64
+          #   archive: tar.gz tar.xz tar.zst
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
+          # - target: x86_64-unknown-freebsd
+          #   os: ubuntu-latest
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: x86_64-unknown-netbsd
+          #   os: ubuntu-latest
+          #   archive: tar.gz tar.xz tar.zst
+          # - target: wasm32-unknown-emscripten
+          #   archive: tar.gz tar.xz tar.zst
+
+    runs-on: ${{matrix.os}}
+    env:
+      DIST_DIR: smartdns-${{ matrix.target }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@master
+
+      - name: Install Rust Toolchain Components
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - uses: extractions/setup-just@v1
+
+      - name: cargo install patch-crate
+        uses: baptiste0928/cargo-install@v2
+        with:
+          crate: patch-crate
+          
+      - name: Patch crates
+        run: cargo patch-crate
+        shell: bash
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.os == 'ubuntu-latest' }}
+          command: build
+          args: --release --target=${{ matrix.target }}
+
+      - name: Pre publish
+        run: |
+          mkdir $DIST_DIR
+          cp LICENSE $DIST_DIR
+          cp README*.md $DIST_DIR
+          cp etc/smartdns/smartdns.conf $DIST_DIR
+        shell: bash
+          
+      - name: Publish archive
+        if: ${{ !contains(matrix.target, 'windows') && !contains(matrix.target, 'darwin') }}
+        env:
+          ARCHIVE_FILE: smartdns-${{ matrix.target }}.tar.gz
+        run: |
+          cp target/${{ matrix.target }}/release/smartdns $DIST_DIR
+          tar -zcvf $ARCHIVE_FILE $DIST_DIR
+          shasum -a256 $ARCHIVE_FILE > $ARCHIVE_FILE-sha256sum.txt
+          echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
+
+      - name: Publish zip archive macos
+        if: ${{ contains(matrix.target, 'darwin') }}
+        env:
+          ARCHIVE_FILE: smartdns-${{ matrix.target }}.zip
+        run: |
+          cp target/${{ matrix.target }}/release/smartdns $DIST_DIR
+          zip -9r $ARCHIVE_FILE $DIST_DIR
+          shasum -a256 $ARCHIVE_FILE > $ARCHIVE_FILE-sha256sum.txt
+          echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
+      
+      - name: Publish zip archive windows
+        if: ${{ contains(matrix.target, 'windows') }}
+        env:
+          ARCHIVE_FILE: smartdns-${{ matrix.target }}.zip
+        run: |
+          cp target/${{ matrix.target }}/release/smartdns.exe $DIST_DIR
+          7z a -tzip $ARCHIVE_FILE $DIST_DIR
+          echo ${{ hashFiles(format(' smartdns-{0}.zip', matrix.target)) }} > $ARCHIVE_FILE-sha256sum.txt
+          echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
+        shell: bash
+    
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartdns-${{ matrix.target }}
+          retention-days: 30
+          path: ${{ env.archive_file }}  
+      
+      - name: Publish release
+        uses: softprops/action-gh-release@v0.1.15
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        with:
+          draft: false
+          files: |
+            ${{ env.archive_file }} 
+            ${{ env.archive_file }}-sha256sum.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
