@@ -24,7 +24,7 @@ SmartDNS-rs 🐋 is a local DNS server imspired by [C SmartDNS](https://github.c
 
 - **Support for multiple query protocols**
 
-  Supports UDP, TCP, DoT(DNS over TLS), DoH(DNS over HTTPS) queries and  service, and non-53 port queries, effectively avoiding DNS pollution and protect privacy, and support query DNS over socks5, http proxy.
+  Supports UDP, TCP, DoT, DoQ, DoH, DoH3 queries and  service, and non-53 port queries, effectively avoiding DNS pollution and protect privacy, and support query DNS over socks5, http proxy.
 
 - **Domain IP address specification**
 

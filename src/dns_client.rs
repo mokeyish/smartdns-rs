@@ -1397,12 +1397,23 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "not available now"]
-    async fn test_nameserver_adguard_quic_resolve() {
-        let dns_url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
-        let client = DnsClient::builder().add_server(dns_url).build().await;
-        assert!(query_google(&client).await);
-        assert!(query_alidns(&client).await);
+    #[cfg(feature = "dns-over-quic")]
+    async fn test_nameserver_quic_resolve() {
+        let urls = [
+            DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap(),
+            DnsUrl::from_str("quic://unfiltered.adguard-dns.com?enable_sni=true").unwrap(),
+        ];
+
+        let results = urls
+            .into_iter()
+            .map(|url| async move {
+                let client = DnsClient::builder().add_server(url).build().await;
+                query_google(&client).await && query_alidns(&client).await
+            })
+            .join_all()
+            .await;
+
+        assert!(results.into_iter().all(|r| r));
     }
 
     // #[test]

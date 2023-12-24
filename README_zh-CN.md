@@ -24,7 +24,7 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/s
 
 - **支持多种查询协议**
 
-  支持 UDP、TCP、DoT 和 DoH 查询及服务，以及非 53 端口查询；支持通过socks5，HTTP代理查询。
+  支持 UDP、TCP、DoT、DoQ、DoH 和 DoH3 查询及服务，以及非 53 端口查询；支持通过socks5，HTTP代理查询。
 
 - **特定域名 IP 地址指定**
 
