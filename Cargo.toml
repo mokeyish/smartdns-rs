@@ -22,7 +22,7 @@ crates = ["hickory-server", "hickory-proto"]
 
 [features]
 
-default = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3"]
+default = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft"]
 
 homebrew = ["default"]
 
@@ -39,6 +39,9 @@ dns-over-https-rustls = [
   "hickory-resolver/dns-over-https-rustls",
   "hickory-server/dns-over-https-rustls",
 ]
+
+service = ["dep:which"]
+nft = ["dep:which"]
 
 dnssec = ["hickory-proto/dnssec"]
 
@@ -138,7 +141,7 @@ csv = "1.1"
 hostname = "0.3"
 byte-unit = { version = "5.0.3", features = ["serde"]}
 ipnet = "2.7"
-which = "5.0.0"
+which = { version = "5.0.0", optional = true }
 
 # process
 sysinfo = "0.29"

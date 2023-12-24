@@ -120,8 +120,6 @@ impl App {
         use crate::dns_mw_cname::DnsCNameMiddleware;
         use crate::dns_mw_dnsmasq::DnsmasqMiddleware;
         use crate::dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
-        #[cfg(target_os = "linux")]
-        use crate::dns_mw_nftset::DnsNftsetMiddleware;
         use crate::dns_mw_ns::NameServerMiddleware;
         // use crate::dns_mw_zone::DnsZoneMiddleware;
 
@@ -167,9 +165,10 @@ impl App {
             }
 
             // nftset
-            #[cfg(target_os = "linux")]
+            #[cfg(all(feature = "nft", target_os = "linux"))]
             {
                 use crate::config::ConfigForIP;
+                use crate::dns_mw_nftset::DnsNftsetMiddleware;
                 use crate::ffi::nft::Nft;
                 let nftsets = cfg.valid_nftsets();
                 if !nftsets.is_empty() {

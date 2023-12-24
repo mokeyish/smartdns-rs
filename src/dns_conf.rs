@@ -46,18 +46,23 @@ impl RuntimeConfig {
 
             RuntimeConfig::load_from_file(path)
         } else {
+            #[cfg(feature = "service")]
+            let conf_path: &str = crate::service::CONF_PATH;
+            #[cfg(not(feature = "service"))]
+            let conf_path: &str = "./smartdns.conf";
             cfg_if! {
                 if #[cfg(target_os = "android")] {
                     let candidate_path = [
+                        conf_path,
                         "/data/data/com.termux/files/usr/etc/smartdns.conf",
                         "/data/data/com.termux/files/usr/etc/smartdns/smartdns.conf"
                     ];
 
                 } else if #[cfg(target_os = "windows")] {
-                    let candidate_path  = [crate::service::CONF_PATH];
+                    let candidate_path  = [conf_path];
                 } else {
                     let candidate_path = [
-                        crate::service::CONF_PATH,
+                        conf_path,
                         "/etc/smartdns.conf",
                         "/etc/smartdns/smartdns.conf",
                         "/usr/local/etc/smartdns.conf",
