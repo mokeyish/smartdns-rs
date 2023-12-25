@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@master
 
       - name: Install Rust Toolchain Components
-        uses: ructions/toolchain@v1
+        uses: ructions/toolchain@v2
         with:
           toolchain: stable
           target: ${{ matrix.target }}
@@ -71,7 +71,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@master
       - name: Install Rust Toolchain Components
-        uses: ructions/toolchain@v1
+        uses: ructions/toolchain@v2
         with:
           toolchain: stable
           components: rustfmt, clippy
@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@master
 
       - name: Install Rust Toolchain Components
-        uses: ructions/toolchain@v1
+        uses: ructions/toolchain@v2
         with:
           toolchain: stable
           target: ${{ matrix.target }}
