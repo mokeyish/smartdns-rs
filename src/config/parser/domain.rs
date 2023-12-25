@@ -10,11 +10,11 @@ impl NomParser for Name {
 impl NomParser for Domain {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Domain> {
-        let set = alphanumeric0;
+        let set_name = take_till1(|c| c == '/');
 
         alt((
             map(
-                preceded(tag_no_case("domain-set:"), map(set, String::from)),
+                preceded(tag_no_case("domain-set:"), map(set_name, String::from)),
                 Domain::Set,
             ),
             map(NomParser::parse, Domain::Name),
@@ -52,5 +52,11 @@ mod test {
 
         let n = Name::from_str("*").unwrap();
         assert!(n.is_wildcard());
+    }
+
+    #[test]
+    fn test3() {
+        let (_, domain) = Domain::parse("domain-set:domain-block-list").unwrap();
+        assert_eq!(domain, Domain::Set("domain-block-list".to_string()));
     }
 }
