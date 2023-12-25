@@ -122,6 +122,8 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<RData> {
             match address {
                 IPv4(ipv4) if query_type == A => return Some(RData::A(ipv4.into())),
                 IPv6(ipv6) if query_type == AAAA => return Some(RData::AAAA(ipv6.into())),
+                IPv4(_) if query_type == AAAA && !no_rule_soa => return Some(RData::default_soa()),
+                IPv6(_) if query_type == A && !no_rule_soa => return Some(RData::default_soa()),
                 SOA if !no_rule_soa => return Some(RData::default_soa()),
                 SOAv4 if !no_rule_soa && query_type == A => return Some(RData::default_soa()),
                 SOAv6 if !no_rule_soa && query_type == AAAA => return Some(RData::default_soa()),
@@ -177,6 +179,43 @@ mod tests {
                 .unwrap()[0],
             RData::A("8.8.8.8".parse().unwrap())
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_address_rule_soa2() {
+        let cfg = RuntimeConfig::builder()
+            .with(
+                r#"
+            domain-rule /google.com/ -address 1.2.3.4
+            "#,
+            )
+            .build();
+
+        assert_eq!(
+            cfg.find_domain_rule(&"google.com".parse().unwrap())
+                .unwrap()
+                .address,
+            Some(DomainAddress::IPv4("1.2.3.4".parse().unwrap()))
+        );
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_a_record("google.com", "8.8.8.8".parse().unwrap())
+            .with_aaaa_record("google.com", "2001:4860:4860::8888".parse().unwrap())
+            .build(cfg);
+
+        assert_eq!(
+            mock.lookup_rdata("google.com", RecordType::A)
+                .await
+                .unwrap()[0],
+            RData::A("1.2.3.4".parse().unwrap())
+        );
+
+        assert!(matches!(
+            mock.lookup_rdata("google.com", RecordType::AAAA)
+                .await
+                .unwrap()[0],
+            RData::SOA(_)
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
