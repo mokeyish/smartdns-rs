@@ -60,10 +60,10 @@ impl DnsCacheMiddleware {
         if cfg.cache_persist() {
             let cache_file = cfg.cache_file();
             let cache = cache.cache();
-            if cache_file.exists() {
-                cache.blocking_lock().load(cache_file.as_path());
-            }
             tokio::spawn(async move {
+                if cache_file.exists() {
+                    cache.lock().await.load(cache_file.as_path());
+                }
                 crate::signal::terminate()
                     .await
                     .expect("failed to wait ctrl_c for persist cache.");
