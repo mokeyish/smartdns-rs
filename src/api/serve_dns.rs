@@ -44,7 +44,7 @@ async fn process(
     state: &ServeState,
     req: Request,
     addr: SocketAddr,
-    query_parameters: HashMap<String, String>,
+    parameters: HashMap<String, String>,
 ) -> anyhow::Result<(&'static str, Bytes)> {
     const APPLICATION_DNS_MESSAGE: &str = "application/dns-message";
     const APPLICATION_JSON: &str = "application/json";
@@ -63,7 +63,8 @@ async fn process(
 
     let accept_dns_message = accept == APPLICATION_DNS_MESSAGE;
 
-    let req_msg = if !accept_dns_message && !query_parameters.is_empty() && accept.contains("json")
+    let req_msg = if !accept_dns_message && parameters.contains_key("name")
+        || parameters.contains_key("query")
     {
         // https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-json/
         use crate::libdns::proto::{
@@ -71,17 +72,19 @@ async fn process(
             rr::{Name, RecordType},
         };
 
-        let name: Name = query_parameters
+        let name: Name = parameters
             .get("name")
+            .or_else(|| parameters.get("query"))
             .ok_or_else(|| anyhow::anyhow!("Query name is required"))?
             .parse()?;
-        let query_type: RecordType = query_parameters
-            .get("type")
-            .ok_or_else(|| anyhow::anyhow!("Query type is required"))?
-            .parse()?;
-        let dnssec = matches!(query_parameters.get("do"), Some(s) if s == "true" || s == "1");
-        let checking_disabled =
-            matches!(query_parameters.get("cd"), Some(s) if s == "true" || s == "1");
+
+        let query_type = match parameters.get("type") {
+            Some(s) => s.parse()?,
+            None => RecordType::A,
+        };
+
+        let dnssec = matches!(parameters.get("do"), Some(s) if s == "true" || s == "1");
+        let checking_disabled = matches!(parameters.get("cd"), Some(s) if s == "true" || s == "1");
 
         let mut message = Message::new();
         message.add_query(Query::query(name, query_type));
