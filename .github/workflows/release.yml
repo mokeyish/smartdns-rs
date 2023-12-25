@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@master
 
       - name: Install Rust Toolchain Components
-        uses: actions-rs/toolchain@v1
+        uses: ructions/toolchain@v1
         with:
           toolchain: stable
           target: ${{ matrix.target }}
@@ -86,7 +86,7 @@ jobs:
         shell: bash
 
       - name: Build
-        uses: actions-rs/cargo@v1
+        uses: ructions/cargo@v1
         with:
           use-cross: ${{ matrix.os == 'ubuntu-latest' }}
           command: build
