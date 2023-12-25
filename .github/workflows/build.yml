@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@master
 
       - name: Install Rust Toolchain Components
-        uses: ructions/toolchain@v1
+        uses: ructions/toolchain@v2
         with:
           toolchain: stable
           target: ${{ matrix.target }}
