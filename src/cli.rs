@@ -141,22 +141,12 @@ impl From<CompatibleCli> for Cli {
         let verbose0 = if verbose {
             Verbosity::new(10, 0)
         } else {
-            Verbosity::new(level_value(log::Level::INFO), 0)
+            Default::default()
         };
         Self {
             command: Commands::Run { conf, pid },
             verbose: verbose0,
         }
-    }
-}
-
-fn level_value(level: log::Level) -> u8 {
-    match level {
-        log::Level::ERROR => 0,
-        log::Level::WARN => 1,
-        log::Level::INFO => 2,
-        log::Level::DEBUG => 3,
-        log::Level::TRACE => 4,
     }
 }
 
@@ -291,5 +281,7 @@ mod tests {
                 pid: None,
             }
         ));
+
+        assert_eq!(cli.log_level(), Some(log::Level::INFO));
     }
 }
