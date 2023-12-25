@@ -319,4 +319,21 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn test_parse_domain_rule() {
+        assert_eq!(
+            parse_config("domain-rules /domain-set:domain-block-list/ --address #").unwrap(),
+            (
+                "",
+                OneConfig::DomainRule(ConfigForDomain {
+                    domain: Domain::Set("domain-block-list".to_string()),
+                    config: DomainRule {
+                        address: Some(DomainAddress::SOA),
+                        ..Default::default()
+                    }
+                })
+            )
+        );
+    }
 }
