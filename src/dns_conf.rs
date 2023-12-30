@@ -716,6 +716,9 @@ impl RuntimeConfigBuilder {
 
     pub fn config(&mut self, line: &str) {
         let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return;
+        }
         use crate::config::parser::OneConfig::*;
         match parser::parse_config(line) {
             Ok((_, config_item)) => match config_item {
