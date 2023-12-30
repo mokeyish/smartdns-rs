@@ -47,12 +47,8 @@ impl IDomainSetProvider for DomainSetFileProvider {
 
     fn get_domain_set(&self) -> Result<HashSet<Name>> {
         let mut domain_set = HashSet::new();
-
-        if self.file.exists() {
-            let text = std::fs::read_to_string(&self.file)?;
-            read_to_domain_set(&text, &mut domain_set);
-        }
-
+        let text = std::fs::read_to_string(&self.file)?;
+        read_to_domain_set(&text, &mut domain_set);
         Ok(domain_set)
     }
 }

@@ -79,7 +79,10 @@ pub fn serve(
                     let (bytes, addr) = message.into_parts();
                     let req_message = SerialMessage::binary(bytes, addr, Protocol::Tcp);
                     let res_message = handler.send(req_message).await;
-                    if let Err(err) = stream_handle.send(res_message.into()) {
+                    if let Err(err) = res_message
+                        .try_into()
+                        .map(|buffer| stream_handle.send(buffer))
+                    {
                         log::error!("TCP stream processing failed from{:?}", err);
                     }
                 }

@@ -93,7 +93,10 @@ pub fn serve(
                     let req_message = SerialMessage::binary(bytes.into(), src_addr, Protocol::Quic);
                     let res_message = handler.send(req_message).await;
 
-                    if let Err(err) = request_stream.send_bytes(res_message.into()).await {
+                    if let Err(err) = match res_message.try_into() {
+                        Ok(buffer) => request_stream.send_bytes(buffer).await,
+                        Err(err) => Err(err),
+                    } {
                         log::warn!("quic stream processing failed from {src_addr}: {err}");
                     }
 

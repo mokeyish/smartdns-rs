@@ -64,20 +64,22 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
         let client = &self.client;
 
-        if let Some(lookup) = client.lookup_nameserver(name.clone(), rtype).await {
-            debug!(
-                "lookup nameserver {} {} ip {:?}",
-                name,
-                rtype,
-                lookup
-                    .records()
-                    .iter()
-                    .filter_map(|record| record.data().map(|data| data.ip_addr()))
-                    .flatten()
-                    .collect::<Vec<_>>()
-            );
-            ctx.no_cache = true;
-            return Ok(lookup);
+        if rtype.is_ip_addr() {
+            if let Some(lookup) = client.lookup_nameserver(name.clone(), rtype).await {
+                debug!(
+                    "lookup nameserver {} {} ip {:?}",
+                    name,
+                    rtype,
+                    lookup
+                        .answers()
+                        .iter()
+                        .filter_map(|record| record.data().map(|data| data.ip_addr()))
+                        .flatten()
+                        .collect::<Vec<_>>()
+                );
+                ctx.no_cache = true;
+                return Ok(lookup);
+            }
         }
 
         let lookup_options = LookupOptions {
@@ -91,7 +93,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             return client.lookup(name.clone(), lookup_options).await;
         }
 
-        let (group_name, name_server_group) = match self.get_name_server_group(ctx).await {
+        let (group_name, name_server) = match self.get_name_server_group(ctx).await {
             Some(ns) => ns,
             None => {
                 error!("no available nameserver found for {}", name);
@@ -140,9 +142,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                 opts.response_strategy = ResponseMode::FastestIp;
             }
 
-            lookup_ip(name_server_group.deref(), name.clone(), &opts).await
+            lookup_ip(name_server.deref(), name.clone(), &opts).await
         } else {
-            name_server_group.lookup(name.clone(), lookup_options).await
+            name_server.lookup(name.clone(), lookup_options).await
         }
     }
 }
@@ -185,10 +187,7 @@ async fn lookup_ip(
     use crate::third_ext::FutureJoinAllExt;
     use futures_util::future::{select_all, select_ok};
 
-    assert!(matches!(
-        options.record_type,
-        RecordType::A | RecordType::AAAA
-    ));
+    assert!(options.record_type.is_ip_addr());
 
     let mut tasks = server
         .iter()
@@ -202,13 +201,12 @@ async fn lookup_ip(
     let ping_duration = |fut: Pin<
         Box<dyn Future<Output = Result<DnsResponse, LookupError>> + Send>,
     >| async {
-        let res = fut.await;
-        let res2 = match res {
+        match fut.await {
             Ok(lookup_ip) => {
                 use crate::infra::ping::{ping_fastest, PingAddr, PingOptions};
 
-                let ips = lookup_ip.ips();
-                if ips.is_empty() {
+                let ip_addrs = lookup_ip.ip_addrs();
+                if ip_addrs.is_empty() {
                     return Ok((Default::default(), lookup_ip));
                 }
                 let ping_ops = PingOptions::default().with_timeout_secs(2);
@@ -220,24 +218,31 @@ async fn lookup_ip(
                 for mode in options.speed_check_mode.iter() {
                     let ping_dests = match mode {
                         SpeedCheckMode::None => panic!("unexpected"),
-                        SpeedCheckMode::Ping => {
-                            ips.iter().map(|ip| PingAddr::Icmp(*ip)).collect::<Vec<_>>()
-                        }
+                        SpeedCheckMode::Ping => ip_addrs
+                            .iter()
+                            .map(|ip| PingAddr::Icmp(*ip))
+                            .collect::<Vec<_>>(),
                         SpeedCheckMode::Tcp(port) => {
-                            debug!("Speed test {} tcp ping {:?} port {}", name, ips, port);
-                            ips.iter()
+                            debug!("Speed test {} tcp ping {:?} port {}", name, ip_addrs, port);
+                            ip_addrs
+                                .iter()
                                 .map(|ip| PingAddr::Tcp(SocketAddr::new(*ip, *port)))
                                 .collect::<Vec<_>>()
                         }
                         SpeedCheckMode::Http(port) => {
-                            debug!("Speed test {} http ping {:?} port {}", name, ips, port);
-                            ips.iter()
+                            debug!("Speed test {} http ping {:?} port {}", name, ip_addrs, port);
+                            ip_addrs
+                                .iter()
                                 .map(|ip| PingAddr::Http(SocketAddr::new(*ip, *port)))
                                 .collect::<Vec<_>>()
                         }
                         SpeedCheckMode::Https(port) => {
-                            debug!("Speed test {} https ping {:?} port {}", name, ips, port);
-                            ips.iter()
+                            debug!(
+                                "Speed test {} https ping {:?} port {}",
+                                name, ip_addrs, port
+                            );
+                            ip_addrs
+                                .iter()
                                 .map(|ip| PingAddr::Https(SocketAddr::new(*ip, *port)))
                                 .collect::<Vec<_>>()
                         }
@@ -254,12 +259,11 @@ async fn lookup_ip(
 
                 match ping_res {
                     Ok((out, _)) => {
+                        let mut lookup = lookup_ip;
                         let dura = out.duration();
-                        let lookup = lookup_ip;
                         let query = lookup.query().clone();
-                        let valid_until = lookup.valid_until();
                         let records = lookup
-                            .records()
+                            .answers()
                             .iter()
                             .filter(|r| match r.data() {
                                 Some(RData::A(ip))
@@ -272,24 +276,26 @@ async fn lookup_ip(
                                 {
                                     true
                                 }
+                                Some(RData::CNAME(_)) => true,
                                 _ => false,
                             })
                             .map(|r| r.to_owned())
                             .collect::<Vec<_>>();
+
                         debug!(
                             "The fastest ip of {} is {}",
                             query.name(),
                             out.destination().ip()
                         );
-                        let lookup_ip = DnsResponse::new_with_deadline(query, records, valid_until);
-                        Ok((dura, lookup_ip))
+
+                        *lookup.answers_mut() = records;
+                        Ok((dura, lookup))
                     }
                     Err(_) => Ok((Default::default(), lookup_ip)),
                 }
             }
             Err(err) => Err(err),
-        };
-        res2
+        }
     };
 
     use ResponseMode::*;
@@ -323,12 +329,17 @@ async fn lookup_ip(
                 }
 
                 match res {
-                    Ok((duration, lookup_ip)) => {
+                    Ok((duration, lookup_ip))
+                        if lookup_ip
+                            .answers()
+                            .iter()
+                            .any(|r| r.record_type() == options.record_type) =>
+                    {
                         if duration.as_nanos() > 0 {
                             return Ok(lookup_ip);
                         }
                     }
-                    Err(_err) => (),
+                    _ => (),
                 }
 
                 tasks = rest;
@@ -350,10 +361,10 @@ async fn lookup_ip(
                 match res {
                     Ok((dura, lookup)) => {
                         if dura < min_dura {
-                            fastest_res = Some(Ok(lookup.clone()));
+                            fastest_res = Some(Ok(lookup));
                             min_dura = dura;
                         } else {
-                            last_res = Some(Ok(lookup.clone()));
+                            last_res = Some(Ok(lookup));
                         }
                     }
                     Err(err) => last_res = Some(Err(err)),
@@ -371,7 +382,9 @@ async fn lookup_ip(
         }
         FastestResponse => loop {
             let (res, _idx, rest) = select_all(tasks).await;
-            if res.is_ok() || rest.is_empty() {
+            if rest.is_empty()
+                || matches!(&res, Ok(res) if res.answers().iter().any(|r| r.record_type() == options.record_type))
+            {
                 return res;
             }
             tasks = rest;
@@ -384,10 +397,7 @@ async fn per_nameserver_lookup_ip(
     name: Name,
     options: &LookupIpOptions,
 ) -> Result<DnsResponse, LookupError> {
-    assert!(matches!(
-        options.lookup_options.record_type,
-        RecordType::A | RecordType::AAAA
-    ));
+    assert!(options.lookup_options.record_type.is_ip_addr());
 
     let res = server.lookup(name.clone(), options).await;
 
@@ -420,11 +430,11 @@ async fn per_nameserver_lookup_ip(
     };
 
     match res {
-        Ok(lookup) => {
+        Ok(mut lookup) => {
             let query = lookup.query().clone();
 
-            let records = lookup
-                .records()
+            let answers = lookup
+                .answers()
                 .iter()
                 .filter(|record| match record.data().map(|data| data.ip_addr()) {
                     Some(Some(ip)) => ip_filter(&ip),
@@ -433,7 +443,7 @@ async fn per_nameserver_lookup_ip(
                 .cloned()
                 .collect::<Vec<_>>();
 
-            if records.is_empty() {
+            if answers.is_empty() {
                 return Err(ResolveErrorKind::NoRecordsFound {
                     query: Box::new(query),
                     soa: None,
@@ -444,7 +454,10 @@ async fn per_nameserver_lookup_ip(
                 .into());
             }
 
-            Ok(DnsResponse::new_with_max_ttl(query, records))
+            *lookup.answers_mut() = answers;
+            lookup.set_valid_until_max();
+
+            Ok(lookup)
         }
         Err(err) => Err(err),
     }
@@ -496,7 +509,7 @@ mod tests {
                 .into_iter()
                 .flatten()
                 .map(|lookup| {
-                    let mut ips = lookup.ips();
+                    let mut ips = lookup.ip_addrs();
                     ips.sort();
                     ips
                 })

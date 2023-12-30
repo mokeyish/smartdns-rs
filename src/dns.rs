@@ -96,6 +96,7 @@ mod serial_message {
     use crate::libdns::proto::op::Message;
     use crate::libdns::Protocol;
     use bytes::Bytes;
+    use hickory_proto::error::ProtoError;
     use std::net::SocketAddr;
 
     pub enum SerialMessage {
@@ -130,39 +131,34 @@ mod serial_message {
         }
     }
 
-    impl From<SerialMessage> for crate::libdns::proto::xfer::SerialMessage {
-        fn from(val: SerialMessage) -> Self {
-            match val {
+    impl TryFrom<SerialMessage> for crate::libdns::proto::xfer::SerialMessage {
+        type Error = ProtoError;
+        fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
+            Ok(match value {
                 SerialMessage::Bytes(bytes, addr, _) => Self::new(bytes, addr),
-                SerialMessage::Raw(message, addr, _) => {
-                    use crate::libdns::proto::serialize::binary::{BinEncodable, BinEncoder};
-                    let mut bytes = Vec::with_capacity(512);
-                    // mut block
-                    {
-                        let _ = message.emit(&mut BinEncoder::new(&mut bytes));
-                    };
-                    Self::new(bytes, addr)
-                }
-            }
+                SerialMessage::Raw(message, addr, _) => Self::new(message.to_vec()?, addr),
+            })
         }
     }
 
-    impl From<SerialMessage> for Vec<u8> {
+    impl TryFrom<SerialMessage> for Vec<u8> {
+        type Error = ProtoError;
         #[inline]
-        fn from(val: SerialMessage) -> Self {
-            crate::libdns::proto::xfer::SerialMessage::from(val)
+        fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
+            Ok(crate::libdns::proto::xfer::SerialMessage::try_from(value)?
                 .into_parts()
-                .0
+                .0)
         }
     }
 
-    impl From<SerialMessage> for Bytes {
+    impl TryFrom<SerialMessage> for Bytes {
+        type Error = ProtoError;
         #[inline]
-        fn from(val: SerialMessage) -> Self {
-            crate::libdns::proto::xfer::SerialMessage::from(val)
+        fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
+            Ok(crate::libdns::proto::xfer::SerialMessage::try_from(value)?
                 .into_parts()
                 .0
-                .into()
+                .into())
         }
     }
 }
@@ -318,7 +314,7 @@ mod response {
 
     #[derive(Debug, Clone, Eq, PartialEq)]
     pub struct DnsResponse {
-        message: Arc<Message>,
+        message: Message,
         valid_until: Instant,
     }
 
@@ -343,7 +339,7 @@ mod response {
             message.update_counts();
 
             Self {
-                message: message.into(),
+                message,
                 valid_until,
             }
         }
@@ -379,14 +375,14 @@ mod response {
         }
 
         pub fn records(&self) -> &[Record] {
-            self.message.answers()
+            self.answers()
         }
 
         pub fn record_iter(&self) -> std::slice::Iter<'_, Record> {
-            self.records().iter()
+            self.answers().iter()
         }
 
-        pub fn ips(&self) -> Vec<IpAddr> {
+        pub fn ip_addrs(&self) -> Vec<IpAddr> {
             self.message()
                 .answers()
                 .iter()
@@ -394,8 +390,17 @@ mod response {
                 .collect()
         }
 
+        pub fn set_valid_until_max(&mut self) {
+            self.set_valid_until(MAX_TTL)
+        }
+
+        pub fn set_valid_until(&mut self, ttl: u32) {
+            let valid_until = Instant::now() + Duration::from_secs(ttl as u64);
+            self.valid_until = valid_until
+        }
+
         pub fn into_message(self, header: Option<Header>) -> Message {
-            let mut message = self.message.as_ref().clone();
+            let mut message = self.message;
             if let Some(header) = header {
                 message.set_header(header);
             }
@@ -411,6 +416,12 @@ mod response {
         }
     }
 
+    impl std::ops::DerefMut for DnsResponse {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.message
+        }
+    }
+
     impl From<Message> for DnsResponse {
         fn from(message: Message) -> Self {
             let valid_until = Instant::now()
@@ -423,7 +434,7 @@ mod response {
                         .unwrap_or(MAX_TTL) as u64,
                 );
             Self {
-                message: message.into(),
+                message,
                 valid_until,
             }
         }
@@ -431,53 +442,29 @@ mod response {
 
     impl DnsResponse {
         pub fn max_ttl(&self) -> Option<u32> {
-            self.records().iter().map(|record| record.ttl()).max()
+            self.answers().iter().map(|record| record.ttl()).max()
         }
 
         pub fn min_ttl(&self) -> Option<u32> {
-            self.records().iter().map(|record| record.ttl()).min()
+            self.answers().iter().map(|record| record.ttl()).min()
         }
 
-        pub fn with_new_ttl(&self, ttl: u32) -> Self {
-            let records = self
-                .records()
-                .iter()
-                .map(|record| {
-                    let mut record = record.clone();
-                    record.set_ttl(ttl);
-                    record
-                })
-                .collect::<Vec<_>>();
-
-            Self::new_with_deadline(self.query().clone(), records, self.valid_until())
+        pub fn set_new_ttl(&mut self, ttl: u32) {
+            for record in self.answers_mut() {
+                record.set_ttl(ttl);
+            }
         }
 
-        pub fn with_max_ttl(&self, ttl: u32) -> Self {
-            let records = self
-                .records()
-                .iter()
-                .map(|record| {
-                    let mut record = record.clone();
-                    record.set_max_ttl(ttl);
-                    record
-                })
-                .collect::<Vec<_>>();
-
-            Self::new_with_deadline(self.query().clone(), records, self.valid_until())
+        pub fn set_max_ttl(&mut self, ttl: u32) {
+            for record in self.answers_mut() {
+                record.set_max_ttl(ttl);
+            }
         }
 
-        pub fn with_min_ttl(&self, ttl: u32) -> Self {
-            let records = self
-                .records()
-                .iter()
-                .map(|record| {
-                    let mut record = record.clone();
-                    record.set_min_ttl(ttl);
-                    record
-                })
-                .collect::<Vec<_>>();
-
-            Self::new_with_deadline(self.query().clone(), records, self.valid_until())
+        pub fn set_min_ttl(&mut self, ttl: u32) {
+            for record in self.answers_mut() {
+                record.set_min_ttl(ttl);
+            }
         }
     }
 }

@@ -78,6 +78,12 @@ pub enum Commands {
         #[command(subcommand)]
         command: ServiceCommands,
     },
+    /// Test configuration and exit
+    Test {
+        /// Config file
+        #[arg(short = 'c', long)]
+        conf: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

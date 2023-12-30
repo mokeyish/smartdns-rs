@@ -1,29 +1,23 @@
 use std::borrow::Borrow;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::str::FromStr;
 
 use crate::libdns::proto::rr::rdata::PTR;
-use crate::libdns::proto::rr::LowerName;
-use crate::libdns::server::authority::{AuthorityObject, LookupOptions};
 use ipnet::IpNet;
 
 use crate::dns::*;
 use crate::dns_conf::RuntimeConfig;
 use crate::infra::ipset::IpSet;
-use crate::log::debug;
 use crate::middleware::*;
 
 pub struct DnsZoneMiddleware {
-    catalog: Catalog,
     server_net: IpSet,
     server_names: BTreeSet<Name>,
 }
 
 impl DnsZoneMiddleware {
     pub fn new(_cfg: &RuntimeConfig) -> Self {
-        let catalog = Catalog::new();
-
         let server_net = {
             use local_ip_address::list_afinet_netifas;
             let mut ips = Vec::<IpAddr>::new();
@@ -52,7 +46,6 @@ impl DnsZoneMiddleware {
         };
 
         Self {
-            catalog,
             server_net,
             server_names,
         }
@@ -89,82 +82,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
             }
         };
 
-        if let Some(authority) = self.catalog.find(name) {
-            if let Ok(lookup) = authority
-                .lookup(name, rtype, LookupOptions::default())
-                .await
-            {
-                let records = lookup.iter().map(|r| r.to_owned()).collect::<Vec<_>>();
-                if !records.is_empty() {
-                    return Ok(DnsResponse::new_with_max_ttl(
-                        query.original().to_owned(),
-                        records,
-                    ));
-                }
-            }
-        }
-
         next.run(ctx, req).await
-    }
-}
-
-struct Catalog {
-    authorities: HashMap<LowerName, Box<dyn AuthorityObject>>,
-}
-
-impl Catalog {
-    /// Constructs a new Catalog
-    pub fn new() -> Self {
-        Self {
-            authorities: Default::default(),
-        }
-    }
-
-    /// Insert or update a zone authority
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - zone name, e.g. example.com.
-    /// * `authority` - the zone data
-    pub fn upsert(&mut self, name: LowerName, authority: Box<dyn AuthorityObject>) {
-        self.authorities.insert(name, authority);
-    }
-
-    /// Remove a zone from the catalog
-    pub fn remove(&mut self, name: &LowerName) -> Option<Box<dyn AuthorityObject>> {
-        self.authorities.remove(name)
-    }
-
-    /// Checks whether the `Catalog` contains DNS records for `name`
-    ///
-    /// Use this when you know the exact `LowerName` that was used when
-    /// adding an authority and you don't care about the authority it
-    /// contains. For public domain names, `LowerName` is usually the
-    /// top level domain name like `example.com.`.
-    ///
-    /// If you do not know the exact domain name to use or you actually
-    /// want to use the authority it contains, use `find` instead.
-    pub fn contains(&self, name: &LowerName) -> bool {
-        self.authorities.contains_key(name)
-    }
-
-    /// Recursively searches the catalog for a matching authority
-    pub fn find(&self, name: &LowerName) -> Option<&(dyn AuthorityObject + 'static)> {
-        if self.authorities.is_empty() {
-            return None;
-        }
-        debug!("searching authorities for: {}", name);
-        self.authorities
-            .get(name)
-            .map(|authority| &**authority)
-            .or_else(|| {
-                if !name.is_root() {
-                    let name = name.base_name();
-                    self.find(&name)
-                } else {
-                    None
-                }
-            })
     }
 }
 

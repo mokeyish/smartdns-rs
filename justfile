@@ -15,7 +15,7 @@ clippy: init
 fmt: init
   cargo fmt --all
 
-apply-patch:
+apply-patch: init
   cargo patch-crate
 
 # Initialize all tools needed

@@ -24,7 +24,7 @@ mod dns_mw_dualstack;
 #[cfg(all(feature = "nft", target_os = "linux"))]
 mod dns_mw_nftset;
 mod dns_mw_ns;
-// mod dns_mw_zone;
+mod dns_mw_zone;
 mod dns_rule;
 mod dns_url;
 mod dnsmasq;
@@ -150,6 +150,9 @@ impl Cli {
             #[cfg(not(feature = "service"))]
             Commands::Service { command: _ } => {
                 warn!("please enable feature: service")
+            }
+            Commands::Test { conf } => {
+                RuntimeConfig::load(conf);
             }
         }
     }

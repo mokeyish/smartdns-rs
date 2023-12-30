@@ -109,7 +109,10 @@ pub fn serve(
                     let req_message = SerialMessage::binary(bytes, addr, Protocol::Tls);
                     let res_message = handler.send(req_message).await;
 
-                    if let Err(err) = stream_handle.send(res_message.into()) {
+                    if let Err(err) = res_message
+                        .try_into()
+                        .map(|buffer| stream_handle.send(buffer))
+                    {
                         log::error!("{:?}", err);
                     }
                 }
