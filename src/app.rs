@@ -121,7 +121,7 @@ impl App {
         use crate::dns_mw_dnsmasq::DnsmasqMiddleware;
         use crate::dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
         use crate::dns_mw_ns::NameServerMiddleware;
-        // use crate::dns_mw_zone::DnsZoneMiddleware;
+        use crate::dns_mw_zone::DnsZoneMiddleware;
 
         let cfg = self.cfg.read().await.clone();
 
@@ -142,7 +142,7 @@ impl App {
                 middleware_builder = middleware_builder.with(DnsCNameMiddleware);
             }
 
-            // middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
+            middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
 
             middleware_builder = middleware_builder.with(AddressMiddleware);
 

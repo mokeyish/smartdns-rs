@@ -22,5 +22,7 @@ dist
 
 etc/smartdns/smartdns.yaml
 
+.vscode/settings.json
+
 # localhost.crt
 # localhost.key

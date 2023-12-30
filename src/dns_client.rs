@@ -579,7 +579,7 @@ impl NameServerFactory {
                     if let Some(domain) = url.domain() {
                         match resolver.lookup_ip(domain).await {
                             Ok(lookup_ip) => lookup_ip
-                                .ips()
+                                .ip_addrs()
                                 .into_iter()
                                 .map_while(|ip| {
                                     let mut url = url.clone();
@@ -1255,7 +1255,7 @@ mod tests {
             .await
             .unwrap();
         assert!(lookup_ip
-            .ips()
+            .ip_addrs()
             .into_iter()
             .any(|i| i == "223.5.5.5".parse::<IpAddr>().unwrap()
                 || i == "223.6.6.6".parse::<IpAddr>().unwrap()));
@@ -1279,7 +1279,7 @@ mod tests {
             .await
         {
             Ok(Ok(lookup)) => lookup
-                .ips()
+                .ip_addrs()
                 .iter()
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()
@@ -1299,7 +1299,7 @@ mod tests {
             .await
         {
             Ok(Ok(lookup)) => lookup
-                .ips()
+                .ip_addrs()
                 .iter()
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()

@@ -232,7 +232,7 @@ pub struct Config {
     pub nftsets: Vec<ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>>,
 
     pub resolv_file: Option<PathBuf>,
-    pub domain_set_providers: HashMap<String, DomainSetProvider>,
+    pub domain_set_providers: HashMap<String, Vec<DomainSetProvider>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

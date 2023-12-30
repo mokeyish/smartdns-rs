@@ -21,11 +21,11 @@ pub fn routes() -> StatefulRouter {
 
 async fn serve_dns(
     State(state): State<Arc<ServeState>>,
-    extract::Query(query_parameters): extract::Query<HashMap<String, String>>,
+    extract::Query(parameters): extract::Query<HashMap<String, String>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
 ) -> Response {
-    match process(&state, req, addr, query_parameters).await {
+    match process(&state, req, addr, parameters).await {
         Ok((content_type, bytes)) => {
             let mut res = Body::from(bytes).into_response();
             res.headers_mut()
@@ -79,7 +79,7 @@ async fn process(
             .parse()?;
 
         let query_type = match parameters.get("type") {
-            Some(s) => s.parse()?,
+            Some(s) => s.parse::<u16>().map(RecordType::from).or(s.parse())?,
             None => RecordType::A,
         };
 
@@ -104,7 +104,7 @@ async fn process(
     let res_msg = state.dns_handle.send(req_msg).await;
 
     let (content_type, bytes) = if accept_dns_message {
-        (APPLICATION_DNS_MESSAGE, res_msg.into())
+        (APPLICATION_DNS_MESSAGE, res_msg.try_into()?)
     } else {
         let message = match res_msg {
             SerialMessage::Raw(message, _, _) => message,

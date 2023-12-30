@@ -599,7 +599,7 @@ impl DnsCache {
                 if negative_ttl < self.ttl.negative_max {
                     let result = value.lookup.clone();
                     if let Ok(ref mut lookup) = value.lookup {
-                        *lookup = lookup.with_new_ttl(self.ttl.negative_min.as_secs() as u32)
+                        lookup.set_new_ttl(self.ttl.negative_min.as_secs() as u32)
                     }
                     Some((OutOfDate::Yes, result))
                 } else {

@@ -11,7 +11,7 @@ use thiserror::Error;
 pub async fn ping(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutput, PingError>> {
     let mut outs = Vec::new();
 
-    for (_seq, dest) in dests.iter().enumerate() {
+    for dest in dests.iter() {
         outs.push(match dest {
             PingAddr::Icmp(addr) => icmp::ping(*addr, opts).await,
             PingAddr::Tcp(addr) => tcp::ping(*addr, opts).await,
