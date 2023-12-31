@@ -217,7 +217,7 @@ async fn lookup_ip(
 
                 for mode in options.speed_check_mode.iter() {
                     let ping_dests = match mode {
-                        SpeedCheckMode::None => panic!("unexpected"),
+                        SpeedCheckMode::None => continue,
                         SpeedCheckMode::Ping => ip_addrs
                             .iter()
                             .map(|ip| PingAddr::Icmp(*ip))
@@ -376,7 +376,7 @@ async fn lookup_ip(
             } else {
                 match last_res {
                     Some(res) => res,
-                    None => panic!("no connections"),
+                    None => Err(ResolveErrorKind::NoConnections.into()),
                 }
             }
         }
