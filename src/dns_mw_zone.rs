@@ -72,6 +72,24 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                 is_current_server = true;
             } else if let Ok(net) = name.parse_arpa_name() {
                 is_current_server = self.server_net.iter().any(|ip| net.contains(ip));
+
+                if !is_current_server {
+                    let is_private_ip = match net.addr() {
+                        IpAddr::V4(ip) => ip.is_private(),
+                        IpAddr::V6(ip) => {
+                            const fn is_unique_local(ip: std::net::Ipv6Addr) -> bool {
+                                (ip.segments()[0] & 0xfe00) == 0xfc00
+                            }
+                            is_unique_local(ip)
+                        }
+                    };
+
+                    if is_private_ip {
+                        let mut res = DnsResponse::empty();
+                        res.add_query(query.original().to_owned());
+                        return Ok(res);
+                    }
+                }
             }
 
             if is_current_server {
