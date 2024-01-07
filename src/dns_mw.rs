@@ -241,12 +241,13 @@ mod tests {
         }
 
         pub fn with_record(self, record: Record) -> Self {
-            self.with_multi_records(record.name().clone(), vec![record])
+            self.with_multi_records(record.name().clone(), record.record_type(), vec![record])
         }
 
         pub fn with_multi_records<Name: IntoName + Debug>(
             mut self,
             name: Name,
+            record_type: RecordType,
             records: Vec<Record>,
         ) -> Self {
             let name = match name.into_name() {
@@ -254,13 +255,7 @@ mod tests {
                 Err(err) => panic!("invalid Name {}", err),
             };
 
-            let query = Query::query(
-                name,
-                records
-                    .first()
-                    .expect("must at least one record")
-                    .record_type(),
-            );
+            let query = Query::query(name, record_type);
 
             self.map.insert(
                 query.clone(),

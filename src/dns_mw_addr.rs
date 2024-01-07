@@ -49,10 +49,27 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
             Ok(lookup) => Ok({
                 let mut records = Cow::Borrowed(lookup.records());
 
-                if let Some(max_reply_ip_num) = ctx.cfg().max_reply_ip_num() {
-                    let max_reply_ip_num = max_reply_ip_num as usize;
-                    if max_reply_ip_num > 0 && records.len() > max_reply_ip_num {
-                        records.to_mut().truncate(max_reply_ip_num);
+                if query_type.is_ip_addr() {
+                    if let Some(mut max_reply_ip_num) = ctx.cfg().max_reply_ip_num() {
+                        if max_reply_ip_num > 0 {
+                            let mut truncate = None;
+                            for (i, r) in records.iter().enumerate() {
+                                if matches!(r.data(), Some(RData::A(_) | RData::AAAA(_))) {
+                                    max_reply_ip_num -= 1;
+                                    if max_reply_ip_num == 0 {
+                                        truncate = Some(i + 1);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            match truncate {
+                                Some(truncate) if records.len() > truncate => {
+                                    records.to_mut().truncate(truncate);
+                                }
+                                _ => (),
+                            }
+                        }
                     }
                 }
 
@@ -151,6 +168,7 @@ mod tests {
     use crate::{
         dns_conf::{DomainAddress, RuntimeConfig},
         dns_mw::*,
+        libdns::proto::rr::rdata,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -229,6 +247,7 @@ mod tests {
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
                 "dns.google",
+                RecordType::A,
                 vec![
                     Record::from_rdata(
                         "dns.google".parse().unwrap(),
@@ -259,6 +278,7 @@ mod tests {
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
                 "dns.google",
+                RecordType::A,
                 vec![
                     Record::from_rdata(
                         "dns.google".parse().unwrap(),
@@ -292,6 +312,7 @@ mod tests {
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
                 "dns.google",
+                RecordType::A,
                 vec![
                     Record::from_rdata(
                         "dns.google".parse().unwrap(),
@@ -326,6 +347,7 @@ mod tests {
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
                 "dns.google",
+                RecordType::A,
                 vec![
                     Record::from_rdata(
                         "dns.google".parse().unwrap(),
@@ -360,6 +382,7 @@ mod tests {
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
                 "dns.google",
+                RecordType::A,
                 vec![
                     Record::from_rdata(
                         "dns.google".parse().unwrap(),
@@ -393,12 +416,13 @@ mod tests {
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
             .with("rr-ttl-reply-max 30")
-            .with("max-reply-ip-num 2")
+            .with("max-reply-ip-num 1")
             .build();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
                 "dns.google",
+                RecordType::A,
                 vec![Record::from_rdata(
                     "dns.google".parse().unwrap(),
                     96,
@@ -420,12 +444,13 @@ mod tests {
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
             .with("rr-ttl-reply-max 30")
-            .with("max-reply-ip-num 0")
+            .with("max-reply-ip-num 2")
             .build();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
                 "dns.google",
+                RecordType::A,
                 vec![
                     Record::from_rdata(
                         "dns.google".parse().unwrap(),
@@ -448,7 +473,52 @@ mod tests {
 
         let lookup = mock.lookup("dns.google", RecordType::A).await?;
 
-        assert_eq!(lookup.records().len(), 3);
+        assert_eq!(lookup.records().len(), 2);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_clip_ttl_cname_max_reply_ip_num_2() -> Result<(), DnsError> {
+        let cfg = RuntimeConfig::builder()
+            .with("rr-ttl-max 66")
+            .with("rr-ttl-min 55")
+            .with("rr-ttl-reply-max 30")
+            .with("max-reply-ip-num 2")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware)
+            .with_multi_records(
+                "dns.google",
+                RecordType::A,
+                vec![
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::CNAME(rdata::CNAME("dns.google".parse::<Name>().unwrap())),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        96,
+                        RData::A("8.8.8.8".parse().unwrap()),
+                    ),
+                    Record::from_rdata(
+                        "dns.google".parse().unwrap(),
+                        48,
+                        RData::A("8.8.4.4".parse().unwrap()),
+                    ),
+                ],
+            )
+            .build(cfg);
+
+        let lookup = mock.lookup("dns.google", RecordType::A).await?;
+
+        let ip_count: u8 = lookup
+            .record_iter()
+            .map(|r| matches!(r.data(), Some(RData::A(_) | RData::AAAA(_))) as u8)
+            .sum();
+
+        assert_eq!(ip_count, 2);
 
         Ok(())
     }
