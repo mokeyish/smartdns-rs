@@ -22,9 +22,9 @@ jobs:
           - target: i686-pc-windows-msvc
             os: windows-latest
             archive: zip
-          - target: i686-pc-windows-gnu
-            os: windows-latest
-            archive: zip
+          # - target: i686-pc-windows-gnu  # error: linker `i686-w64-mingw32-gcc` not found
+          #   os: windows-latest
+          #   archive: zip
           - target: x86_64-apple-darwin
             os: macos-latest
             archive: zip
