@@ -133,6 +133,13 @@ address /test.example.com/1.2.3.5
 
 # 屏蔽域名（广告屏蔽）
 address /ads.example.com/#
+
+# 以下特性在[C 语言版 SmartDNS](https://github.com/pymumu/smartdns) 尚未支持，仅适用于SmartDNS-rs
+# 使用 DoH3
+server-h3 223.5.5.5
+
+# 使用 DoQ
+server-quic 223.5.5.5
 ```
 
 
@@ -162,6 +169,8 @@ cargo build --release
 # 运行
 sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 ```
+
+对于交叉编译，推荐使用[cross](https://github.com/cross-rs/cross)（依赖Docker）
 
 ## 鸣谢!!!
 

@@ -136,6 +136,13 @@ address /test.example.com/1.2.3.5
 
 # Block Domains (Ad Blocking)
 address /ads.example.com/#
+
+# The following features are not yet supported in the [C SmartDNS](https://github.com/pymumu/smartdns) and are only applicable to SmartDNS-rs.
+# Configure DoH3
+server-h3 1.1.1.1
+
+# Configure DoQ
+server-quic unfiltered.adguard-dns.com
 ```
 
 For more advanced configurations, please refer to [here](https://github.com/pymumu/smartdns/blob/doc/en/docs/configuration.md) , and refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md) for the function coverage.
@@ -163,6 +170,8 @@ cargo build --release
 # run
 sudo ./target/release/smartdns run -c ./etc/smartdns/smartdns.conf
 ```
+
+For cross-compilation, it is recommended to use [cross](https://github.com/cross-rs/cross) (requires Docker).
 
 ## Acknowledgments !!!
 
