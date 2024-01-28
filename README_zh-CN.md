@@ -154,14 +154,11 @@ server-quic 223.5.5.5
 git clone https://github.com/mokeyish/smartdns-rs.git
 cd smartdns-rs
 
-# 安装 patch-crate
-cargo install patch-crate
-
-# 执行 patch crates
-cargo patch-crate
+# 安装 https://github.com/casey/just
+cargo install just
 
 # 编译
-cargo build --release
+just build
 
 # 查看命令帮助
 ./target/release/smartdns help

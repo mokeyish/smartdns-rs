@@ -155,14 +155,11 @@ Assuming you have installed [Rust](https://www.rust-lang.org/learn/get-started),
 git clone https://github.com/mokeyish/smartdns-rs.git
 cd smartdns-rs
 
-# install patch-crate
-cargo install patch-crate
-
-# patch crates
-cargo patch-crate
+# install https://github.com/casey/just
+cargo install just
 
 # build
-cargo build --release
+just build
 
 # print help
 ./target/release/smartdns --help

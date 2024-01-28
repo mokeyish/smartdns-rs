@@ -1,18 +1,18 @@
 
 
-build: init
+build: apply-patch
   cargo build -r
 
 # Run tests
-test: init
+test: apply-patch
   cargo test
 
 # Run clippy
-clippy: init
+clippy: apply-patch
   cargo clippy --fix --all 
 
 # Check the format
-fmt: init
+fmt: apply-patch
   cargo fmt --all
 
 apply-patch: init
