@@ -97,7 +97,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             Some(ns) => ns,
             None => {
                 error!("no available nameserver found for {}", name);
-                return Err(ResolveErrorKind::NoConnections.into());
+                return Err(ProtoErrorKind::NoConnections.into());
             }
         };
 
@@ -195,7 +195,7 @@ async fn lookup_ip(
         .collect::<Vec<_>>();
 
     if tasks.is_empty() {
-        return Err(ResolveErrorKind::NoConnections.into());
+        return Err(ProtoErrorKind::NoConnections.into());
     }
 
     let ping_duration = |fut: Pin<
@@ -376,7 +376,7 @@ async fn lookup_ip(
             } else {
                 match last_res {
                     Some(res) => res,
-                    None => Err(ResolveErrorKind::NoConnections.into()),
+                    None => Err(ProtoErrorKind::NoConnections.into()),
                 }
             }
         }
@@ -444,7 +444,7 @@ async fn per_nameserver_lookup_ip(
                 .collect::<Vec<_>>();
 
             if answers.is_empty() {
-                return Err(ResolveErrorKind::NoRecordsFound {
+                return Err(ProtoErrorKind::NoRecordsFound {
                     query: Box::new(query),
                     soa: None,
                     negative_ttl: None,

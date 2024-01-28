@@ -1,11 +1,10 @@
 use std::{borrow::Borrow, sync::Arc};
 
 use crate::libdns::proto::{
+    error::ProtoErrorKind,
     op::{Query, ResponseCode},
     rr::{rdata::SOA, IntoName, Record, RecordType},
 };
-
-use crate::libdns::resolver::error::ResolveErrorKind;
 
 use crate::{
     config::ServerOpts,
@@ -122,7 +121,7 @@ impl MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, DnsError> for
             ctx.cfg().rr_ttl().unwrap_or_default() as u32,
             SOA::default_soa(),
         );
-        Err(ResolveErrorKind::NoRecordsFound {
+        Err(ProtoErrorKind::NoRecordsFound {
             query: req.query().original().to_owned().into(),
             soa: Some(Box::new(soa)),
             negative_ttl: None,
