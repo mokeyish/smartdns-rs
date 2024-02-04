@@ -126,7 +126,7 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<RData> {
     }
 
     // skip address rule.
-    if server_opts.no_rule_addr() || !query_type.is_ip_addr() {
+    if server_opts.no_rule_addr() || (!query_type.is_ip_addr() && query_type != HTTPS) {
         return None;
     }
 
