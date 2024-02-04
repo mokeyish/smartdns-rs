@@ -24,6 +24,7 @@ pub struct DnsUrl {
     path: Option<String>,
     ip: Option<IpAddr>,
     params: BTreeMap<String, String>,
+    fragment: Option<String>,
 }
 
 impl DnsUrl {
@@ -135,7 +136,7 @@ impl FromStr for DnsUrl {
 
         let url = Url::parse(url.as_str())?;
 
-        let proto = match url.scheme() {
+        let mut proto = match url.scheme() {
             "udp" => Protocol::Udp,
             "tcp" => Protocol::Tcp,
             "tls" => Protocol::Tls,
@@ -147,6 +148,10 @@ impl FromStr for DnsUrl {
             "h3" => Protocol::H3,
             schema => return Err(DnsUrlParseErr::ProtocolNotSupport(schema.to_string())),
         };
+
+        if matches!(url.fragment(), Some(fragment) if fragment == "h3") {
+            proto = Protocol::H3;
+        }
 
         let host = url.host();
         let port = url.port();
@@ -183,6 +188,7 @@ impl FromStr for DnsUrl {
             },
             ip: None,
             params,
+            fragment: url.fragment().map(|s| s.to_string()),
         })
     }
 }
@@ -201,7 +207,13 @@ impl ToString for DnsUrl {
             #[cfg(feature = "dns-over-quic")]
             Quic => "quic://",
             #[cfg(feature = "dns-over-h3")]
-            H3 => "h3://",
+            H3 => {
+                if matches!(&self.fragment, Some(fragment) if fragment == "h3") {
+                    "https://"
+                } else {
+                    "h3://"
+                }
+            }
             _ => unimplemented!(),
         };
 
@@ -216,8 +228,14 @@ impl ToString for DnsUrl {
         }
 
         // path
-        if matches!(self.proto, Protocol::Https) {
+        if matches!(self.proto, Protocol::Https | Protocol::H3) {
             out += self.path();
+        }
+
+        // fragment
+        if let Some(fragment) = self.fragment.as_deref() {
+            out.push('#');
+            out.push_str(fragment)
         }
 
         // query
@@ -503,6 +521,19 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "");
         assert_eq!(url.to_string(), "h3://dns.adguard-dns.com");
+        assert!(url.ip().is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "dns-over-h3")]
+    fn test_parse_h3_2() {
+        let url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query#h3").unwrap();
+
+        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.port(), 443);
+        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert!(url.ip().is_none());
     }
 
