@@ -1017,6 +1017,27 @@ mod connection_provider {
         }
     }
 
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    fn set_so_mark<F: std::os::fd::AsFd, S: std::ops::Deref<Target = F> + Sized>(
+        socket: S,
+        mark: Option<u32>,
+    ) -> S {
+        if let Some(mark) = mark {
+            use socket2::SockRef;
+            let sock_ref = SockRef::from(socket.deref());
+            sock_ref.set_mark(mark).unwrap_or_else(|err| {
+                warn!("set so_mark failed: {:?}", err);
+            });
+        }
+        socket
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+    #[inline]
+    fn set_so_mark<S>(socket: S, _mark: Option<u32>) -> S {
+        socket
+    }
+
     impl RuntimeProvider for TokioRuntimeProvider {
         type Handle = TokioHandle;
         type Timer = TokioTime;
@@ -1033,20 +1054,8 @@ mod connection_provider {
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Tcp>>>> {
             let proxy_config = self.proxy.clone();
 
-            #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             let so_mark = self.so_mark;
-            let so_mark = move |tcp: proxy::TcpStream| {
-                #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-                if let Some(mark) = so_mark {
-                    use socket2::SockRef;
-                    let sock_ref = SockRef::from(tcp.deref());
-                    sock_ref.set_mark(mark).unwrap_or_else(|err| {
-                        warn!("set so_mark failed: {:?}", err);
-                    });
-                }
-                tcp
-            };
-
+            let so_mark = move |tcp| set_so_mark(tcp, so_mark);
             Box::pin(async move {
                 proxy::connect_tcp(server_addr, proxy_config.as_ref())
                     .await
@@ -1060,7 +1069,13 @@ mod connection_provider {
             local_addr: SocketAddr,
             _server_addr: SocketAddr,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Udp>>>> {
-            Box::pin(tokio::net::UdpSocket::bind(local_addr))
+            let so_mark = self.so_mark;
+            let so_mark = move |udp| {
+                set_so_mark(&udp, so_mark);
+                udp
+            };
+
+            Box::pin(async move { Self::Udp::bind(local_addr).await.map(so_mark) })
         }
     }
 }
