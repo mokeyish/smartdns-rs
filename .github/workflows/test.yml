@@ -40,7 +40,7 @@ jobs:
       - uses: extractions/setup-just@v1
 
       - name: cargo install patch-crate
-        uses: baptiste0928/cargo-install@v2
+        uses: baptiste0928/cargo-install@v3
         with:
           crate: patch-crate
           
@@ -81,7 +81,7 @@ jobs:
       - uses: extractions/setup-just@v1
 
       - name: cargo install patch-crate
-        uses: baptiste0928/cargo-install@v2
+        uses: baptiste0928/cargo-install@v3
         with:
           crate: patch-crate
           
@@ -168,7 +168,7 @@ jobs:
       - uses: extractions/setup-just@v1
 
       - name: cargo install patch-crate
-        uses: baptiste0928/cargo-install@v2
+        uses: baptiste0928/cargo-install@v3
         with:
           crate: patch-crate
           
