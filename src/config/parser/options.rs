@@ -44,7 +44,7 @@ pub fn unkown_value(input: &str) -> IResult<&str, &str> {
     preceded(
         alt((tag("="), recognize(pair(opt(char(':')), space1)))),
         recognize(pair(
-            is_not("-_ \t"),
+            is_not("-_ \t#"),
             take_till(|c: char| c.is_whitespace()),
         )),
     )(input)
@@ -88,6 +88,17 @@ mod tests {
                     ("group", Some("bootstrap")),
                     ("exclude-default-group", None)
                 ]
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_options2() {
+        assert_eq!(
+            parse("-group bootstrap # -exclude-default-group").unwrap(),
+            (
+                " # -exclude-default-group",
+                vec![("group", Some("bootstrap"))]
             )
         );
     }

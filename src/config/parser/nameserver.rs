@@ -258,4 +258,29 @@ mod tests {
             ))
         );
     }
+
+    #[test]
+    fn test_server_https_1() {
+        assert_eq!(
+            NameServerInfo::parse(
+                "server https://dns.alidns.com/dns-query -group alidns -exclude-default-group # -proxy proxy"
+            ),
+            Ok((
+                " # -proxy proxy",
+                NameServerInfo {
+                    server: DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap(),
+                    group: vec!["alidns".to_string()],
+                    blacklist_ip: Default::default(),
+                    whitelist_ip: Default::default(),
+                    check_edns: Default::default(),
+                    exclude_default_group: true,
+                    proxy: None,
+                    bootstrap_dns: Default::default(),
+                    resolve_group: None,
+                    edns_client_subnet: None,
+                    so_mark: None,
+                }
+            ))
+        );
+    }
 }
