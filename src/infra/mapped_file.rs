@@ -135,7 +135,7 @@ impl MappedFile {
         match self.file {
             Some(ref mut file) => Ok(file),
             None => {
-                match {
+                let res = {
                     let mut opt = File::options();
 
                     #[cfg(unix)]
@@ -154,7 +154,8 @@ impl MappedFile {
                         }
                     }
                     opt.open(self.path.as_path())
-                } {
+                };
+                match res {
                     Ok(mut file) => {
                         self.len = file.metadata().unwrap().len();
                         if self.len == 0 && self.peamble_bytes.is_some() {

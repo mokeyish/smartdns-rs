@@ -24,6 +24,6 @@ apply-patch: init
 
 # Initialize all tools needed
 init:
-  @cargo install patch-crate -q
+  @cargo patch-crate --version || cargo install patch-crate
   # @cargo patch-crate
 

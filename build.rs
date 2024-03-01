@@ -27,7 +27,6 @@ fn write_all_to_file<P: AsRef<Path> + Copy, T: AsRef<[u8]>>(file_path: P, text: 
 
 fn append_text_to_file<P: AsRef<Path> + Copy, T: AsRef<[u8]>>(file_path: P, text: T) {
     let mut file = File::options()
-        .write(true)
         .append(true)
         .create(true)
         .open(file_path)

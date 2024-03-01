@@ -449,15 +449,17 @@ impl NameServerFactory {
         url: &VerifiedDnsUrl,
         proxy: Option<ProxyConfig>,
         so_mark: Option<u32>,
+        device: Option<String>,
         resolver_opts: NameServerOpts,
     ) -> Arc<NameServer> {
         use crate::libdns::resolver::name_server::NameServer as N;
 
         let key = format!(
-            "{}{:?}{}",
+            "{}{:?}#{}@{}",
             url.to_string(),
             proxy.as_ref().map(|s| s.to_string()),
-            so_mark.unwrap_or_default()
+            so_mark.unwrap_or_default(),
+            device.as_deref().unwrap_or_default(),
         );
 
         if let Some(ns) = self.cache.read().await.get(&key) {
@@ -469,7 +471,7 @@ impl NameServerFactory {
         let inner = N::<GenericConnector<TokioRuntimeProvider>>::new(
             config,
             resolver_opts.deref().to_owned(),
-            GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark)),
+            GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device)),
         );
 
         let ns = Arc::new(NameServer {
@@ -617,8 +619,14 @@ impl NameServerFactory {
 
             for url in verified_urls {
                 servers.push(
-                    self.create(&url, proxy.clone(), info.so_mark, nameserver_opts.clone())
-                        .await,
+                    self.create(
+                        &url,
+                        proxy.clone(),
+                        info.so_mark,
+                        info.interface.clone(),
+                        nameserver_opts.clone(),
+                    )
+                    .await,
                 )
             }
         }
@@ -641,13 +649,14 @@ impl NameServer {
         opts: NameServerOpts,
         proxy: Option<ProxyConfig>,
         so_mark: Option<u32>,
+        device: Option<String>,
     ) -> Self {
         use crate::libdns::resolver::name_server::NameServer as N;
 
         let inner = N::<GenericConnector<TokioRuntimeProvider>>::new(
             config,
             opts.resolver_opts.clone(),
-            GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark)),
+            GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device)),
         );
 
         Self { opts, inner }
@@ -1004,37 +1013,54 @@ mod connection_provider {
     pub struct TokioRuntimeProvider {
         proxy: Option<ProxyConfig>,
         so_mark: Option<u32>,
+        device: Option<String>,
         handle: TokioHandle,
     }
 
     impl TokioRuntimeProvider {
-        pub fn new(proxy: Option<ProxyConfig>, so_mark: Option<u32>) -> Self {
+        pub fn new(
+            proxy: Option<ProxyConfig>,
+            so_mark: Option<u32>,
+            device: Option<String>,
+        ) -> Self {
             Self {
                 proxy,
                 so_mark,
+                device,
                 handle: TokioHandle::default(),
             }
         }
     }
 
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-    fn set_so_mark<F: std::os::fd::AsFd, S: std::ops::Deref<Target = F> + Sized>(
+    fn setup_socket<F: std::os::fd::AsFd, S: std::ops::Deref<Target = F> + Sized>(
         socket: S,
         mark: Option<u32>,
+        device: Option<String>,
     ) -> S {
-        if let Some(mark) = mark {
+        if mark.is_some() || device.is_some() {
             use socket2::SockRef;
             let sock_ref = SockRef::from(socket.deref());
-            sock_ref.set_mark(mark).unwrap_or_else(|err| {
-                warn!("set so_mark failed: {:?}", err);
-            });
+            if let Some(mark) = mark {
+                sock_ref.set_mark(mark).unwrap_or_else(|err| {
+                    warn!("set so_mark failed: {:?}", err);
+                });
+            }
+
+            if let Some(device) = device {
+                sock_ref
+                    .bind_device(Some(device.as_bytes()))
+                    .unwrap_or_else(|err| {
+                        warn!("bind device failed: {:?}", err);
+                    });
+            }
         }
         socket
     }
 
     #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
     #[inline]
-    fn set_so_mark<S>(socket: S, _mark: Option<u32>) -> S {
+    fn setup_socket<S>(socket: S, _mark: Option<u32>, _device: Option<String>) -> S {
         socket
     }
 
@@ -1055,11 +1081,12 @@ mod connection_provider {
             let proxy_config = self.proxy.clone();
 
             let so_mark = self.so_mark;
-            let so_mark = move |tcp| set_so_mark(tcp, so_mark);
+            let device = self.device.clone();
+            let setup_socket = move |tcp| setup_socket(tcp, so_mark, device);
             Box::pin(async move {
                 proxy::connect_tcp(server_addr, proxy_config.as_ref())
                     .await
-                    .map(so_mark)
+                    .map(setup_socket)
                     .map(AsyncIoTokioAsStd)
             })
         }
@@ -1070,12 +1097,13 @@ mod connection_provider {
             _server_addr: SocketAddr,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Udp>>>> {
             let so_mark = self.so_mark;
-            let so_mark = move |udp| {
-                set_so_mark(&udp, so_mark);
+            let device = self.device.clone();
+            let setup_socket = move |udp| {
+                setup_socket(&udp, so_mark, device);
                 udp
             };
 
-            Box::pin(async move { Self::Udp::bind(local_addr).await.map(so_mark) })
+            Box::pin(async move { Self::Udp::bind(local_addr).await.map(setup_socket) })
         }
     }
 }
@@ -1172,6 +1200,7 @@ mod bootstrap {
                 name_servers.push(Arc::new(super::NameServer::new(
                     config.clone(),
                     Default::default(),
+                    None,
                     None,
                     None,
                 )));
