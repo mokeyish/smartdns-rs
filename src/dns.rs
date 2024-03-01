@@ -11,6 +11,7 @@ use crate::config::ServerOpts;
 use crate::dns_conf::RuntimeConfig;
 
 pub use crate::libdns::proto::{
+    error::ProtoErrorKind,
     op,
     rr::{self, rdata::SOA, Name, RData, Record, RecordType},
 };
@@ -296,6 +297,8 @@ mod request {
 
 mod response {
 
+    use hickory_proto::op;
+
     use crate::dns_client::MAX_TTL;
     use crate::libdns::proto::{
         op::{Header, Message, Query},
@@ -333,10 +336,23 @@ mod response {
             R: IntoIterator<Item = Record, IntoIter = I>,
             I: Iterator<Item = Record>,
         {
+            use op::message::{update_header_counts, HeaderCounts};
             let mut message = Message::new();
             message.add_query(query.clone());
             message.add_answers(records);
-            message.update_counts();
+
+            let header = update_header_counts(
+                message.header(),
+                message.truncated(),
+                HeaderCounts {
+                    query_count: message.queries().len(),
+                    answer_count: message.answers().len(),
+                    nameserver_count: message.name_servers().len(),
+                    additional_count: message.additionals().len(),
+                },
+            );
+
+            message.set_header(header);
 
             Self {
                 message,

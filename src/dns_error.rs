@@ -1,6 +1,7 @@
 use crate::dns::DnsResponse;
 use crate::libdns::proto::{error::ProtoError, op::ResponseCode};
 use crate::libdns::resolver::error::{ResolveError, ResolveErrorKind};
+use hickory_proto::error::ProtoErrorKind;
 use std::{io, sync::Arc};
 use thiserror::Error;
 
@@ -15,9 +16,13 @@ pub enum LookupError {
     /// There was an error performing the lookup
     #[error("Error performing lookup: {0}")]
     ResponseCode(ResponseCode),
+    /// An error got returned by the hickory-proto crate
+    #[error("proto error: {0}")]
+    Proto(#[from] ProtoError),
     /// Resolve Error
     #[error("Forward resolution error: {0}")]
     ResolveError(#[from] ResolveError),
+
     /// Recursive Resolver Error
     #[cfg(feature = "hickory-recursor")]
     #[cfg_attr(docsrs, doc(cfg(feature = "recursor")))]
@@ -39,8 +44,8 @@ impl LookupError {
     }
 
     pub fn as_soa(&self) -> Option<DnsResponse> {
-        if let Self::ResolveError(err) = self {
-            if let ResolveErrorKind::NoRecordsFound {
+        if let Self::Proto(err) = self {
+            if let ProtoErrorKind::NoRecordsFound {
                 query,
                 soa: Some(record),
                 ..
@@ -62,9 +67,9 @@ impl From<ResponseCode> for LookupError {
     }
 }
 
-impl From<ProtoError> for LookupError {
-    fn from(value: ProtoError) -> Self {
-        Self::ResolveError(value.into())
+impl From<ProtoErrorKind> for LookupError {
+    fn from(value: ProtoErrorKind) -> Self {
+        Self::Proto(value.into())
     }
 }
 
