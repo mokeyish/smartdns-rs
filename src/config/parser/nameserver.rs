@@ -77,6 +77,7 @@ impl NomParser for NameServerInfo {
             resolve_group: None,
             edns_client_subnet: None,
             so_mark: None,
+            interface: None,
         };
 
         if let Some(options) = options {
@@ -101,6 +102,9 @@ impl NomParser for NameServerInfo {
                     },
                     "proxy" => {
                         nameserver.proxy = v.map(|p| p.to_string());
+                    }
+                    "interface" => {
+                        nameserver.interface = v.map(|p| p.to_string());
                     }
                     "subnet" => match v {
                         Some(s) => nameserver.edns_client_subnet = s.parse().ok(),
@@ -141,7 +145,7 @@ mod tests {
     #[test]
     fn test_simple() {
         assert_eq!(
-            NameServerInfo::parse("server 8.8.8.8:53"),
+            NameServerInfo::parse("server 8.8.8.8:53 -interface Net"),
             Ok((
                 "",
                 NameServerInfo {
@@ -156,6 +160,7 @@ mod tests {
                     resolve_group: None,
                     edns_client_subnet: None,
                     so_mark: None,
+                    interface: Some("Net".to_string()),
                 }
             ))
         );
@@ -176,6 +181,7 @@ mod tests {
                     resolve_group: None,
                     edns_client_subnet: None,
                     so_mark: None,
+                    interface: None,
                 }
             ))
         );
@@ -209,6 +215,7 @@ mod tests {
                     resolve_group: None,
                     edns_client_subnet: None,
                     so_mark: None,
+                    interface: None,
                 }
             ))
         );
@@ -229,6 +236,7 @@ mod tests {
                     resolve_group: None,
                     edns_client_subnet: None,
                     so_mark: None,
+                    interface: None,
                 }
             ))
         );
@@ -254,6 +262,7 @@ mod tests {
                     resolve_group: None,
                     edns_client_subnet: None,
                     so_mark: None,
+                    interface: None,
                 }
             ))
         );
@@ -279,6 +288,7 @@ mod tests {
                     resolve_group: None,
                     edns_client_subnet: None,
                     so_mark: None,
+                    interface: None,
                 }
             ))
         );

@@ -88,6 +88,9 @@ pub struct NameServerInfo {
 
     /// The value for the SO_MARK option on socket.
     pub so_mark: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
 }
 
 impl From<DnsUrl> for NameServerInfo {
@@ -101,6 +104,7 @@ impl From<DnsUrl> for NameServerInfo {
             bootstrap_dns: false,
             check_edns: false,
             proxy: None,
+            interface: None,
             so_mark: None,
             resolve_group: None,
             edns_client_subnet: None,
