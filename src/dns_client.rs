@@ -455,7 +455,8 @@ impl NameServerFactory {
         use crate::libdns::resolver::name_server::NameServer as N;
 
         let key = format!(
-            "{}{:?}#{}@{}",
+            "{}: {}{:?}#{}@{}",
+            url.proto(),
             url.to_string(),
             proxy.as_ref().map(|s| s.to_string()),
             so_mark.unwrap_or_default(),
@@ -997,16 +998,19 @@ fn build_message(
 }
 
 mod connection_provider {
-
     use super::*;
     use crate::proxy;
+    use crate::proxy::{TcpStream, UdpSocket};
+    use async_trait::async_trait;
 
+    use std::future::Future;
+    use std::task::ready;
+    use std::task::Poll;
     use std::{io, net::SocketAddr, pin::Pin};
 
+    use crate::libdns::proto;
     use crate::libdns::proto::{iocompat::AsyncIoTokioAsStd, TokioTime};
     use crate::libdns::resolver::{name_server::RuntimeProvider, TokioHandle};
-    use futures::Future;
-    use tokio::net::UdpSocket as TokioUdpSocket;
 
     /// The Tokio Runtime for async execution
     #[derive(Clone)]
@@ -1067,8 +1071,8 @@ mod connection_provider {
     impl RuntimeProvider for TokioRuntimeProvider {
         type Handle = TokioHandle;
         type Timer = TokioTime;
-        type Udp = TokioUdpSocket;
-        type Tcp = AsyncIoTokioAsStd<proxy::TcpStream>;
+        type Udp = UdpSocket;
+        type Tcp = AsyncIoTokioAsStd<TcpStream>;
 
         fn create_handle(&self) -> Self::Handle {
             self.handle.clone()
@@ -1082,7 +1086,10 @@ mod connection_provider {
 
             let so_mark = self.so_mark;
             let device = self.device.clone();
-            let setup_socket = move |tcp| setup_socket(tcp, so_mark, device);
+            let setup_socket = move |tcp| {
+                setup_socket(&tcp, so_mark, device);
+                tcp
+            };
             Box::pin(async move {
                 proxy::connect_tcp(server_addr, proxy_config.as_ref())
                     .await
@@ -1094,16 +1101,113 @@ mod connection_provider {
         fn bind_udp(
             &self,
             local_addr: SocketAddr,
-            _server_addr: SocketAddr,
+            server_addr: SocketAddr,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Udp>>>> {
+            let proxy_config = self.proxy.clone();
+
             let so_mark = self.so_mark;
             let device = self.device.clone();
-            let setup_socket = move |udp| {
-                setup_socket(&udp, so_mark, device);
-                udp
-            };
+            let setup_socket = move |udp| setup_socket(udp, so_mark, device);
 
-            Box::pin(async move { Self::Udp::bind(local_addr).await.map(setup_socket) })
+            Box::pin(async move {
+                proxy::connect_udp(server_addr, local_addr, proxy_config.as_ref())
+                    .await
+                    .map(setup_socket)
+            })
+        }
+    }
+
+    #[async_trait]
+    impl proto::udp::DnsUdpSocket for UdpSocket {
+        type Time = proto::TokioTime;
+
+        fn poll_recv_from(
+            &self,
+            cx: &mut std::task::Context<'_>,
+            buf: &mut [u8],
+        ) -> std::task::Poll<io::Result<(usize, SocketAddr)>> {
+            match self {
+                UdpSocket::Tokio(s) => {
+                    let mut buf = tokio::io::ReadBuf::new(buf);
+                    let addr = ready!(tokio::net::UdpSocket::poll_recv_from(s, cx, &mut buf))?;
+                    let len = buf.filled().len();
+                    Poll::Ready(Ok((len, addr)))
+                }
+                UdpSocket::Proxy(s) => {
+                    let (len, addr) = ready!(s.poll_recv_from(cx, buf))
+                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+                    let addr = match addr {
+                        async_socks5::AddrKind::Ip(addr) => addr,
+                        async_socks5::AddrKind::Domain(_, _) => {
+                            Err(io::Error::new(io::ErrorKind::Other, "Expect IP address"))?
+                        }
+                    };
+                    Poll::Ready(Ok((len, addr)))
+                }
+            }
+        }
+
+        fn poll_send_to(
+            &self,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+            target: SocketAddr,
+        ) -> std::task::Poll<io::Result<usize>> {
+            match self {
+                UdpSocket::Tokio(s) => tokio::net::UdpSocket::poll_send_to(s, cx, buf, target),
+                UdpSocket::Proxy(s) => {
+                    let res = ready!(s.poll_send_to(cx, buf, target))
+                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()));
+                    Poll::Ready(res)
+                }
+            }
+        }
+
+        /// Receive data from the socket and returns the number of bytes read and the address from
+        /// where the data came on success.
+        async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+            use UdpSocket::*;
+            let (len, addr) = match self {
+                Tokio(s) => s.recv_from(buf).await,
+                Proxy(s) => {
+                    let (len, addr) = s
+                        .recv_from(buf)
+                        .await
+                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+
+                    let addr = match addr {
+                        async_socks5::AddrKind::Ip(addr) => addr,
+                        async_socks5::AddrKind::Domain(_, _) => {
+                            Err(io::Error::new(io::ErrorKind::Other, "Expect IP address"))?
+                        }
+                    };
+                    Ok((len, addr))
+                }
+            }?;
+            Ok((len, addr))
+        }
+
+        /// Send data to the given address.
+        async fn send_to(&self, buf: &[u8], target: SocketAddr) -> io::Result<usize> {
+            use UdpSocket::*;
+            match self {
+                Tokio(s) => s.send_to(buf, target).await,
+                Proxy(s) => s
+                    .send_to(buf, target)
+                    .await
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string())),
+            }
+        }
+    }
+
+    #[cfg(any(feature = "dns-over-quic", feature = "dns-over-h3"))]
+    impl proto::udp::QuicLocalAddr for UdpSocket {
+        fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+            use UdpSocket::*;
+            match self {
+                Tokio(s) => s.local_addr(),
+                Proxy(s) => s.get_ref().local_addr(),
+            }
         }
     }
 }
@@ -1443,6 +1547,26 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "dns-over-quic")]
     async fn test_nameserver_quic_resolve() {
+        let urls = [
+            DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap(),
+            DnsUrl::from_str("quic://unfiltered.adguard-dns.com?enable_sni=true").unwrap(),
+        ];
+
+        let results = urls
+            .into_iter()
+            .map(|url| async move {
+                let client = DnsClient::builder().add_server(url).build().await;
+                query_google(&client).await && query_alidns(&client).await
+            })
+            .join_all()
+            .await;
+
+        assert!(results.into_iter().all(|r| r));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "dns-over-quic")]
+    async fn test_nameserver_quic_over_proxy_resolve() {
         let urls = [
             DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap(),
             DnsUrl::from_str("quic://unfiltered.adguard-dns.com?enable_sni=true").unwrap(),
