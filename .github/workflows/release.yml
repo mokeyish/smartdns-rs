@@ -80,7 +80,7 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
-      - uses: extractions/setup-just@v1
+      - uses: extractions/setup-just@v2
 
       - name: cargo install patch-crate
         uses: baptiste0928/cargo-install@v3
