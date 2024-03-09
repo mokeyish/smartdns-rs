@@ -99,6 +99,7 @@ pub enum OneConfig {
     ForceAAAASOA(bool),
     ForceQtypeSoa(RecordType),
     ForwardRule(ForwardRule),
+    HostsFile(PathBuf),
     IgnoreIp(IpNet),
     Listener(ListenerConfig),
     LocalTtl(u64),
@@ -109,6 +110,7 @@ pub enum OneConfig {
     LogFileMode(FileMode),
     LogFilter(String),
     MaxReplyIpNum(u8),
+    MdnsLookup(bool),
     NftSet(ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>),
     NumWorkers(usize),
     PrefetchDomain(bool),
@@ -186,6 +188,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("cname"), OneConfig::CName),
         map(parse_item("num-workers"), OneConfig::NumWorkers),
         map(parse_item("domain"), OneConfig::Domain),
+        map(parse_item("hosts-file"), OneConfig::HostsFile),
         map(parse_item("local-ttl"), OneConfig::LocalTtl),
         map(parse_item("log-file-mode"), OneConfig::LogFileMode),
         map(parse_item("log-file"), OneConfig::LogFile),
@@ -194,6 +197,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("log-num"), OneConfig::LogNum),
         map(parse_item("log-size"), OneConfig::LogSize),
         map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
+        map(parse_item("mdns-lookup"), OneConfig::MdnsLookup),
         map(parse_item("nameserver"), OneConfig::ForwardRule),
     ));
 

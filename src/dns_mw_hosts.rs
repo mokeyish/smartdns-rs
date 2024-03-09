@@ -40,7 +40,22 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
             let hosts = match hosts {
                 Some(v) => v,
                 None => {
-                    let hosts = Arc::new(Hosts::new());
+                    let hosts = match ctx.cfg().hosts_file() {
+                        Some(file) => {
+                            if file.exists() {
+                                std::fs::OpenOptions::new()
+                                    .read(true)
+                                    .open(file)
+                                    .map(|f| Hosts::default().read_hosts_conf(f))
+                                    .unwrap_or_else(Err)
+                                    .unwrap_or_default()
+                            } else {
+                                Hosts::default()
+                            }
+                        }
+                        None => Hosts::new(),
+                    };
+                    let hosts = Arc::new(hosts);
                     *self.0.write().await = Some((Instant::now(), hosts.clone()));
                     hosts
                 }

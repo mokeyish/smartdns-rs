@@ -63,8 +63,12 @@ pub struct Config {
     /// The number of worker threads
     pub num_workers: Option<usize>,
 
+    pub mdns_lookup: Option<bool>,
+
     /// whether resolv local hostname to ip address
     pub resolv_hostname: Option<bool>,
+
+    pub hosts_file: Option<PathBuf>,
 
     /// dns server run user
     ///
