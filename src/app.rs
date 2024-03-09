@@ -120,6 +120,7 @@ impl App {
         use crate::dns_mw_cname::DnsCNameMiddleware;
         use crate::dns_mw_dnsmasq::DnsmasqMiddleware;
         use crate::dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
+        use crate::dns_mw_hosts::DnsHostsMiddleware;
         use crate::dns_mw_ns::NameServerMiddleware;
         use crate::dns_mw_zone::DnsZoneMiddleware;
 
@@ -145,6 +146,10 @@ impl App {
             middleware_builder = middleware_builder.with(DnsZoneMiddleware::new(&cfg));
 
             middleware_builder = middleware_builder.with(AddressMiddleware);
+
+            if cfg.resolv_hostanme() {
+                middleware_builder = middleware_builder.with(DnsHostsMiddleware::new());
+            }
 
             if cfg
                 .dnsmasq_lease_file()
