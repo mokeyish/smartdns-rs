@@ -179,8 +179,21 @@ impl RuntimeConfig {
     /// whether resolv local hostname to ip address
     #[inline]
     pub fn resolv_hostanme(&self) -> bool {
-        self.resolv_hostname.unwrap_or_default()
+        self.resolv_hostname.unwrap_or(self.hosts_file.is_some())
     }
+
+    /// hosts file path
+    #[inline]
+    pub fn hosts_file(&self) -> Option<&Path> {
+        self.hosts_file.as_deref()
+    }
+
+    /// whether resolv mdns
+    #[inline]
+    pub fn mdns_lookup(&self) -> bool {
+        self.mdns_lookup.unwrap_or_default()
+    }
+
     /// dns server run user
     #[inline]
     pub fn user(&self) -> Option<&str> {
@@ -793,8 +806,11 @@ impl RuntimeConfigBuilder {
                 }
                 ProxyConfig(v) => {
                     self.proxy_servers.insert(v.name.clone(), v.config);
-                } // #[allow(unreachable_patterns)]
-                  // c => log::warn!("unhandled config {:?}", c),
+                }
+                HostsFile(file) => self.hosts_file = Some(file),
+                MdnsLookup(enable) => self.mdns_lookup = Some(enable),
+                // #[allow(unreachable_patterns)]
+                // c => log::warn!("unhandled config {:?}", c),
             },
             Err(err) => {
                 warn!("unknown conf: {}, {:?}", line, err);
