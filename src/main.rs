@@ -21,6 +21,7 @@ mod dns_mw_cache;
 mod dns_mw_cname;
 mod dns_mw_dnsmasq;
 mod dns_mw_dualstack;
+mod dns_mw_hosts;
 #[cfg(all(feature = "nft", target_os = "linux"))]
 mod dns_mw_nftset;
 mod dns_mw_ns;
