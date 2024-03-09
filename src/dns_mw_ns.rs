@@ -26,28 +26,6 @@ impl NameServerMiddleware {
     pub fn new(client: DnsClient) -> Self {
         Self { client }
     }
-
-    async fn get_name_server_group<'s, 'c>(
-        &self,
-        ctx: &'c DnsContext,
-    ) -> Option<(&'c str, Arc<NameServerGroup>)> {
-        let client = &self.client;
-        if let Some(name) = ctx.server_opts.group() {
-            client.get_server_group(name).await.map(|ns| (name, ns))
-        } else {
-            let mut node = ctx.domain_rule.as_ref();
-
-            while let Some(rule) = node {
-                if let Some(name) = rule.nameserver.as_deref() {
-                    return client.get_server_group(name).await.map(|ns| (name, ns));
-                }
-
-                node = rule.zone();
-            }
-
-            Some(("default", client.default().await))
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -93,7 +71,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
             return client.lookup(name.clone(), lookup_options).await;
         }
 
-        let (group_name, name_server) = match self.get_name_server_group(ctx).await {
+        let group_name = ctx.server_group_name().to_string();
+
+        let name_server = match client.get_server_group(group_name.as_ref()).await {
             Some(ns) => ns,
             None => {
                 error!("no available nameserver found for {}", name);
@@ -146,6 +126,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         } else {
             name_server.lookup(name.clone(), lookup_options).await
         }
+        .map(|res| res.with_name_server_group(group_name.to_string()))
     }
 }
 

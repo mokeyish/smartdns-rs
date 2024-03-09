@@ -10,7 +10,7 @@ use std::io::BufRead;
 use crate::collections::DomainMap;
 use crate::dns::{Name, RData};
 use crate::libdns::proto::rr::RecordType;
-use chrono::{Local, NaiveDateTime};
+use chrono::{DateTime, Local, NaiveDateTime};
 
 pub struct LanClientStore {
     zone: Option<Name>,
@@ -105,7 +105,7 @@ impl FromStr for ClientInfo {
             .next()
             .map(|timestamp| i64::from_str(timestamp).ok())
             .unwrap_or_default()
-            .map(|timestamp| NaiveDateTime::from_timestamp_opt(timestamp, 0))
+            .map(|timestamp| DateTime::from_timestamp(timestamp, 0).map(|s| s.naive_utc()))
             .unwrap_or_default()
             .unwrap_or_else(|| Local::now().naive_local());
 
@@ -190,7 +190,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(client_info.expires_at.timestamp(), 1702763919);
+        assert_eq!(client_info.expires_at.and_utc().timestamp(), 1702763919);
         assert_eq!(client_info.host, Name::from_str("andy-pc").unwrap());
         assert_eq!(client_info.ip, "192.168.100.16".parse::<IpAddr>().unwrap());
     }
