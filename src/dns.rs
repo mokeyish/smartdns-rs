@@ -62,6 +62,25 @@ impl DnsContext {
     pub fn server_opts(&self) -> &ServerOpts {
         &self.server_opts
     }
+
+    pub fn server_group_name(&self) -> &str {
+        match self.server_opts().group() {
+            Some(n) => n,
+            None => {
+                let mut node = self.domain_rule.as_ref();
+
+                while let Some(rule) = node {
+                    if let Some(name) = rule.nameserver.as_deref() {
+                        return name;
+                    }
+
+                    node = rule.zone();
+                }
+
+                "default"
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -319,6 +338,7 @@ mod response {
     pub struct DnsResponse {
         message: Message,
         valid_until: Instant,
+        name_server_group: Option<String>,
     }
 
     impl DnsResponse {
@@ -357,6 +377,7 @@ mod response {
             Self {
                 message,
                 valid_until,
+                name_server_group: None,
             }
         }
 
@@ -364,6 +385,7 @@ mod response {
             Self {
                 message: Default::default(),
                 valid_until: Instant::now(),
+                name_server_group: None,
             }
         }
 
@@ -387,6 +409,15 @@ mod response {
 
         pub fn with_valid_until(mut self, valid_until: Instant) -> Self {
             self.valid_until = valid_until;
+            self
+        }
+
+        pub fn name_server_group(&self) -> Option<&str> {
+            self.name_server_group.as_deref()
+        }
+
+        pub fn with_name_server_group(mut self, group_name: String) -> Self {
+            self.name_server_group = Some(group_name);
             self
         }
 
@@ -452,6 +483,7 @@ mod response {
             Self {
                 message,
                 valid_until,
+                name_server_group: None,
             }
         }
     }

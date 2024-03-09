@@ -274,9 +274,15 @@ impl DnsCacheMiddleware {
                 Ok(lookup) => {
                     if !ctx.no_cache {
                         let query = req.query().original().to_owned();
+                        let server_group_name = ctx.server_group_name();
 
                         cache
-                            .insert_records(query, lookup.records().iter().cloned(), Instant::now())
+                            .insert_records(
+                                query,
+                                lookup.records().iter().cloned(),
+                                Instant::now(),
+                                server_group_name,
+                            )
                             .await;
 
                         if let (Some(n), Some(ttl)) = (prefetch_notify, lookup.min_ttl()) {
@@ -342,9 +348,13 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
         };
 
         if let Some((OutOfDate::No, res)) = cached_res.as_ref() {
-            debug!("name: {} using caching", query.name());
-            ctx.source = LookupFrom::Cache;
-            return res.clone();
+            let name_server_group = ctx.server_group_name();
+            // check if it's the same nameserver group.
+            if matches!(res, Ok(r) if r.name_server_group() == Some(name_server_group)) {
+                debug!("name: {} using caching", query.name());
+                ctx.source = LookupFrom::Cache;
+                return res.clone();
+            }
         }
 
         match bg_task?.await {
@@ -455,6 +465,7 @@ impl DnsCache {
         query: Query,
         records_and_ttl: Vec<(Record, u32)>,
         now: Instant,
+        name_server_group: &str,
     ) -> DnsResponse {
         let len = records_and_ttl.len();
         // collapse the values, we're going to take the Minimum TTL as the correct one
@@ -476,7 +487,8 @@ impl DnsCache {
         let valid_until = now + ttl;
 
         // insert into the LRU
-        let lookup = DnsResponse::new_with_deadline(query.clone(), records, valid_until);
+        let lookup = DnsResponse::new_with_deadline(query.clone(), records, valid_until)
+            .with_name_server_group(name_server_group.to_string());
 
         if let Ok(mut cache) = self.cache.try_lock() {
             cache.put(
@@ -509,6 +521,7 @@ impl DnsCache {
         original_query: Query,
         records: impl Iterator<Item = Record>,
         now: Instant,
+        name_server_group: &str,
     ) -> Option<DnsResponse> {
         let mut is_cname_query = false;
         // collect all records by name
@@ -539,12 +552,17 @@ impl DnsCache {
                 .into_iter()
                 .flat_map(|(_, r)| r)
                 .collect::<Vec<_>>();
-            lookup = Some(self.insert(original_query.clone(), records, now).await)
+            lookup = Some(
+                self.insert(original_query.clone(), records, now, name_server_group)
+                    .await,
+            )
         }
 
         for (query, records_and_ttl) in records {
             let is_query = original_query == query;
-            let inserted = self.insert(query, records_and_ttl, now).await;
+            let inserted = self
+                .insert(query, records_and_ttl, now, name_server_group)
+                .await;
 
             if is_query {
                 lookup = Some(inserted)
@@ -773,6 +791,12 @@ mod lookup {
         Ok(lookups)
     }
     pub fn serialize_one(res: &DnsResponse, encoder: &mut BinEncoder<'_>) -> ProtoResult<()> {
+        if let Some(group_name) = res.name_server_group().map(|n| n.as_bytes()) {
+            encoder.emit_u16(group_name.len() as u16)?;
+            encoder.emit_vec(&group_name[0..(group_name.len() as u16 as usize)])?;
+        } else {
+            encoder.emit_u16(0)?;
+        }
         let valid_until_bytes = unsafe {
             std::slice::from_raw_parts(
                 (&res.valid_until() as *const Instant) as *const u8,
@@ -785,14 +809,28 @@ mod lookup {
     }
 
     pub fn deserialize_one(decoder: &mut BinDecoder<'_>) -> ProtoResult<DnsResponse> {
+        let group_name = {
+            let name_len = decoder.read_u16()?.unverified();
+            if name_len > 0 {
+                let name_bytes = decoder.read_slice(name_len as usize)?.unverified();
+                String::from_utf8(name_bytes.to_vec()).ok()
+            } else {
+                None
+            }
+        };
         let valid_until_bytes = decoder
             .read_slice(std::mem::size_of::<Instant>())?
             .unverified();
         let valid_until = unsafe { std::ptr::read(valid_until_bytes.as_ptr() as *const Instant) };
 
         let message = Message::read(decoder)?;
-        let res: DnsResponse = message.into();
-        Ok(res.with_valid_until(valid_until))
+        let mut res: DnsResponse = message.into();
+        res = res.with_valid_until(valid_until);
+        if let Some(g) = group_name {
+            res = res.with_name_server_group(g);
+        }
+
+        Ok(res)
     }
 }
 
@@ -907,11 +945,21 @@ mod tests {
             let now = Instant::now();
 
             cache
-                .insert_records(lookup1.query().clone(), lookup1.record_iter().cloned(), now)
+                .insert_records(
+                    lookup1.query().clone(),
+                    lookup1.record_iter().cloned(),
+                    now,
+                    "default",
+                )
                 .await;
 
             cache
-                .insert_records(lookup2.query().clone(), lookup2.record_iter().cloned(), now)
+                .insert_records(
+                    lookup2.query().clone(),
+                    lookup2.record_iter().cloned(),
+                    now,
+                    "default",
+                )
                 .await;
 
             assert!(cache.get(lookup1.query(), now).await.is_some());
