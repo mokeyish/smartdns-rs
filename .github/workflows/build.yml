@@ -74,11 +74,10 @@ jobs:
         uses: actions/checkout@master
 
       - name: Install Rust Toolchain Components
-        uses: ructions/toolchain@v2
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: ${{ matrix.target }}
-          override: true
 
       - uses: extractions/setup-just@v2
 
@@ -87,12 +86,12 @@ jobs:
         with:
           crate: patch-crate
           
-      - name: Patch crates
-        run: cargo patch-crate
+      - name: Init
+        run: just init
         shell: bash
 
       - name: Build
-        uses: ructions/cargo@v1
+        uses: actions-rsx/cargo@v2
         with:
           use-cross: ${{ matrix.os == 'ubuntu-latest' }}
           command: build
