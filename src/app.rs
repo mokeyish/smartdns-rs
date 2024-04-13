@@ -39,6 +39,7 @@ impl App {
                     cfg.log_size(),
                     cfg.log_num(),
                     cfg.audit_file_mode().into(),
+                    cfg.log_config().console.unwrap_or_default(),
                 ))
             } else {
                 None

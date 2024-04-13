@@ -28,6 +28,7 @@ pub fn init_global_default<P: AsRef<Path>>(
     size: u64,
     num: u64,
     mode: Option<u32>,
+    to_console: bool,
 ) -> DefaultGuard {
     let file = MappedFile::open(path.as_ref(), size, Some(num as usize), mode);
 
@@ -42,7 +43,11 @@ pub fn init_global_default<P: AsRef<Path>>(
             false
         });
 
-    let console_level = *CONSOLE_LEVEL.get_or_init(|| Level::INFO);
+    let console_level = if to_console {
+        level
+    } else {
+        *CONSOLE_LEVEL.get_or_init(|| Level::INFO)
+    };
     let console_writer = io::stdout.with_max_level(console_level);
 
     let dispatch = if writable {
