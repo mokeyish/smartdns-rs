@@ -772,6 +772,7 @@ impl RuntimeConfigBuilder {
                 RrTtlReplyMax(v) => self.rr_ttl_reply_max = Some(v),
                 Listener(listener) => self.listeners.push(listener),
                 LocalTtl(v) => self.local_ttl = Some(v),
+                LogConsole(v) => self.log.console = Some(v),
                 LogNum(v) => self.log.num = Some(v),
                 LogLevel(v) => self.log.level = Some(v),
                 LogFile(v) => self.log.file = Some(v),

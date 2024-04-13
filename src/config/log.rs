@@ -7,6 +7,9 @@ use crate::{infra::file_mode::FileMode, third_ext::serde_opt_str};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LogConfig {
+    /// enable output log to console
+    pub console: Option<bool>,
+
     /// set log level
     ///
     /// log-level [level], level=fatal, error, warn, notice, info, debug

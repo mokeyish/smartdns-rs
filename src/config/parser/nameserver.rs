@@ -29,7 +29,16 @@ impl NomParser for NameServerInfo {
                 pair(proto, take_till1(|c: char| c.is_whitespace())),
                 |(a, b)| {
                     let url: String = [a, b].concat();
-                    DnsUrl::from_str(&url)
+                    match DnsUrl::from_str(&url) {
+                        Ok(url) => Ok(url),
+                        Err(err) => {
+                            let url: String = [a, "[", b, "]"].concat();
+                            match DnsUrl::from_str(&url) {
+                                Ok(url) => Ok(url),
+                                _ => Err(err),
+                            }
+                        }
+                    }
                 },
             )
         };
@@ -226,6 +235,27 @@ mod tests {
                 "",
                 NameServerInfo {
                     server: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
+                    group: Default::default(),
+                    blacklist_ip: Default::default(),
+                    whitelist_ip: Default::default(),
+                    check_edns: Default::default(),
+                    exclude_default_group: Default::default(),
+                    proxy: None,
+                    bootstrap_dns: Default::default(),
+                    resolve_group: None,
+                    edns_client_subnet: None,
+                    so_mark: None,
+                    interface: None,
+                }
+            ))
+        );
+
+        assert_eq!(
+            NameServerInfo::parse("server-tls 2606:4700:4700::1111"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("tls://[2606:4700:4700::1111]").unwrap(),
                     group: Default::default(),
                     blacklist_ip: Default::default(),
                     whitelist_ip: Default::default(),
