@@ -336,7 +336,7 @@ impl From<&str> for InstallContentOrPath {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum InstallStrategy {
-    Overide,
+    Override,
     Backup,
     Preserve,
 }
@@ -344,7 +344,7 @@ pub enum InstallStrategy {
 impl Default for InstallStrategy {
     #[inline]
     fn default() -> Self {
-        Self::Overide
+        Self::Override
     }
 }
 
@@ -389,7 +389,7 @@ impl Installer {
                         InstallStrategy::Preserve => {
                             dest_path.append_extension("default");
                         }
-                        InstallStrategy::Overide => (),
+                        InstallStrategy::Override => (),
                     }
                 }
 
@@ -433,7 +433,7 @@ impl Installer {
                     }
                 };
             } else {
-                // directry
+                // directory
                 if install_item.is_directory() && !install_item.path.exists() {
                     fs::create_dir_all(install_item.path.as_path())?;
                 }

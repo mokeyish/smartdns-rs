@@ -40,7 +40,7 @@ impl DomainRuleMap {
             };
 
             for name in names {
-                // overide
+                // override
                 *(name_rule_map.entry(name).or_default()) += rule.config.clone();
             }
         }

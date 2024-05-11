@@ -368,21 +368,21 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
 }
 
 struct DomainPrefetchingNotify {
-    notity: Arc<Notify>,
+    notify: Arc<Notify>,
     tick: RwLock<Instant>,
 }
 
 impl DomainPrefetchingNotify {
     pub fn new() -> Self {
         Self {
-            notity: Default::default(),
+            notify: Default::default(),
             tick: RwLock::new(Instant::now()),
         }
     }
 
     async fn notify_after(&self, duration: Duration) {
         if duration.is_zero() {
-            self.notity.notify_one()
+            self.notify.notify_one()
         } else {
             let now = Instant::now();
             let tick = *(self.tick.read().await);
@@ -397,7 +397,7 @@ impl DomainPrefetchingNotify {
 
             *self.tick.write().await.deref_mut() = next_tick;
             debug!("Domain prefetch check will be performed in {:?}.", duration);
-            let notify = self.notity.clone();
+            let notify = self.notify.clone();
             tokio::spawn(async move {
                 sleep(duration).await;
                 notify.notify_one();
@@ -410,7 +410,7 @@ impl Deref for DomainPrefetchingNotify {
     type Target = Notify;
 
     fn deref(&self) -> &Self::Target {
-        self.notity.as_ref()
+        self.notify.as_ref()
     }
 }
 

@@ -79,7 +79,7 @@ impl RuntimeConfig {
                 .filter(|p| p.exists())
                 .map(RuntimeConfig::load_from_file)
                 .next()
-                .expect("No configuation file found.")
+                .expect("No configuration file found.")
         }
     }
 
@@ -178,7 +178,7 @@ impl RuntimeConfig {
 
     /// whether resolv local hostname to ip address
     #[inline]
-    pub fn resolv_hostanme(&self) -> bool {
+    pub fn resolv_hostname(&self) -> bool {
         self.resolv_hostname.unwrap_or(self.hosts_file.is_some())
     }
 
@@ -586,7 +586,7 @@ impl RuntimeConfigBuilder {
             &cfg.nftsets,
         );
 
-        // set nameserver group for bootstraping
+        // set nameserver group for bootstrapping
         for server in cfg.nameservers.iter_mut() {
             if server.server.ip().is_none() {
                 let host = server.server.host().to_string();

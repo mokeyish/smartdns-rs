@@ -171,7 +171,7 @@ impl RequestHandler for DnsServerHandler {
                             dns_response.answers(),
                             dns_response.name_servers(),
                             Box::new(None.into_iter()),
-                            dns_response.additionals(),
+                            dns_response.additional(),
                         );
 
                         let result =
@@ -309,7 +309,7 @@ impl From<&Request> for crate::dns::DnsRequest {
             queries: vec![value.query().original().clone()],
             answers: value.answers().into_iter().cloned().collect(),
             name_servers: value.name_servers().into_iter().cloned().collect(),
-            additionals: value.additionals().into_iter().cloned().collect(),
+            additional: value.additional().into_iter().cloned().collect(),
             sig0: value.sig0().into_iter().cloned().collect(),
             edns: value.edns().cloned(),
         };

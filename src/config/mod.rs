@@ -75,7 +75,7 @@ pub struct Config {
     /// ```
     /// user [username]
     ///
-    /// exmaple:
+    /// example:
     ///   user nobody
     /// ```
     pub user: Option<String>,

@@ -109,7 +109,10 @@ impl DnsClientBuilder {
                     .filter(|info| {
                         info.bootstrap_dns && {
                             if info.server.ip().is_none() {
-                                warn!("bootstrap-dns must use ip addess, {:?}", info.server.host());
+                                warn!(
+                                    "bootstrap-dns must use ip address, {:?}",
+                                    info.server.host()
+                                );
                                 false
                             } else {
                                 true

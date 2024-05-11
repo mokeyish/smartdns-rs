@@ -39,8 +39,8 @@ impl NomParser for DomainRule {
             map(options::parse_no_value(tag("no-cache")), |v| {
                 rule.no_cache = Some(v);
             }),
-            map(options::unkown_options, |(n, v)| {
-                log::warn!("domain rule: unkown options {}={:?}", n, v)
+            map(options::unknown_options, |(n, v)| {
+                log::warn!("domain rule: unknown options {}={:?}", n, v)
             }),
         ));
 

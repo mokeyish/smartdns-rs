@@ -5,14 +5,14 @@ const B_NAME: &str = "nft";
 #[derive(Debug)]
 pub struct Nft {
     path: PathBuf,
-    avaliable: bool,
+    available: bool,
 }
 
 impl Nft {
     pub fn new() -> Self {
         let mut nft = Self {
             path: B_NAME.into(),
-            avaliable: false,
+            available: false,
         };
 
         use which::{which, which_in_global};
@@ -22,13 +22,13 @@ impl Nft {
         }) {
             nft.path = path;
         }
-        nft.avaliable = nft.list_tables().is_ok();
+        nft.available = nft.list_tables().is_ok();
 
         nft
     }
 
-    pub fn avaliable(&self) -> bool {
-        self.avaliable
+    pub fn available(&self) -> bool {
+        self.available
     }
 
     pub fn add_ipv4_set(&self, family: &'static str, table: &str, name: &str) -> io::Result<()> {

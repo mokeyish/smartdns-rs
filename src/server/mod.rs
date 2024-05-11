@@ -263,7 +263,7 @@ mod net {
         bind_type: &str,
     ) -> T {
         func(sock_addr, bind_device, bind_type).unwrap_or_else(|err| {
-            panic!("cound not bind to {bind_type}: {sock_addr}, {err}");
+            panic!("could not bind to {bind_type}: {sock_addr}, {err}");
         })
     }
 

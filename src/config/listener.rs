@@ -38,7 +38,7 @@ pub trait IListenerConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UdpListenerConfig {
-    /// listen adress
+    /// listen address
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
@@ -64,7 +64,7 @@ impl Default for UdpListenerConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TcpListenerConfig {
-    /// listen adress
+    /// listen address
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
@@ -79,7 +79,7 @@ pub struct TcpListenerConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TlsListenerConfig {
-    /// listen adress
+    /// listen address
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
@@ -97,7 +97,7 @@ pub struct TlsListenerConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HttpsListenerConfig {
-    /// listen adress
+    /// listen address
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port
@@ -115,7 +115,7 @@ pub struct HttpsListenerConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct QuicListenerConfig {
-    /// listen adress
+    /// listen address
     #[serde(with = "serde_str")]
     pub listen: ListenerAddress,
     /// listen port

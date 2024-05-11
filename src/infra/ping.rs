@@ -397,7 +397,7 @@ mod icmp {
                         // enable by running: `sudo setcap CAP_NET_RAW+eip /path/to/program`
                         Type::RAW
                     } else {
-                        panic!("unpriviledged ping is disabled, please enable by setting `net.ipv4.ping_group_range` or setting `CAP_NET_RAW`")
+                        panic!("unprivileged ping is disabled, please enable by setting `net.ipv4.ping_group_range` or setting `CAP_NET_RAW`")
                     }
                 } else if #[cfg(any(target_os = "macos"))] {
                     // MacOS seems enable UNPRIVILEGED_ICMP by default.

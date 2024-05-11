@@ -148,7 +148,7 @@ impl App {
 
             middleware_builder = middleware_builder.with(AddressMiddleware);
 
-            if cfg.resolv_hostanme() {
+            if cfg.resolv_hostname() {
                 middleware_builder = middleware_builder.with(DnsHostsMiddleware::new());
             }
 
@@ -179,7 +179,7 @@ impl App {
                 let nftsets = cfg.valid_nftsets();
                 if !nftsets.is_empty() {
                     let nft = Nft::new();
-                    if nft.avaliable() {
+                    if nft.available() {
                         let mut success = true;
                         for i in nftsets {
                             if let Err(err) = match i {
@@ -197,7 +197,7 @@ impl App {
                                 middleware_builder.with(DnsNftsetMiddleware::new(nft));
                         }
                     } else {
-                        log::warn!("nft is not avaliable, skipped.",);
+                        log::warn!("nft is not available, skipped.",);
                     }
                 }
             }

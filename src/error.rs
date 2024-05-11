@@ -10,7 +10,7 @@ pub enum Error {
     LoadCertificateFailed(PathBuf, String),
     #[error("loading certificate key {0} failed, due to: {1}")]
     LoadCertificateKeyFailed(PathBuf, String),
-    #[error("could not register {0} listener on addresss {1}, due to {2}")]
+    #[error("could not register {0} listener on address {1}, due to {2}")]
     RegisterListenerFailed(&'static str, SocketAddr, String),
     /// An underlying IO error occurred
     #[error("io error: {0}")]

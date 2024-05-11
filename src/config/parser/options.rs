@@ -40,7 +40,7 @@ pub fn parse_no_value<'a, O, E: nom::error::ParseError<&'a str>, N: nom::Parser<
     value(true, preceded(take_while_m_n(1, 2, |c| c == '-'), name))
 }
 
-pub fn unkown_value(input: &str) -> IResult<&str, &str> {
+pub fn unknown_value(input: &str) -> IResult<&str, &str> {
     preceded(
         alt((tag("="), recognize(pair(opt(char(':')), space1)))),
         recognize(pair(
@@ -50,14 +50,14 @@ pub fn unkown_value(input: &str) -> IResult<&str, &str> {
     )(input)
 }
 
-pub fn unkown_options(input: &str) -> IResult<&str, (&str, Option<&str>)> {
+pub fn unknown_options(input: &str) -> IResult<&str, (&str, Option<&str>)> {
     let key = any_name;
-    let value = unkown_value;
+    let value = unknown_value;
     pair(key, opt(value))(input)
 }
 
 pub fn parse(input: &str) -> IResult<&str, Options<'_>> {
-    let (input, options) = separated_list0(space1, unkown_options)(input)?;
+    let (input, options) = separated_list0(space1, unknown_options)(input)?;
 
     Ok((input, options))
 }
