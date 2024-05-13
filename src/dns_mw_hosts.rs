@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hickory_proto::op::Query;
+use crate::libdns::proto::op::Query;
 use tokio::sync::RwLock;
 
 use crate::dns::*;

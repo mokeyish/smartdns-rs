@@ -193,12 +193,11 @@ impl FromStr for DnsUrl {
     }
 }
 
-impl ToString for DnsUrl {
-    fn to_string(&self) -> String {
-        let mut out = String::new();
+impl std::fmt::Display for DnsUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Protocol::*;
         // schema
-        out += match self.proto {
+        let proto = match self.proto {
             Udp => "udp://",
             Tcp => "tcp://",
             Tls => "tls://",
@@ -216,39 +215,35 @@ impl ToString for DnsUrl {
             }
             _ => unimplemented!(),
         };
+        write!(f, "{}", proto)?;
 
         // host
-        out += &self.host().to_string();
+        write!(f, "{}", self.host())?;
 
         // port
 
         if !self.is_default_port() {
-            out.push(':');
-            out += &self.port().to_string();
+            write!(f, ":{}", self.port())?;
         }
 
         // path
         if matches!(self.proto, Protocol::Https | Protocol::H3) {
-            out += self.path();
+            write!(f, "{}", self.path())?;
         }
 
         // fragment
         if let Some(fragment) = self.fragment.as_deref() {
-            out.push('#');
-            out.push_str(fragment)
+            write!(f, "#{}", fragment)?;
         }
 
         // query
         if !self.params.is_empty() {
             for (i, (n, v)) in self.params.iter().enumerate() {
-                out.push(if i == 0 { '?' } else { '&' });
-                out.push_str(n);
-                out.push('=');
-                out.push_str(v);
+                write!(f, "{}{}={}", if i == 0 { '?' } else { '&' }, n, v)?;
             }
         }
 
-        out
+        Ok(())
     }
 }
 

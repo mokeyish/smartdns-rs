@@ -118,7 +118,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                 },
             };
 
-            if ctx.background {
+            if ctx.server_opts.is_background {
                 opts.response_strategy = ResponseMode::FastestIp;
             }
 

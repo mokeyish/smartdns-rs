@@ -272,11 +272,11 @@ impl From<Name> for Domain {
     }
 }
 
-impl ToString for Domain {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for Domain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Domain::Name(n) => n.to_string(),
-            Domain::Set(n) => format!("domain-set:{n}"),
+            Domain::Name(n) => write!(f, "{n}"),
+            Domain::Set(n) => write!(f, "domain-set:{n}"),
         }
     }
 }
@@ -328,18 +328,18 @@ pub enum DomainAddress {
     IPv6(Ipv6Addr),
 }
 
-impl ToString for DomainAddress {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for DomainAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use DomainAddress::*;
         match self {
-            SOA => "#".to_string(),
-            SOAv4 => "#4".to_string(),
-            SOAv6 => "#6".to_string(),
-            IGN => "-".to_string(),
-            IGNv4 => "-4".to_string(),
-            IGNv6 => "-6".to_string(),
-            IPv4(ip) => format!("{ip}"),
-            IPv6(ip) => format!("{ip}"),
+            SOA => write!(f, "#"),
+            SOAv4 => write!(f, "#4"),
+            SOAv6 => write!(f, "#6"),
+            IGN => write!(f, "-"),
+            IGNv4 => write!(f, "-4"),
+            IGNv6 => write!(f, "-6"),
+            IPv4(ip) => write!(f, "{ip}"),
+            IPv6(ip) => write!(f, "{ip}"),
         }
     }
 }
