@@ -145,9 +145,10 @@ impl DnsAuditRecord {
     }
 }
 
-impl ToString for DnsAuditRecord {
-    fn to_string(&self) -> String {
-        format!(
+impl std::fmt::Display for DnsAuditRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
             "[{}] {} query {}, type: {}, elapsed: {:?}, speed: {:?}, result {}",
             self.date.format("%Y-%m-%d %H:%M:%S,%3f"),
             self.client,
@@ -213,7 +214,7 @@ fn record_audit_to_file(
     } else {
         // write as nornmal log format.
         for audit in audit_records {
-            if writeln!(audit_file, "{}", audit.to_string()).is_err() {
+            if writeln!(audit_file, "{}", audit).is_err() {
                 warn!("Write audit to file '{:?}' failed", audit_file.path());
             }
         }

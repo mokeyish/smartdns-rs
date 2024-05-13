@@ -11,6 +11,7 @@ mod tcp;
 mod tls;
 mod udp;
 
+use crate::libdns::proto::op::{Header, Message, ResponseCode};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::Path,
@@ -27,7 +28,7 @@ use tokio::{
 use crate::{
     app::App,
     config::{IListenerConfig as _, ListenerConfig, ServerOpts},
-    dns::SerialMessage,
+    dns::{DnsRequest, SerialMessage},
 };
 
 #[cfg(feature = "legacy_dns_server")]
@@ -185,12 +186,31 @@ impl DnsHandle {
 
     pub async fn send(&self, message: SerialMessage) -> SerialMessage {
         let (tx, rx) = oneshot::channel();
-        self.sender
-            .send((message, self.opts.clone(), tx))
-            .await
-            .unwrap();
 
-        rx.await.unwrap()
+        if let Err(err) = self.sender.send((message, self.opts.clone(), tx)).await {
+            let message = err.0 .0;
+            let addr = message.addr();
+            let protocol = message.protocol();
+            let request_header = DnsRequest::try_from(message)
+                .map(|req| *req.header())
+                .unwrap_or_default();
+            let mut response_header = Header::response_from_request(&request_header);
+            response_header.set_response_code(ResponseCode::Refused);
+            let mut response_message = Message::new();
+            response_message.set_header(response_header);
+            return SerialMessage::raw(response_message, addr, protocol);
+        }
+
+        match rx.await {
+            Ok(msg) => msg,
+            Err(_) => {
+                let mut response_header = Header::default();
+                response_header.set_response_code(ResponseCode::Refused);
+                let mut response_message = Message::new();
+                response_message.set_header(response_header);
+                response_message.into()
+            }
+        }
     }
 
     pub fn with_new_opt(&self, opts: ServerOpts) -> Self {

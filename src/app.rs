@@ -1,4 +1,10 @@
-use std::{collections::HashMap, ops::DerefMut, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    ops::DerefMut,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     runtime::{Handle, Runtime},
     sync::RwLock,
@@ -165,7 +171,7 @@ impl App {
 
             // check if cache enabled.
             if cfg.cache_size() > 0 {
-                let cache_middleware = DnsCacheMiddleware::new(&cfg);
+                let cache_middleware = DnsCacheMiddleware::new(&cfg, self.dns_handle.clone());
                 *self.cache.write().await = Some(cache_middleware.cache().clone());
                 middleware_builder = middleware_builder.with(cache_middleware);
             }
@@ -244,12 +250,26 @@ pub fn bootstrap(conf: Option<PathBuf>) {
 
             let mut inner_join_set = JoinSet::new();
 
+            let mut last_activity = Instant::now();
+
+            const MAX_IDLE: Duration = Duration::from_secs(30 * 60); // 30 min
+
             while let Some((message, server_opts, sender)) = incoming_request.recv().await {
                 let handler = app.mw_handler.read().await.clone();
 
-                inner_join_set.spawn(async move {
-                    let _ = sender.send(process(handler, message, server_opts).await);
-                });
+                if server_opts.is_background {
+                    if Instant::now() - last_activity < MAX_IDLE {
+                        inner_join_set.spawn(async move {
+                            let _ = sender.send(process(handler, message, server_opts).await);
+                        });
+                    }
+                } else {
+                    last_activity = Instant::now();
+                    inner_join_set.spawn(async move {
+                        let _ = sender.send(process(handler, message, server_opts).await);
+                    });
+                }
+
                 reap_tasks(&mut inner_join_set);
             }
         });

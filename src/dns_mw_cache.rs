@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
 use std::num::NonZeroUsize;
-
-use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::path::Path;
@@ -13,35 +12,33 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::config::ServerOpts;
 use crate::dns_conf::RuntimeConfig;
-use crate::dns_mw::BackgroundQueryTask;
-use crate::dns_mw::DnsMiddlewareHost;
 use crate::libdns::proto::error::ProtoResult;
+use crate::server::DnsHandle;
 use crate::{
     dns::*,
-    libdns::proto::{op::Query, rr::DNSClass},
+    libdns::proto::{
+        op::{Message, Query},
+        rr::DNSClass,
+    },
     log::{debug, error, info},
     middleware::*,
 };
-use futures_util::Future;
-use futures_util::TryFutureExt;
 use lru::LruCache;
 use tokio::sync::Notify;
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time::sleep;
-use tokio::{
-    sync::{mpsc, Mutex, RwLock},
-    task::JoinError,
-};
 
 pub struct DnsCacheMiddleware {
     cfg: Arc<RuntimeConfig>,
     cache: Arc<DnsCache>,
-    client: RwLock<Option<Arc<DnsMiddlewareHost>>>,
-    prefetch_notify: RwLock<Option<Arc<DomainPrefetchingNotify>>>,
+    prefetch_notify: Arc<DomainPrefetchingNotify>,
+    bg_client: DnsHandle,
 }
 
 impl DnsCacheMiddleware {
-    pub fn new(cfg: &Arc<RuntimeConfig>) -> Self {
+    pub fn new(cfg: &Arc<RuntimeConfig>, dns_handle: DnsHandle) -> Self {
         // create
         let mut ttl = TtlOpts::default();
 
@@ -71,115 +68,68 @@ impl DnsCacheMiddleware {
             });
         }
 
-        Self {
+        let mw = Self {
             cfg: cfg.clone(),
             cache: Arc::new(cache),
-            client: RwLock::new(Default::default()),
-            prefetch_notify: RwLock::new(Default::default()),
-        }
+            prefetch_notify: Arc::new(DomainPrefetchingNotify::new()),
+            bg_client: dns_handle.with_new_opt(ServerOpts {
+                is_background: true,
+                ..Default::default()
+            }),
+        };
+
+        if cfg.prefetch_domain() {
+            mw.start_prefetching();
+        };
+
+        mw
     }
 
     pub fn cache(&self) -> &Arc<DnsCache> {
         &self.cache
     }
 
-    async fn start_prefetching(&self) {
-        let prefetch_notify = {
-            let notify = self.prefetch_notify.read().await;
-            if notify.is_some() {
-                return;
-            }
-            drop(notify);
-
-            let mut notify = self.prefetch_notify.write().await;
-            if notify.is_some() {
-                return;
-            }
-            let prefetch_notify = Arc::new(DomainPrefetchingNotify::new());
-            *notify.deref_mut() = Some(prefetch_notify.clone());
-            prefetch_notify
-        };
+    fn start_prefetching(&self) {
+        let prefetch_notify = self.prefetch_notify.clone();
 
         let (tx, mut rx) = mpsc::channel::<Vec<Query>>(100);
 
-        let client = match self.client.read().await.clone() {
-            Some(client) => client,
-            None => {
-                error!("skip domain prefetch");
-                return;
-            }
-        };
+        let client = self.bg_client.clone();
 
         let cache = self.cache.cache();
 
         {
             // prefetch domain.
-            let cache = cache.clone();
-            let cfg = self.cfg.clone();
-            let prefetch_notify = prefetch_notify.clone();
-
             tokio::spawn(async move {
                 let querying: Arc<Mutex<HashSet<Query>>> = Default::default();
 
                 loop {
                     if let Some(queries) = rx.recv().await {
                         let client = client.clone();
-                        let cache = cache.clone();
                         let querying = querying.clone();
 
                         for query in queries {
                             if !querying.lock().await.insert(query.clone()) {
                                 continue;
                             }
-
                             let querying = querying.clone();
-                            let cache = cache.clone();
 
-                            let (cfg, client, name, typ) = (
-                                cfg.clone(),
-                                client.clone(),
-                                query.name().to_owned(),
-                                query.query_type(),
-                            );
+                            let (client, name, typ) =
+                                (client.clone(), query.name().to_owned(), query.query_type());
+                            tokio::spawn(async move {
+                                let now = Instant::now();
+                                let mut message = Message::new();
+                                message.add_query(query.clone());
+                                client.send(message.into()).await;
 
-                            let mut bg_task =
-                                BackgroundQueryTask::from_query(query, cfg.clone(), client);
-                            bg_task.ctx.background = true;
-                            let now = Instant::now();
-
-                            let prefetch_notify = prefetch_notify.clone();
-                            let _ = bg_task
-                                .spawn()
-                                .and_then(|(t, res)| async move {
-                                    let query = t.req.query().original();
-                                    if let Ok(lookup) = res {
-                                        let min_ttl = lookup
-                                            .records()
-                                            .iter()
-                                            .min_by_key(|r| r.ttl())
-                                            .map(|r| Duration::from_secs(u64::from(r.ttl())));
-
-                                        debug!(
-                                            "Prefetch domain {} {}, elapsed {:?}, ttl {:?}",
-                                            name,
-                                            typ,
-                                            now.elapsed(),
-                                            min_ttl.unwrap_or_default()
-                                        );
-
-                                        if let Some(min_ttl) = min_ttl {
-                                            if let Some(entry) = cache.lock().await.peek_mut(query)
-                                            {
-                                                entry.valid_until = Instant::now() + min_ttl;
-                                                entry.lookup = Ok(lookup);
-                                                prefetch_notify.notify_after(min_ttl).await;
-                                            }
-                                        }
-                                    }
-                                    querying.lock().await.remove(query);
-                                    Ok(())
-                                })
-                                .await;
+                                debug!(
+                                    "Prefetch domain {} {}, elapsed {:?}",
+                                    name,
+                                    typ,
+                                    now.elapsed()
+                                );
+                                querying.lock().await.remove(&query);
+                            });
                         }
                     }
                 }
@@ -247,67 +197,6 @@ impl DnsCacheMiddleware {
             });
         }
     }
-
-    async fn bg_fetch(
-        &self,
-        ctx: &mut DnsContext,
-        req: &DnsRequest,
-        cached_res: Option<DnsResponse>,
-    ) -> Result<
-        impl Future<Output = Result<(BackgroundQueryTask, Result<DnsResponse, DnsError>), JoinError>>,
-        DnsError,
-    > {
-        let client = self.client.read().await.clone().ok_or_else(|| {
-            DnsError::from(ResolveErrorKind::Message("get client for caching failed."))
-        })?;
-
-        let bg_task = BackgroundQueryTask::new(ctx, req, client);
-
-        let cache = self.cache.clone();
-
-        let prefetch_notify = self.prefetch_notify.read().await.clone();
-
-        Ok(bg_task.spawn().and_then(|(task, res)| async move {
-            let ctx = &task.ctx;
-            let req = &task.req;
-            let res = match res {
-                Ok(lookup) => {
-                    if !ctx.no_cache {
-                        let query = req.query().original().to_owned();
-                        let server_group_name = ctx.server_group_name();
-
-                        cache
-                            .insert_records(
-                                query,
-                                lookup.records().iter().cloned(),
-                                Instant::now(),
-                                server_group_name,
-                            )
-                            .await;
-
-                        if let (Some(n), Some(ttl)) = (prefetch_notify, lookup.min_ttl()) {
-                            n.notify_after(Duration::from_secs(ttl as u64)).await;
-                        }
-                    }
-                    Ok(lookup)
-                }
-                Err(err) => {
-                    // try to return expired result.
-                    if ctx.cfg().serve_expired() {
-                        if let Some(lookup) = cached_res {
-                            Ok(lookup)
-                        } else {
-                            Err(err)
-                        }
-                    } else {
-                        Err(err)
-                    }
-                }
-            };
-
-            Ok((task, res))
-        }))
-    }
 }
 
 #[async_trait::async_trait]
@@ -323,46 +212,77 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
             return next.run(ctx, req).await;
         }
 
-        // try create client for fetching result.
-        {
-            let client = self.client.read().await;
-            if client.is_none() {
-                drop(client);
-                let mut client = self.client.write().await;
-                *client.deref_mut() = Some(Arc::new(DnsMiddlewareHost::from(&next)));
-                drop(client);
-
-                if ctx.cfg().prefetch_domain() {
-                    self.start_prefetching().await;
-                }
-            }
-        }
-
         let query = req.query().original().to_owned();
 
-        let cached_res = self.cache.get(&query, Instant::now()).await;
+        let cached_res = if ctx.server_opts.is_background {
+            None
+        } else {
+            let cached_res = self.cache.get(&query, Instant::now()).await;
 
-        let bg_task = {
-            let cached_res = cached_res.as_ref().and_then(|c| c.1.clone().ok());
-            self.bg_fetch(ctx, req, cached_res).await
+            if let Some((outdate, res)) = cached_res.as_ref() {
+                match outdate {
+                    OutOfDate::No => {
+                        let name_server_group = ctx.server_group_name();
+                        // check if it's the same nameserver group.
+                        if matches!(res, Ok(r) if r.name_server_group() == Some(name_server_group))
+                        {
+                            debug!("name: {} using caching", query.name());
+                            ctx.source = LookupFrom::Cache;
+                            return res.clone();
+                        }
+                    }
+                    OutOfDate::Yes => {
+                        if self.cfg.serve_expired() {
+                            if let Ok(res) = res {
+                                if matches!(res.max_ttl(), Some(ttl) if ttl < self.cfg.serve_expired_ttl() as u32 )
+                                {
+                                    let mut res = res.clone();
+                                    res.set_max_ttl(self.cfg.serve_expired_reply_ttl() as u32);
+                                    return Ok(res);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            cached_res
         };
 
-        if let Some((OutOfDate::No, res)) = cached_res.as_ref() {
-            let name_server_group = ctx.server_group_name();
-            // check if it's the same nameserver group.
-            if matches!(res, Ok(r) if r.name_server_group() == Some(name_server_group)) {
-                debug!("name: {} using caching", query.name());
-                ctx.source = LookupFrom::Cache;
-                return res.clone();
-            }
-        }
+        let res = next.run(ctx, req).await;
 
-        match bg_task?.await {
-            Ok((task, res)) => {
-                *ctx = task.ctx;
-                res
+        match res {
+            Ok(lookup) => {
+                if !ctx.no_cache {
+                    let query = req.query().original().to_owned();
+                    let server_group_name = ctx.server_group_name();
+
+                    self.cache
+                        .insert_records(
+                            query,
+                            lookup.records().iter().cloned(),
+                            Instant::now(),
+                            server_group_name,
+                        )
+                        .await;
+
+                    if let Some(ttl) = lookup.min_ttl() {
+                        self.prefetch_notify
+                            .notify_after(Duration::from_secs(ttl as u64))
+                            .await;
+                    }
+                }
+                Ok(lookup)
             }
-            Err(err) => Err(DnsError::from(ResolveErrorKind::Msg(err.to_string()))),
+            Err(err) => {
+                // try to return expired result.
+                if ctx.cfg().serve_expired() {
+                    if let Some((_, Ok(res))) = cached_res {
+                        return Ok(res);
+                    }
+                }
+                Err(err)
+            }
         }
     }
 }
@@ -613,11 +533,11 @@ impl DnsCache {
 
                 Some((OutOfDate::No, result))
             } else {
-                let negative_ttl = value.valid_until - now;
+                let negative_ttl = now - value.valid_until;
                 if negative_ttl < self.ttl.negative_max {
                     let result = value.lookup.clone();
                     if let Ok(ref mut lookup) = value.lookup {
-                        lookup.set_new_ttl(self.ttl.negative_min.as_secs() as u32)
+                        lookup.set_new_ttl(negative_ttl.as_secs() as u32)
                     }
                     Some((OutOfDate::Yes, result))
                 } else {

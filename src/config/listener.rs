@@ -173,15 +173,15 @@ pub enum ListenerAddress {
     V6(Ipv6Addr),
 }
 
-impl ToString for ListenerAddress {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ListenerAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ListenerAddress::*;
 
         match self {
-            Localhost => "localhost".to_string(),
-            All => "*".to_string(),
-            V4(ip) => ip.to_string(),
-            V6(ip) => format!("[{ip}]"),
+            Localhost => write!(f, "localhost"),
+            All => write!(f, "*"),
+            V4(ip) => write!(f, "{ip}"),
+            V6(ip) => write!(f, "[{ip}]"),
         }
     }
 }

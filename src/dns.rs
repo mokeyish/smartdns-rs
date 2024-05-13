@@ -30,7 +30,6 @@ pub struct DnsContext {
     pub fastest_speed: Duration,
     pub source: LookupFrom,
     pub no_cache: bool,
-    pub background: bool,
 }
 
 impl DnsContext {
@@ -49,7 +48,6 @@ impl DnsContext {
             fastest_speed: Default::default(),
             source: Default::default(),
             no_cache,
-            background: false,
         }
     }
 
@@ -113,11 +111,14 @@ impl Default for LookupFrom {
 
 mod serial_message {
 
-    use crate::libdns::proto::op::Message;
+    use crate::dns_error::LookupError;
+    use crate::libdns::proto::error::ProtoError;
     use crate::libdns::Protocol;
+    use crate::{config::ServerOpts, libdns::proto::op::Message};
     use bytes::Bytes;
-    use hickory_proto::error::ProtoError;
-    use std::net::SocketAddr;
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
+    use super::{DnsRequest, DnsResponse};
 
     pub enum SerialMessage {
         Raw(Message, SocketAddr, Protocol),
@@ -148,6 +149,16 @@ mod serial_message {
                 SerialMessage::Raw(_, a, _) => *a,
                 SerialMessage::Bytes(_, a, _) => *a,
             }
+        }
+    }
+
+    impl From<Message> for SerialMessage {
+        fn from(message: Message) -> Self {
+            Self::raw(
+                message,
+                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 0)),
+                Protocol::Udp,
+            )
         }
     }
 
@@ -285,10 +296,13 @@ mod request {
         fn from(query: Query) -> Self {
             use std::net::{Ipv4Addr, SocketAddrV4};
 
+            let mut message = Message::new();
+            message.add_query(query.clone());
+
             Self {
                 id: rand::random(),
                 query: query.into(),
-                message: Arc::new(Message::default()),
+                message: Arc::new(message),
                 src: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)),
                 protocol: Protocol::Udp,
             }
@@ -316,11 +330,9 @@ mod request {
 
 mod response {
 
-    use hickory_proto::op;
-
     use crate::dns_client::MAX_TTL;
     use crate::libdns::proto::{
-        op::{Header, Message, Query},
+        op::{self, Header, Message, Query},
         rr::{RData, Record},
     };
     use crate::libdns::resolver::TtlClip as _;

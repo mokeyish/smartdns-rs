@@ -1,7 +1,9 @@
 use crate::dns::DnsResponse;
-use crate::libdns::proto::{error::ProtoError, op::ResponseCode};
+use crate::libdns::proto::{
+    error::{ProtoError, ProtoErrorKind},
+    op::ResponseCode,
+};
 use crate::libdns::resolver::error::{ResolveError, ResolveErrorKind};
-use hickory_proto::error::ProtoErrorKind;
 use std::{io, sync::Arc};
 use thiserror::Error;
 

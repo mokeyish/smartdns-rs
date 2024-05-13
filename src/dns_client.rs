@@ -457,7 +457,7 @@ impl NameServerFactory {
         let key = format!(
             "{}: {}{:?}#{}@{}",
             url.proto(),
-            url.to_string(),
+            **url,
             proxy.as_ref().map(|s| s.to_string()),
             so_mark.unwrap_or_default(),
             device.as_deref().unwrap_or_default(),

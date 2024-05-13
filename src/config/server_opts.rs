@@ -41,6 +41,9 @@ pub struct ServerOpts {
     /// do not serve expired
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_serve_expired: Option<bool>,
+
+    /// Indicates whether the query task is a background task.
+    pub is_background: bool,
 }
 
 impl ServerOpts {
@@ -116,6 +119,7 @@ impl ServerOpts {
             no_dualstack_selection,
             force_aaaa_soa,
             no_serve_expired,
+            is_background: _,
         } = other;
 
         if self.group.is_none() {

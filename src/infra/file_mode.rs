@@ -53,9 +53,9 @@ impl Debug for FileMode {
     }
 }
 
-impl ToString for FileMode {
-    fn to_string(&self) -> String {
-        format!("{:o}", self.0)
+impl std::fmt::Display for FileMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:o}", self.0)
     }
 }
 
