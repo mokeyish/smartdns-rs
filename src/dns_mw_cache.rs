@@ -525,11 +525,16 @@ impl DnsCache {
         let mut should_pop = false;
         let lookup = cache.get_mut(query).and_then(|value| {
             if value.is_current(now) {
-                let mut result = value.lookup.clone();
-
-                if let Err(ref mut err) = result {
-                    Self::nx_error_with_ttl(err, value.ttl(now));
-                }
+                let result = match value.lookup.clone() {
+                    Ok(mut res) => {
+                        res.set_max_ttl(value.ttl(now).as_secs() as u32);
+                        Ok(res)
+                    }
+                    Err(mut err) => {
+                        Self::nx_error_with_ttl(&mut err, value.ttl(now));
+                        Err(err)
+                    }
+                };
 
                 Some((OutOfDate::No, result))
             } else {
