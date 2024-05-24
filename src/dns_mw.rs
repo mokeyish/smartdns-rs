@@ -1,14 +1,13 @@
 use std::{borrow::Borrow, sync::Arc};
 
 use crate::libdns::proto::{
-    error::ProtoErrorKind,
-    op::{Query, ResponseCode},
-    rr::{rdata::SOA, IntoName, Record, RecordType},
+    op::Query,
+    rr::{IntoName, RecordType},
 };
 
 use crate::{
     config::ServerOpts,
-    dns::{DefaultSOA, DnsContext, DnsError, DnsRequest, DnsResponse},
+    dns::{DnsContext, DnsError, DnsRequest, DnsResponse},
     dns_conf::RuntimeConfig,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
@@ -78,19 +77,10 @@ impl MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, DnsError> for
         ctx: &mut DnsContext,
         req: &DnsRequest,
     ) -> Result<DnsResponse, DnsError> {
-        let soa = Record::from_rdata(
-            req.query().name().to_owned().into(),
+        Err(DnsError::no_records_found(
+            req.query().original().to_owned(),
             ctx.cfg().rr_ttl().unwrap_or_default() as u32,
-            SOA::default_soa(),
-        );
-        Err(ProtoErrorKind::NoRecordsFound {
-            query: req.query().original().to_owned().into(),
-            soa: Some(Box::new(soa)),
-            negative_ttl: None,
-            response_code: ResponseCode::ServFail,
-            trusted: true,
-        }
-        .into())
+        ))
     }
 }
 
@@ -100,7 +90,7 @@ pub use tests::*;
 #[cfg(test)]
 mod tests {
 
-    use crate::libdns::proto::rr::RData;
+    use crate::libdns::proto::rr::{RData, Record};
     use std::{
         collections::HashMap,
         fmt::Debug,
