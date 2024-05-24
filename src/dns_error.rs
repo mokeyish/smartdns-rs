@@ -1,7 +1,8 @@
-use crate::dns::DnsResponse;
+use crate::dns::{DefaultSOA as _, DnsResponse};
 use crate::libdns::proto::{
     error::{ProtoError, ProtoErrorKind},
-    op::ResponseCode,
+    op::{Query, ResponseCode},
+    rr::{rdata::SOA, Record},
 };
 use crate::libdns::resolver::error::{ResolveError, ResolveErrorKind};
 use std::{io, sync::Arc};
@@ -60,6 +61,19 @@ impl LookupError {
             }
         }
         None
+    }
+
+    pub fn no_records_found(query: Query, ttl: u32) -> LookupError {
+        let soa = Record::from_rdata(query.name().to_owned(), ttl, SOA::default_soa());
+
+        ProtoErrorKind::NoRecordsFound {
+            query: query.into(),
+            soa: Some(Box::new(soa)),
+            negative_ttl: None,
+            response_code: ResponseCode::ServFail,
+            trusted: true,
+        }
+        .into()
     }
 }
 

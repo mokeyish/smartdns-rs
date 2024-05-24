@@ -62,6 +62,8 @@ Please refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md
 
 ## Installing
 
+*Nightly builds can be found [here](https://github.com/mokeyish/smartdns-rs/actions/workflows/build.yml).*
+
 - MacOS
 
   If you have installed [brew](https://brew.sh/), you can directly use the following command to install.

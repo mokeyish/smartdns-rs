@@ -442,11 +442,14 @@ mod response {
         }
 
         pub fn ip_addrs(&self) -> Vec<IpAddr> {
+            self.ip_addrs_iter().collect()
+        }
+
+        pub fn ip_addrs_iter(&self) -> impl Iterator<Item = IpAddr> + '_ {
             self.message()
                 .answers()
                 .iter()
                 .flat_map(|r| r.data().and_then(|d| d.ip_addr()))
-                .collect()
         }
 
         pub fn set_valid_until_max(&mut self) {
