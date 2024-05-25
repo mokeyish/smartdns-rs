@@ -92,24 +92,24 @@ impl NomParser for NameServerInfo {
         if let Some(options) = options {
             for (k, v) in options {
                 match k.to_lowercase().as_str() {
-                    "exclude-default-group" => nameserver.exclude_default_group = true,
+                    "e" | "exclude-default-group" => nameserver.exclude_default_group = true,
                     "blacklist-ip" => nameserver.blacklist_ip = true,
                     "whitelist-ip" => nameserver.whitelist_ip = true,
                     "check-edns" => nameserver.check_edns = true,
-                    "bootstrap-dns" => nameserver.bootstrap_dns = true,
+                    "b" | "bootstrap-dns" => nameserver.bootstrap_dns = true,
                     "set-mark" => match v {
                         Some(m) => nameserver.so_mark = u32::from_str_or_hex(m).ok(),
                         None => {
                             log::warn!("expect mark")
                         }
                     },
-                    "group" => match v {
+                    "g" | "group" => match v {
                         Some(g) => nameserver.group.push(g.to_string()),
                         None => {
                             log::warn!("expect group name")
                         }
                     },
-                    "proxy" => {
+                    "p" | "proxy" => {
                         nameserver.proxy = v.map(|p| p.to_string());
                     }
                     "interface" => {
@@ -133,7 +133,7 @@ impl NomParser for NameServerInfo {
                             log::warn!("expect host-name")
                         }
                     },
-                    "no-check-certificate" => {
+                    "k" | "no-check-certificate" => {
                         nameserver.server.set_ssl_verify(false);
                     }
                     _ => {
@@ -276,7 +276,7 @@ mod tests {
     fn test_server_https() {
         assert_eq!(
             NameServerInfo::parse(
-                "server-https https://223.5.5.5/dns-query -group bootstrap -exclude-default-group"
+                "server-https https://223.5.5.5/dns-query -g bootstrap -exclude-default-group"
             ),
             Ok((
                 "",
@@ -302,7 +302,7 @@ mod tests {
     fn test_server_https_1() {
         assert_eq!(
             NameServerInfo::parse(
-                "server https://dns.alidns.com/dns-query -group alidns -exclude-default-group # -proxy proxy"
+                "server https://dns.alidns.com/dns-query -group alidns -e # -proxy proxy"
             ),
             Ok((
                 " # -proxy proxy",
