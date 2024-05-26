@@ -2,6 +2,7 @@
 
 use std::fmt::Debug;
 
+use std::net::IpAddr;
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use crate::dns_error::LookupError;
@@ -535,6 +536,7 @@ mod response {
 pub type DnsRequest = request::DnsRequest;
 pub type DnsResponse = response::DnsResponse;
 pub type DnsError = LookupError;
+use ipnet::IpAdd;
 pub use serial_message::SerialMessage;
 
 #[derive(Debug, Clone, Copy, Default)]

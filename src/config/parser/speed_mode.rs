@@ -1,14 +1,20 @@
 use super::*;
 
-impl NomParser for SpeedCheckModeList {
+impl NomParser for Option<SpeedCheckModeList> {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
-            value(Default::default(), tag_no_case("none")),
-            map(
-                separated_list1(delimited(space0, char(','), space0), NomParser::parse),
-                SpeedCheckModeList,
-            ),
+            value(None, tag_no_case("none")),
+            map(SpeedCheckModeList::parse, Some),
         ))(input)
+    }
+}
+
+impl NomParser for SpeedCheckModeList {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        map(
+            separated_list1(delimited(space0, char(','), space0), NomParser::parse),
+            SpeedCheckModeList,
+        )(input)
     }
 }
 
@@ -69,7 +75,7 @@ mod tests {
     #[test]
     fn test_speed_mode_none() {
         assert_eq!(
-            SpeedCheckModeList::parse("none"),
+            Option::<SpeedCheckModeList>::parse("none"),
             Ok(("", Default::default()))
         );
     }

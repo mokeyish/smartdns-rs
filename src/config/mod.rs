@@ -130,7 +130,7 @@ pub struct Config {
     ///   speed-check-mode tcp:443,ping
     ///   speed-check-mode none
     /// ```
-    pub speed_check_mode: SpeedCheckModeList,
+    pub speed_check_mode: Option<SpeedCheckModeList>,
 
     /// force AAAA query return SOA
     ///

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::{borrow::Borrow, net::IpAddr, time::Duration};
@@ -7,7 +6,6 @@ use std::{borrow::Borrow, net::IpAddr, time::Duration};
 use crate::dns_client::{LookupOptions, NameServer};
 
 use crate::infra::ipset::IpSet;
-use crate::infra::ping::PingAddr;
 use crate::{
     config::{ResponseMode, SpeedCheckMode, SpeedCheckModeList},
     dns::*,
@@ -99,10 +97,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     response_strategy: rule
                         .get(|n| n.response_mode)
                         .unwrap_or_else(|| cfg.response_mode()),
-                    speed_check_mode: if rule.speed_check_mode.is_empty() {
-                        cfg.speed_check_mode().clone()
-                    } else {
-                        rule.speed_check_mode.clone()
+                    speed_check_mode: match rule.speed_check_mode.as_ref() {
+                        Some(mode) => Some(mode.clone()),
+                        None => cfg.speed_check_mode().cloned(),
                     },
                     no_speed_check: ctx.server_opts.no_speed_check(),
                     ignore_ip: cfg.ignore_ip().clone(),
@@ -112,7 +109,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                 },
                 None => LookupIpOptions {
                     response_strategy: cfg.response_mode(),
-                    speed_check_mode: cfg.speed_check_mode().clone(),
+                    speed_check_mode: cfg.speed_check_mode().cloned(),
                     no_speed_check: ctx.server_opts.no_speed_check(),
                     ignore_ip: cfg.ignore_ip().clone(),
                     blacklist_ip: cfg.blacklist_ip().clone(),
@@ -135,7 +132,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
 struct LookupIpOptions {
     response_strategy: ResponseMode,
-    speed_check_mode: SpeedCheckModeList,
+    speed_check_mode: Option<SpeedCheckModeList>,
     no_speed_check: bool,
     ignore_ip: Arc<IpSet>,
     whitelist_ip: Arc<IpSet>,
@@ -170,6 +167,7 @@ async fn lookup_ip(
 ) -> Result<DnsResponse, LookupError> {
     use crate::third_ext::FutureJoinAllExt;
     use futures_util::future::{select, select_all, Either};
+    use ResponseMode::*;
 
     assert!(options.record_type.is_ip_addr());
 
@@ -182,23 +180,22 @@ async fn lookup_ip(
         return Err(ProtoErrorKind::NoConnections.into());
     }
 
-    use ResponseMode::*;
-
     // ignore
-    let response_strategy = if options.no_speed_check
-        || options.speed_check_mode.is_empty()
-        || options
-            .speed_check_mode
-            .iter()
-            .any(|m| *m == SpeedCheckMode::None)
-    {
+    let response_strategy = if options.no_speed_check || options.speed_check_mode.is_none() {
         FastestResponse
     } else {
         options.response_strategy
     };
 
+    let speed_check_mode = options
+        .speed_check_mode
+        .as_ref()
+        .map(|m| m.as_slice())
+        .unwrap_or_default();
+
     let mut ok_tasks = vec![];
     let mut err_tasks = vec![];
+
     let selected_ip = match response_strategy {
         FirstPing => {
             let mut tasks = tasks;
@@ -253,7 +250,7 @@ async fn lookup_ip(
                                 multi_mode_ping_fastest(
                                     name.clone(),
                                     ip_addrs,
-                                    options.speed_check_mode.to_vec(),
+                                    speed_check_mode.to_vec(),
                                 )
                                 .boxed(),
                             );
@@ -311,12 +308,9 @@ async fn lookup_ip(
                 0 => None,
                 1 => ip_addrs.pop(),
                 _ => {
-                    let fastest_ip = multi_mode_ping_fastest(
-                        name.clone(),
-                        ip_addrs,
-                        options.speed_check_mode.to_vec(),
-                    )
-                    .await;
+                    let fastest_ip =
+                        multi_mode_ping_fastest(name.clone(), ip_addrs, speed_check_mode.to_vec())
+                            .await;
 
                     fastest_ip.or_else(|| {
                         ip_addrs_map
@@ -351,7 +345,13 @@ async fn lookup_ip(
         unreachable!()
     }
 
-    Ok(ok_tasks.into_iter().next().unwrap()) // There is definitely one.
+    match ok_tasks.into_iter().next() {
+        Some(lookup) => Ok(lookup),
+        None => match err_tasks.into_iter().next() {
+            Some(err) => Err(err),
+            None => unreachable!(),
+        },
+    }
 }
 
 async fn multi_mode_ping_fastest(
@@ -360,49 +360,17 @@ async fn multi_mode_ping_fastest(
     modes: Vec<SpeedCheckMode>,
 ) -> Option<IpAddr> {
     use crate::infra::ping::{ping_fastest, PingOptions};
-    let duaration = Duration::from_millis(200);
+    let duration = Duration::from_millis(200);
     let ping_ops = PingOptions::default().with_timeout_secs(2);
 
     let mut fastest_ip = None;
 
     for mode in &modes {
-        let dests = match mode {
-            SpeedCheckMode::None => continue,
-            SpeedCheckMode::Ping => {
-                debug!("Speed test {} ping {:?}", name, ip_addrs);
-                ip_addrs
-                    .iter()
-                    .map(|ip| PingAddr::Icmp(*ip))
-                    .collect::<Vec<_>>()
-            }
-            SpeedCheckMode::Tcp(port) => {
-                debug!("Speed test {} TCP ping {:?} port {}", name, ip_addrs, port);
-                ip_addrs
-                    .iter()
-                    .map(|ip| PingAddr::Tcp(SocketAddr::new(*ip, *port)))
-                    .collect::<Vec<_>>()
-            }
-            SpeedCheckMode::Http(port) => {
-                debug!("Speed test {} HTTP ping {:?} port {}", name, ip_addrs, port);
-                ip_addrs
-                    .iter()
-                    .map(|ip| PingAddr::Http(SocketAddr::new(*ip, *port)))
-                    .collect::<Vec<_>>()
-            }
-            SpeedCheckMode::Https(port) => {
-                debug!(
-                    "Speed test {} HTTPS ping {:?} port {}",
-                    name, ip_addrs, port
-                );
-                ip_addrs
-                    .iter()
-                    .map(|ip| PingAddr::Https(SocketAddr::new(*ip, *port)))
-                    .collect::<Vec<_>>()
-            }
-        };
+        debug!("Speed test {} {:?} ping {:?}", name, mode, ip_addrs);
+        let dests = mode.to_ping_addrs(&ip_addrs);
 
         let ping_task = ping_fastest(dests, ping_ops).boxed();
-        let timeout_task = sleep(duaration).boxed();
+        let timeout_task = sleep(duration).boxed();
         match futures_util::future::select(ping_task, timeout_task).await {
             futures::future::Either::Left((ping_res, _)) => {
                 match ping_res {
