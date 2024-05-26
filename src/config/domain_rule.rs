@@ -11,7 +11,7 @@ pub struct DomainRule {
     pub cname: Option<CName>,
 
     /// The mode of speed checking.
-    pub speed_check_mode: SpeedCheckModeList,
+    pub speed_check_mode: Option<SpeedCheckModeList>,
 
     pub dualstack_ip_selection: Option<bool>,
 
@@ -36,7 +36,7 @@ impl std::ops::AddAssign for DomainRule {
             self.address = rhs.address;
         }
 
-        if !rhs.speed_check_mode.is_empty() {
+        if rhs.speed_check_mode.is_some() {
             self.speed_check_mode = rhs.speed_check_mode;
         }
         if rhs.dualstack_ip_selection.is_some() {

@@ -12,7 +12,9 @@ impl NomParser for DomainRule {
                     SpeedCheckModeList::parse,
                 ),
                 |v| {
-                    rule.speed_check_mode.extend(v.0);
+                    rule.speed_check_mode
+                        .get_or_insert_with(|| SpeedCheckModeList(vec![]))
+                        .extend(v.0);
                 },
             ),
             map(
@@ -62,7 +64,7 @@ mod tests {
             Ok((
                 "",
                 DomainRule {
-                    speed_check_mode: vec![SpeedCheckMode::Ping].into(),
+                    speed_check_mode: Some(vec![SpeedCheckMode::Ping].into()),
                     ..Default::default()
                 }
             ))
@@ -72,7 +74,9 @@ mod tests {
             Ok((
                 "",
                 DomainRule {
-                    speed_check_mode: vec![SpeedCheckMode::Ping, SpeedCheckMode::Tcp(53)].into(),
+                    speed_check_mode: Some(
+                        vec![SpeedCheckMode::Ping, SpeedCheckMode::Tcp(53)].into()
+                    ),
                     ..Default::default()
                 }
             ))

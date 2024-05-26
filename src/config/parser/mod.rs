@@ -128,7 +128,7 @@ pub enum OneConfig {
     RrTtlMin(u64),
     RrTtlMax(u64),
     RrTtlReplyMax(u64),
-    SpeedMode(SpeedCheckModeList),
+    SpeedMode(Option<SpeedCheckModeList>),
     TcpIdleTime(u64),
     WhitelistIp(IpNet),
     User(String),

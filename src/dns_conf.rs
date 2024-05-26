@@ -289,8 +289,8 @@ impl RuntimeConfig {
 
     /// speed check mode
     #[inline]
-    pub fn speed_check_mode(&self) -> &SpeedCheckModeList {
-        &self.speed_check_mode
+    pub fn speed_check_mode(&self) -> Option<&SpeedCheckModeList> {
+        self.speed_check_mode.as_ref()
     }
 
     /// force AAAA query return SOA
@@ -758,7 +758,7 @@ impl RuntimeConfigBuilder {
                 ServerName(v) => self.server_name = Some(v),
                 NumWorkers(v) => self.num_workers = Some(v),
                 Domain(v) => self.domain = Some(v),
-                SpeedMode(v) => self.speed_check_mode.extend(v.0),
+                SpeedMode(v) => self.speed_check_mode = v,
                 ServeExpiredTtl(v) => self.cache.serve_expired_ttl = Some(v),
                 ServeExpiredReplyTtl(v) => self.cache.serve_expired_reply_ttl = Some(v),
                 CacheSize(v) => self.cache.size = Some(v),
@@ -1227,7 +1227,7 @@ mod tests {
         );
         assert_eq!(
             domain_rule.speed_check_mode,
-            vec![SpeedCheckMode::Ping].into()
+            Some(vec![SpeedCheckMode::Ping].into())
         );
         assert_eq!(domain_rule.nameserver, Some("test".to_string()));
         assert_eq!(domain_rule.dualstack_ip_selection, Some(true));
@@ -1248,7 +1248,7 @@ mod tests {
         );
         assert_eq!(
             domain_rule.speed_check_mode,
-            vec![SpeedCheckMode::Ping].into()
+            Some(vec![SpeedCheckMode::Ping].into())
         );
         assert_eq!(domain_rule.nameserver, Some("test".to_string()));
         assert_eq!(domain_rule.dualstack_ip_selection, Some(true));
@@ -1266,7 +1266,7 @@ mod tests {
         assert_eq!(domain_rule.address, Some(DomainAddress::SOA));
         assert_eq!(
             domain_rule.speed_check_mode,
-            vec![SpeedCheckMode::Ping].into()
+            Some(vec![SpeedCheckMode::Ping].into())
         );
         assert_eq!(domain_rule.nameserver, Some("test".to_string()));
         assert_eq!(domain_rule.dualstack_ip_selection, Some(true));
@@ -1287,11 +1287,14 @@ mod tests {
         let mut cfg = RuntimeConfig::builder();
         cfg.config("speed-check-mode ping,tcp:123");
 
-        assert_eq!(cfg.speed_check_mode.len(), 2);
+        assert_eq!(cfg.speed_check_mode.as_ref().unwrap().len(), 2);
 
-        assert_eq!(cfg.speed_check_mode.first().unwrap(), &SpeedCheckMode::Ping);
         assert_eq!(
-            cfg.speed_check_mode.get(1).unwrap(),
+            cfg.speed_check_mode.as_ref().unwrap().first().unwrap(),
+            &SpeedCheckMode::Ping
+        );
+        assert_eq!(
+            cfg.speed_check_mode.as_ref().unwrap().get(1).unwrap(),
             &SpeedCheckMode::Tcp(123)
         );
     }
@@ -1301,14 +1304,14 @@ mod tests {
         let mut cfg = RuntimeConfig::builder();
         cfg.config("speed-check-mode http,https");
 
-        assert_eq!(cfg.speed_check_mode.len(), 2);
+        assert_eq!(cfg.speed_check_mode.as_ref().unwrap().len(), 2);
 
         assert_eq!(
-            cfg.speed_check_mode.first().unwrap(),
+            cfg.speed_check_mode.as_ref().unwrap().first().unwrap(),
             &SpeedCheckMode::Http(80)
         );
         assert_eq!(
-            cfg.speed_check_mode.get(1).unwrap(),
+            cfg.speed_check_mode.as_ref().unwrap().get(1).unwrap(),
             &SpeedCheckMode::Https(443)
         );
     }
