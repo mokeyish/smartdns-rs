@@ -170,7 +170,7 @@ fn read_lease_file<P: AsRef<Path>>(
                 }
             }
             client_info.host.set_fqdn(true);
-            map.insert(client_info.host.clone(), client_info);
+            map.insert(client_info.host.clone().into(), client_info);
         }
     }
 

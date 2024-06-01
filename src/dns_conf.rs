@@ -560,7 +560,7 @@ impl RuntimeConfigBuilder {
             cfg.cnames.dedup_by(|a, b| a.domain == b.domain);
         }
 
-        let mut domain_sets: HashMap<String, HashSet<Name>> = HashMap::new();
+        let mut domain_sets: HashMap<String, HashSet<WildcardName>> = HashMap::new();
 
         for (set_name, providers) in &cfg.domain_set_providers {
             let set = domain_sets.entry(set_name.to_string()).or_default();
@@ -1177,22 +1177,87 @@ mod tests {
 
     #[test]
     fn test_config_address_whitelist_mode() {
-        use std::str::FromStr;
         let cfg = RuntimeConfig::builder()
             .with("address /google.com/-")
-            .with("address /*/#")
+            .with("address /./#")
             .build();
 
         assert_eq!(
-            cfg.find_domain_rule(&Name::from_str("cloudflare.com").unwrap())
+            cfg.find_domain_rule(&"cloudflare.com".parse().unwrap())
                 .and_then(|r| r.get(|n| n.address)),
             Some(DomainAddress::SOA)
         );
 
         assert_eq!(
-            cfg.find_domain_rule(&Name::from_str("google.com").unwrap())
+            cfg.find_domain_rule(&"google.com".parse().unwrap())
                 .and_then(|r| r.get(|n| n.address)),
             Some(DomainAddress::IGN)
+        );
+    }
+
+    #[test]
+    fn test_config_address_wildcard_1() {
+        let cfg = RuntimeConfig::builder()
+            .with("address /-.example.com/#")
+            .build();
+        assert_eq!(
+            cfg.find_domain_rule(&"example.com".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            Some(DomainAddress::SOA)
+        );
+
+        assert_eq!(
+            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_config_address_wildcard_2() {
+        let cfg = RuntimeConfig::builder().with("address /*/#").build();
+        assert_eq!(
+            cfg.find_domain_rule(&"localhost".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            Some(DomainAddress::SOA)
+        );
+
+        assert_eq!(
+            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            None
+        );
+    }
+
+    #[test]
+    fn test_config_address_wildcard_3() {
+        let cfg = RuntimeConfig::builder().with("address /+/#").build();
+        assert_eq!(
+            cfg.find_domain_rule(&"localhost".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            Some(DomainAddress::SOA)
+        );
+
+        assert_eq!(
+            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            Some(DomainAddress::SOA)
+        );
+    }
+
+    #[test]
+    fn test_config_address_wildcard_4() {
+        let cfg = RuntimeConfig::builder().with("address /./#").build();
+        assert_eq!(
+            cfg.find_domain_rule(&"localhost".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            Some(DomainAddress::SOA)
+        );
+
+        assert_eq!(
+            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+                .and_then(|r| r.get(|n| n.address)),
+            Some(DomainAddress::SOA)
         );
     }
 

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
-use crate::libdns::proto::rr::Name;
+use crate::config::WildcardName;
 
 use crate::{
     collections::DomainMap,
@@ -24,7 +24,7 @@ impl DomainRuleMap {
         cnames: &CNameRules,
         nftsets: &Vec<ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>>,
     ) -> Self {
-        let mut name_rule_map = HashMap::<Name, DomainRule>::new();
+        let mut name_rule_map = HashMap::<WildcardName, DomainRule>::new();
 
         // append domain_rules
 
@@ -143,13 +143,13 @@ impl Deref for DomainRuleMap {
 
 #[derive(Debug)]
 pub struct DomainRuleTreeNode {
-    name: Name,                            // www.example.com
+    name: WildcardName,                    // www.example.com
     rule: Arc<DomainRule>,                 // www.example.com
     zone: Option<Arc<DomainRuleTreeNode>>, // example.com
 }
 
 impl DomainRuleTreeNode {
-    pub fn name(&self) -> &Name {
+    pub fn name(&self) -> &WildcardName {
         &self.name
     }
 
@@ -200,7 +200,7 @@ impl From<&Name> for crate::collections::TrieKey<Name> {
 mod tests {
 
     use crate::config::{AddressRule, DomainAddress};
-    use std::{net::Ipv4Addr, ptr, str::FromStr};
+    use std::{net::Ipv4Addr, ptr};
 
     use super::*;
 
@@ -210,15 +210,15 @@ mod tests {
             &Default::default(),
             &vec![
                 AddressRule {
-                    domain: Name::from_str("a.b.c.www.example.com").unwrap().into(),
+                    domain: "a.b.c.www.example.com".parse().unwrap(),
                     address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
                 AddressRule {
-                    domain: Name::from_str("www.example.com").unwrap().into(),
+                    domain: "www.example.com".parse().unwrap(),
                     address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
                 AddressRule {
-                    domain: Name::from_str("example.com").unwrap().into(),
+                    domain: "example.com".parse().unwrap(),
                     address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
             ],
@@ -228,18 +228,18 @@ mod tests {
             &Default::default(),
         );
 
-        let rule1 = map.find(&Name::from_str("z.a.b.c.www.example.com").unwrap());
+        let rule1 = map.find(&"z.a.b.c.www.example.com".parse().unwrap());
         assert!(rule1.is_some());
         assert_eq!(
             rule1.map(|o| o.name()),
-            Some(&Name::from_str("a.b.c.www.example.com").unwrap())
+            Some(&"a.b.c.www.example.com".parse().unwrap())
         );
 
-        let rule2 = map.find(&Name::from_str("www.example.com").unwrap());
+        let rule2 = map.find(&"www.example.com".parse().unwrap());
 
         assert_eq!(
             rule2.map(|o| o.name()),
-            Some(&Name::from_str("www.example.com").unwrap())
+            Some(&"www.example.com".parse().unwrap())
         );
 
         assert!(ptr::eq(

@@ -1,9 +1,10 @@
-use crate::libdns::proto::rr::Name;
 use enum_dispatch::enum_dispatch;
 use std::{collections::HashSet, path::PathBuf, str::FromStr};
 use url::Url;
 
 use anyhow::Result;
+
+use super::WildcardName;
 
 #[enum_dispatch(IDomainSetProvider)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,7 +17,7 @@ pub enum DomainSetProvider {
 pub trait IDomainSetProvider {
     fn name(&self) -> &str;
 
-    fn get_domain_set(&self) -> Result<HashSet<Name>>;
+    fn get_domain_set(&self) -> Result<HashSet<WildcardName>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +46,7 @@ impl IDomainSetProvider for DomainSetFileProvider {
         self.name.as_str()
     }
 
-    fn get_domain_set(&self) -> Result<HashSet<Name>> {
+    fn get_domain_set(&self) -> Result<HashSet<WildcardName>> {
         let mut domain_set = HashSet::new();
         let text = std::fs::read_to_string(&self.file)?;
         read_to_domain_set(&text, &mut domain_set);
@@ -58,7 +59,7 @@ impl IDomainSetProvider for DomainSetHttpProvider {
         self.name.as_str()
     }
 
-    fn get_domain_set(&self) -> Result<HashSet<Name>> {
+    fn get_domain_set(&self) -> Result<HashSet<WildcardName>> {
         use reqwest::blocking as http;
 
         let mut domain_set = HashSet::new();
@@ -70,7 +71,7 @@ impl IDomainSetProvider for DomainSetHttpProvider {
     }
 }
 
-fn read_to_domain_set(s: &str, domain_set: &mut HashSet<Name>) {
+fn read_to_domain_set(s: &str, domain_set: &mut HashSet<WildcardName>) {
     for line in s.lines() {
         let line = line.trim_start();
         if line.starts_with('#') {
@@ -78,7 +79,7 @@ fn read_to_domain_set(s: &str, domain_set: &mut HashSet<Name>) {
         }
         let mut parts = line.split(' ');
 
-        if let Some(n) = parts.next().and_then(|n| Name::from_str(n).ok()) {
+        if let Some(n) = parts.next().and_then(|n| WildcardName::from_str(n).ok()) {
             domain_set.insert(n);
         }
     }
