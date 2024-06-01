@@ -71,7 +71,7 @@ const DEFAULT_CONF: &str = include_str!("../etc/smartdns/smartdns.conf");
 
 /// Returns a version as specified in Cargo.toml
 pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+    concat!(env!("CARGO_PKG_VERSION"), " ", env!("BUILD_DATE"))
 }
 
 #[cfg(not(windows))]

@@ -52,5 +52,11 @@ fn main() -> io::Result<()> {
         "https://cdn.jsdelivr.net/gh/mullvad/windows-service-rs/src/shell_escape.rs",
         "src/service/windows/shell_escape.rs",
     );
+
+    let now = chrono::Utc::now();
+    println!(
+        "cargo:rustc-env=BUILD_DATE={}",
+        now.format("🕙 %a %b %d %T UTC %Y")
+    );
     Ok(())
 }

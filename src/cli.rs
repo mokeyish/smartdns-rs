@@ -12,7 +12,7 @@ type LogLevelDefault = InfoLevel;
 /// Smart-DNS.
 ///
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version=crate::version(), about, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
