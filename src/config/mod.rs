@@ -19,6 +19,7 @@ use serde::{self, Deserialize, Serialize};
 
 mod audit;
 mod cache;
+mod domain;
 mod domain_rule;
 mod domain_set;
 mod listener;
@@ -31,6 +32,7 @@ mod speed_mode;
 
 pub use audit::*;
 pub use cache::*;
+pub use domain::*;
 pub use domain_rule::*;
 pub use domain_set::*;
 pub use listener::*;
@@ -42,7 +44,7 @@ pub use speed_mode::*;
 
 use self::parser::NomParser;
 
-pub type DomainSets = HashMap<String, HashSet<Name>>;
+pub type DomainSets = HashMap<String, HashSet<WildcardName>>;
 pub type ForwardRules = Vec<ForwardRule>;
 pub type AddressRules = Vec<AddressRule>;
 pub type DomainRules = Vec<ConfigForDomain<DomainRule>>;
@@ -256,34 +258,6 @@ impl<T: Sized + parser::NomParser> std::ops::Deref for ConfigForDomain<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.config
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Domain {
-    Name(Name),
-    Set(String),
-}
-
-impl From<Name> for Domain {
-    #[inline]
-    fn from(v: Name) -> Self {
-        Self::Name(v)
-    }
-}
-
-impl std::fmt::Display for Domain {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Domain::Name(n) => write!(f, "{n}"),
-            Domain::Set(n) => write!(f, "domain-set:{n}"),
-        }
-    }
-}
-
-impl From<Domain> for String {
-    fn from(value: Domain) -> Self {
-        value.to_string()
     }
 }
 

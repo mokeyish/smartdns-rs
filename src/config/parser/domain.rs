@@ -7,6 +7,48 @@ impl NomParser for Name {
     }
 }
 
+impl NomParser for WildcardName {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        alt((
+            map(
+                preceded(tuple((char('*'), char('.'))), NomParser::parse),
+                WildcardName::Sub,
+            ),
+            map(
+                preceded(tuple((char('-'), char('.'))), NomParser::parse),
+                WildcardName::Full,
+            ),
+            map(
+                preceded(tuple((opt(char('+')), char('.'))), NomParser::parse),
+                WildcardName::Suffix,
+            ),
+            map(NomParser::parse, |name: Name| {
+                if name.is_wildcard() {
+                    WildcardName::Sub(name.base_name())
+                } else if name.is_root() {
+                    WildcardName::Suffix(name)
+                } else {
+                    WildcardName::Default(name)
+                }
+            }),
+            map(pair(char('+'), opt(char('.'))), |_| {
+                WildcardName::Suffix(Name::root())
+            }),
+        ))(input)
+    }
+}
+
+impl std::str::FromStr for WildcardName {
+    type Err = nom::Err<nom::error::Error<String>>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match NomParser::parse(s) {
+            Ok((_, v)) => Ok(v),
+            Err(e) => Err(e.to_owned()),
+        }
+    }
+}
+
 impl NomParser for Domain {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Domain> {
@@ -58,5 +100,15 @@ mod test {
     fn test3() {
         let (_, domain) = Domain::parse("domain-set:domain-block-list").unwrap();
         assert_eq!(domain, Domain::Set("domain-block-list".to_string()));
+    }
+
+    #[test]
+    fn test4() {
+        use std::str::FromStr;
+        let n = WildcardName::from_str(".").unwrap();
+        assert_eq!(n, WildcardName::Suffix(Name::root()));
+
+        let n = WildcardName::from_str("*").unwrap();
+        assert_eq!(n, WildcardName::Sub(Name::root()));
     }
 }

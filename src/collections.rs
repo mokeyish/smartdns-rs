@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::libdns::proto::rr::Name;
+use crate::{config::WildcardName, libdns::proto::rr::Name};
 
 #[derive(Debug)]
-pub struct DomainMap<T: Debug>(HashMap<Name, T>);
+pub struct DomainMap<T: Debug>(HashMap<WildcardName, T>);
 
 impl<T: Debug> DomainMap<T> {
     #[inline]
@@ -11,28 +11,61 @@ impl<T: Debug> DomainMap<T> {
         Self::default()
     }
 
-    pub fn find(&self, domain: &Name) -> Option<&T> {
-        let mut domain = domain.to_owned();
+    pub fn find(&self, name: &Name) -> Option<&T> {
+        if self.0.is_empty() {
+            return None;
+        }
+        let mut name = if name.is_wildcard() {
+            name.base_name()
+        } else {
+            name.to_owned()
+        };
 
+        let mut lvl = 0;
         loop {
-            if let Some(v) = self.0.get(&domain) {
-                return Some(v);
+            {
+                if lvl == 0 {
+                    let wildcard_name = WildcardName::Full(name);
+                    if let Some(v) = self.0.get(&wildcard_name) {
+                        return Some(v);
+                    }
+                    name = wildcard_name.into();
+                }
+
+                if lvl == 1 {
+                    let wildcard_name = WildcardName::Sub(name);
+                    if let Some(v) = self.0.get(&wildcard_name) {
+                        return Some(v);
+                    }
+                    name = wildcard_name.into();
+                }
+
+                if lvl >= 1 {
+                    let wildcard_name = WildcardName::Suffix(name);
+                    if let Some(v) = self.0.get(&wildcard_name) {
+                        return Some(v);
+                    }
+                    name = wildcard_name.into();
+                }
+
+                let wildcard_name = WildcardName::Default(name);
+                if let Some(v) = self.0.get(&wildcard_name) {
+                    return Some(v);
+                }
+                name = wildcard_name.into();
             }
 
-            if !domain.is_fqdn() {
-                domain.set_fqdn(true);
+            if !name.is_fqdn() {
+                name.set_fqdn(true);
                 continue;
             }
 
-            if domain.is_root() {
+            if name.is_root() {
                 break;
             }
 
-            if domain.is_wildcard() {
-                domain = domain.base_name();
-            } else {
-                domain = domain.into_wildcard();
-            }
+            name = name.base_name();
+            lvl += 1;
         }
 
         None
@@ -54,14 +87,15 @@ impl<T: Debug> DomainMap<T> {
     }
 
     #[inline]
-    pub fn insert(&mut self, mut domain: Name, value: T) -> Option<T> {
-        domain.set_fqdn(true);
-        self.0.insert(domain, value)
+    pub fn insert(&mut self, name: impl Into<WildcardName>, value: T) -> Option<T> {
+        let mut name = name.into();
+        name.set_fqdn(true);
+        self.0.insert(name, value)
     }
 
     #[inline]
-    pub fn remove(&mut self, domain: &Name) -> Option<T> {
-        self.0.remove(domain)
+    pub fn remove(&mut self, name: &WildcardName) -> Option<T> {
+        self.0.remove(name)
     }
 }
 
@@ -72,9 +106,9 @@ impl<T: Debug> Default for DomainMap<T> {
     }
 }
 
-impl<T: Debug> From<HashMap<Name, T>> for DomainMap<T> {
+impl<T: Debug> From<HashMap<WildcardName, T>> for DomainMap<T> {
     #[inline]
-    fn from(value: HashMap<Name, T>) -> Self {
+    fn from(value: HashMap<WildcardName, T>) -> Self {
         Self(value)
     }
 }
@@ -103,12 +137,12 @@ impl DomainSet {
         self.0.is_empty()
     }
 
-    pub fn insert(&mut self, domain: Name) -> bool {
+    pub fn insert(&mut self, domain: impl Into<WildcardName>) -> bool {
         self.0.insert(domain, ()).is_none()
     }
 
     #[inline]
-    pub fn remove(&mut self, domain: &Name) -> bool {
+    pub fn remove(&mut self, domain: &WildcardName) -> bool {
         self.0.remove(domain).is_some()
     }
 }
@@ -365,15 +399,14 @@ mod phf {
 mod tests {
 
     use super::*;
-    use std::str::FromStr;
 
     #[test]
     fn test_set_contains() {
         let mut set = DomainSet::new();
 
-        set.insert(Name::from_str("example.com").unwrap());
-        assert!(set.contains(&Name::from_str("example.com").unwrap()));
-        assert!(set.contains(&Name::from_str("www.example.com").unwrap()));
+        set.insert(WildcardName::Default("example.com".parse().unwrap()));
+        assert!(set.contains(&"example.com".parse().unwrap()));
+        assert!(set.contains(&"www.example.com".parse().unwrap()));
     }
 
     #[cfg(feature = "experimental-trie")]
