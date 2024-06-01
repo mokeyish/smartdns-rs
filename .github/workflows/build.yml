@@ -71,7 +71,7 @@ jobs:
       DIST_DIR: smartdns-${{ matrix.target }}
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Install Rust Toolchain Components
         uses: dtolnay/rust-toolchain@stable
@@ -79,23 +79,28 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - uses: extractions/setup-just@v2
+      - name: Install just
+        uses: extractions/setup-just@v2
 
-      - name: cargo install patch-crate
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Install cargo-edit
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-edit
+
+      - name: Install patch-crate
         uses: baptiste0928/cargo-install@v3
         with:
           crate: patch-crate
-          
-      - name: Init
-        run: just init
-        shell: bash
 
       - name: Build
-        uses: actions-rsx/cargo@v2
-        with:
-          use-cross: ${{ matrix.os == 'ubuntu-latest' }}
-          command: build
-          args: --release --target=${{ matrix.target }}
+        run: just build --release --target=${{ matrix.target }}
+        env:
+          USE_CROSS: ${{ matrix.os == 'ubuntu-latest' }}
 
       - name: Pre publish
         run: |

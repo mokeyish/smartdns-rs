@@ -28,7 +28,7 @@ jobs:
     runs-on: ${{matrix.os}}
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Install Rust Toolchain Components
         uses: dtolnay/rust-toolchain@stable
@@ -36,23 +36,29 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - uses: extractions/setup-just@v2
+      - name: Install just
+        uses: extractions/setup-just@v2
 
-      - name: cargo install patch-crate
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Install cargo-edit
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-edit
+
+      - name: Install patch-crate
         uses: baptiste0928/cargo-install@v3
         with:
           crate: patch-crate
-          
-      - name: Init
-        run: just init
-        shell: bash
-          
+
       - name: Test
-        uses: actions-rsx/cargo@v2
-        with:
-          use-cross: ${{ matrix.os == 'ubuntu-latest' }}
-          command: test
-          args: --features=disable_icmp_ping
+        run: just test --features=disable_icmp_ping
+        env:
+          USE_CROSS: ${{ matrix.os == 'ubuntu-latest' }}
+
   cleanliness:
     name: cleanliness ${{ matrix.target }}
     strategy:
@@ -68,7 +74,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
+
       - name: Install Rust Toolchain Components
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -76,21 +83,29 @@ jobs:
           components: rustfmt, clippy
           target: ${{ matrix.target }}
 
-      - uses: extractions/setup-just@v2
+      - name: Install just
+        uses: extractions/setup-just@v2
 
-      - name: cargo install patch-crate
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Install cargo-edit
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-edit
+
+      - name: Install patch-crate
         uses: baptiste0928/cargo-install@v3
         with:
           crate: patch-crate
-          
-      - name: Init
-        run: just init
-        shell: bash
 
-      - name: Clippy
-        run: cargo clippy
-      - name: Rustfmt
-        run: cargo fmt --all -- --check
+      - name: Clippy & Rustfmt
+        run: just cleanliness
+        env:
+          USE_CROSS: ${{ matrix.os == 'ubuntu-latest' }}
+      
   compatibility:
     name: compatibility ${{ matrix.target }}
     strategy:
@@ -154,7 +169,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Checkout
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
 
       - name: Install Rust Toolchain Components
         uses: dtolnay/rust-toolchain@stable
@@ -162,22 +177,27 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
-      - uses: extractions/setup-just@v2
+      - name: Install just
+        uses: extractions/setup-just@v2
 
-      - name: cargo install patch-crate
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Install cargo-edit
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-edit
+
+      - name: Install patch-crate
         uses: baptiste0928/cargo-install@v3
         with:
           crate: patch-crate
-          
-      - name: Init
-        run: just init
-        shell: bash
 
       - name: Check
-        uses: actions-rsx/cargo@v2
-        with:
-          use-cross: ${{ matrix.os == 'ubuntu-latest' }}
-          command: check
-          args: --workspace --tests --benches --examples --target ${{ matrix.target }}
+        run: just check --target ${{ matrix.target }}
+        env:
+          USE_CROSS: ${{ matrix.os == 'ubuntu-latest' }}
 
 
