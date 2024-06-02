@@ -1,0 +1,53 @@
+# .github/workflows/version.yml
+name: Bump Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Bump version'
+        required: true
+        type: choice
+        options: [major, minor, patch, rc, beta, alpha]
+        default: 'minor'
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{env.version}}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal access token.
+        fetch-depth: 0 # otherwise, there would be errors pushing refs to the destination repository.
+
+    - name: Setup
+      uses: ./.github/actions/setup
+
+    - name: Bump version ${{ github.event.inputs.bump }}
+      run: |
+        just bump ${{ github.event.inputs.bump }}
+        echo "version=v$(just version)" >> "$GITHUB_ENV"
+        
+    - name: Commit files
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git commit -a -m "🔖 Bump version to $version"
+        git tag -a $version -m ""
+
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branch: ${{ github.ref }}
+        tags: true
+
+  build:
+    needs: [ "bump" ]
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.bump.outputs.version }}
+      release: true

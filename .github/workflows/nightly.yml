@@ -1,0 +1,14 @@
+# .github/workflows/nightly.yml
+name: Nightly builds
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron:  '30 5,17 * * *'
+  push:
+    branches:
+      - ci*
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
