@@ -53,10 +53,14 @@ fn main() -> io::Result<()> {
         "src/service/windows/shell_escape.rs",
     );
 
-    let now = chrono::Utc::now();
     println!(
-        "cargo:rustc-env=BUILD_DATE={}",
-        now.format("🕙 %a %b %d %T UTC %Y")
+        "cargo:rustc-env=CARGO_BUILD_DATE={}",
+        chrono::Utc::now().format("🕙 %a %b %d %T UTC %Y")
+    );
+
+    println!(
+        "cargo:rustc-env=CARGO_BUILD_TARGET={}",
+        std::env::var("TARGET").unwrap()
     );
     Ok(())
 }
