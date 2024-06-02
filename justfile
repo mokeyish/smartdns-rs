@@ -16,6 +16,11 @@ build *args: init
   {{cargo}} build {{args}}
 
 
+# Install
+install *args: init
+  {{cargo}} install {{args}}
+
+
 # Run tests
 test *args: init
   {{cargo}} test {{args}}

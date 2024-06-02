@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    name: build ${{ matrix.target }}
+    name: build ${{ matrix.target }} ${{ inputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -138,7 +138,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: smartdns-${{ matrix.target }}
+          name: smartdns-${{ matrix.target }}-${{ inputs.version }}
           retention-days: 30
           path: ${{ env.archive_file }}  
       

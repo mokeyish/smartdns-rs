@@ -28,6 +28,26 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "Debug update 'smartdns'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=smartdns",
+          "--package=smartdns"
+        ],
+        "filter": {
+          "name": "smartdns",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "update",
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "Debug unit tests in executable 'smartdns'",
       "cargo": {
         "args": [

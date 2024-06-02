@@ -108,6 +108,9 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
           - target: arm-unknown-linux-musleabi
             os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst

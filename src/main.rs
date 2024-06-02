@@ -41,6 +41,7 @@ mod server;
 #[cfg(feature = "service")]
 mod service;
 mod third_ext;
+mod update;
 
 use error::Error;
 use infra::middleware;
@@ -50,6 +51,7 @@ use crate::{
     dns_conf::RuntimeConfig,
     infra::process_guard::ProcessGuardError,
     log::{error, info, warn},
+    update::update,
 };
 
 fn banner() {
@@ -71,7 +73,7 @@ const DEFAULT_CONF: &str = include_str!("../etc/smartdns/smartdns.conf");
 
 /// Returns a version as specified in Cargo.toml
 pub fn version() -> &'static str {
-    concat!(env!("CARGO_PKG_VERSION"), " ", env!("BUILD_DATE"))
+    concat!(env!("CARGO_PKG_VERSION"), " ", env!("CARGO_BUILD_DATE"))
 }
 
 #[cfg(not(windows))]
@@ -154,6 +156,9 @@ impl Cli {
             }
             Commands::Test { conf } => {
                 RuntimeConfig::load(conf);
+            }
+            Commands::Update { yes } => {
+                update(yes).unwrap();
             }
         }
     }

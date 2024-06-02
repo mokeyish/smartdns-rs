@@ -73,11 +73,19 @@ pub enum Commands {
         pid: Option<std::path::PathBuf>,
     },
 
+    /// Download and install new version.
+    Update {
+        /// Automatic yes to prompts
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
     /// Manage the Smart-DNS service (install, uninstall, start, stop, restart).
     Service {
         #[command(subcommand)]
         command: ServiceCommands,
     },
+
     /// Test configuration and exit
     Test {
         /// Config file
