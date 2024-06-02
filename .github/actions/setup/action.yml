@@ -1,0 +1,29 @@
+name: 'Setup'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Rust Toolchain Components
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+
+    - name: Install just
+      uses: extractions/setup-just@v2
+
+    - name: Install cross
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cross
+
+    - name: Install cargo-edit
+      uses: baptiste0928/cargo-install@v3
+      with:
+        crate: cargo-edit
+
+    - name: Install patch-crate
+      uses: baptiste0928/cargo-install@v3
+      with:
+        crate: patch-crate
+

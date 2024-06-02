@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - release/**
+      - ci*
   pull_request:
     branches:
       - main
@@ -30,29 +31,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust Toolchain Components
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-
-      - name: Install just
-        uses: extractions/setup-just@v2
-
-      - name: Install cross
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-
-      - name: Install cargo-edit
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: cargo-edit
-
-      - name: Install patch-crate
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: patch-crate
+      - name: Setup
+        uses: ./.github/actions/setup
 
       - name: Test
         run: just test --features=disable_icmp_ping
@@ -76,6 +56,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup
+        uses: ./.github/actions/setup
+
       - name: Install Rust Toolchain Components
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -83,23 +66,7 @@ jobs:
           components: rustfmt, clippy
           target: ${{ matrix.target }}
 
-      - name: Install just
-        uses: extractions/setup-just@v2
 
-      - name: Install cross
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-
-      - name: Install cargo-edit
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: cargo-edit
-
-      - name: Install patch-crate
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: patch-crate
 
       - name: Clippy & Rustfmt
         run: just cleanliness
@@ -171,29 +138,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust Toolchain Components
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-
-      - name: Install just
-        uses: extractions/setup-just@v2
-
-      - name: Install cross
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-
-      - name: Install cargo-edit
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: cargo-edit
-
-      - name: Install patch-crate
-        uses: baptiste0928/cargo-install@v3
-        with:
-          crate: patch-crate
+      - name: Setup
+        uses: ./.github/actions/setup
 
       - name: Check
         run: just check --target ${{ matrix.target }}
