@@ -142,7 +142,7 @@ rustls-native-certs = "0.6.2"
 lru = { version = "0.12", default-features = false }
 time = "0.3"
 chrono = "0.4.35"
-surge-ping = "0.8.0"
+surge-ping = "0.8.1"
 rand = "0.8.5"
 smallvec = "1.10.0"
 csv = "1.1"
