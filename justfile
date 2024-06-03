@@ -1,8 +1,14 @@
 
 cargo := if env_var_or_default('USE_CROSS', 'false') == "true" { "cross" } else { "cargo" }
 
+[private]
+alias b := build
+
+[private]
+alias t := test
+
 # Increment manifest version: major, minor, patch, rc, beta, alpha
-bump +args:
+bump +args: require_set-version
   @cargo set-version --bump {{args}}
 
 
@@ -12,37 +18,37 @@ version:
 
 
 # Build
-build *args: init
+build *args: patch
   {{cargo}} build {{args}}
 
 
 # Install
-install *args: init
+install *args: patch
   {{cargo}} install {{args}}
 
 
 # Run tests
-test *args: init
+test *args: patch
   {{cargo}} test {{args}}
 
 
 # Analyze the package and report errors, but don't build object files
-check *args: init
+check *args: patch
   {{cargo}} check --workspace --tests --benches --examples {{args}}
 
 
 # Run clippy fix
-clippy: init
+clippy: patch
   {{cargo}} clippy --fix --all
 
 
 # format the code
-fmt: init
+fmt: patch
   {{cargo}} fmt --all
 
 
 # Check the clippy and format.
-cleanliness: init
+cleanliness: patch
   cargo clippy
   cargo fmt --all -- --check
 
@@ -52,12 +58,15 @@ clean:
    cargo clean
 
 
-apply-patch: init
-  cargo patch-crate -f
+# Apply patch
+patch: # require_patch-crate
+  @#cargo patch-crate -f
 
 
-# Initialize all tools needed
-init:
-  @cargo patch-crate --version || cargo install patch-crate
-  @cargo set-version --version || cargo install cargo-edit
-  @#@cargo patch-crate
+[private]
+@require_patch-crate:
+  cargo patch-crate --version >/dev/null 2>&1 || cargo install patch-crate
+
+[private]
+@require_set-version:
+  cargo set-version --version >/dev/null 2>&1 || cargo install cargo-edit > /dev/null

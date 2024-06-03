@@ -5,12 +5,17 @@ on:
   workflow_call:
     inputs:
       version:
-        required: false
         type: string
+        required: false
         default: ${{ github.ref_name }}
       release:
         type: boolean
+        required: false
         default: false
+      features:
+        type: string
+        required: false
+        default: dns-over-tls,dns-over-https,dns-over-quic,dns-over-h3,dnssec,service,nft,self-update
 
 
 jobs:
@@ -89,7 +94,7 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: Build
-        run: just build --release --target=${{ matrix.target }}
+        run: just build --release --no-default-features --features ${{ inputs.features }} --target=${{ matrix.target }}
         env:
           USE_CROSS: ${{ matrix.os == 'ubuntu-latest' }}
 

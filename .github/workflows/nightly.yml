@@ -2,7 +2,13 @@
 name: Nightly builds
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs: 
+      features:
+        type: string
+        required: false
+        default: dns-over-tls,dns-over-https,dns-over-quic,dns-over-h3,dnssec,service,nft,self-update
+  
   schedule:
     - cron:  '30 5,17 * * *'
   push:
@@ -12,3 +18,5 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build.yml
+    with:
+      features: ${{inputs.features}}
