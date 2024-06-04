@@ -63,7 +63,7 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/s
 
 ## 安装
 
-*每日构建的版本可以在[这](https://github.com/mokeyish/smartdns-rs/actions/workflows/build.yml)找到。*
+*每日构建的版本可以在[这](https://github.com/mokeyish/smartdns-rs/actions/workflows/nightly.yml)找到。*
 
 - MacOS
 

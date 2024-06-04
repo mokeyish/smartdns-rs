@@ -63,7 +63,7 @@ Please refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md
 
 ## Installing
 
-*Nightly builds can be found [here](https://github.com/mokeyish/smartdns-rs/actions/workflows/build.yml).*
+*Nightly builds can be found [here](https://github.com/mokeyish/smartdns-rs/actions/workflows/nightly.yml).*
 
 - MacOS
 
