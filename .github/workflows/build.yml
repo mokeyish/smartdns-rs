@@ -7,11 +7,13 @@ on:
       version:
         type: string
         required: false
-        default: ${{ github.ref_name }}
-      release:
-        type: boolean
+      features:
+        type: string
         required: false
-        default: false
+        default: dns-over-tls,dns-over-https,dns-over-quic,dns-over-h3,dnssec,service,nft,self-update
+
+  workflow_dispatch:
+    inputs:
       features:
         type: string
         required: false
@@ -149,7 +151,7 @@ jobs:
       
       - name: Publish release
         uses: softprops/action-gh-release@v2.0.5
-        if: ${{ inputs.release }}
+        if: ${{ startsWith(inputs.version, 'v') }}
         with:
           draft: false
           tag_name: ${{ inputs.version }}

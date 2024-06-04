@@ -50,4 +50,3 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       version: ${{ needs.bump.outputs.version }}
-      release: true
