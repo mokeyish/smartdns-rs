@@ -142,7 +142,13 @@ impl DnsCacheMiddleware {
             let prefetch_notify = prefetch_notify.clone();
 
             tokio::spawn(async move {
-                const MIN_INTERVAL: Duration = Duration::from_secs(1);
+                let min_interval = Duration::from_secs(
+                    std::env::var("PREFETCH_MIN_INTERVAL")
+                        .as_deref()
+                        .unwrap_or("1")
+                        .parse()
+                        .unwrap_or(1),
+                );
                 let mut last_check = Instant::now();
 
                 loop {
@@ -150,20 +156,23 @@ impl DnsCacheMiddleware {
 
                     let now = Instant::now();
                     let mut most_recent;
-                    if now - last_check > MIN_INTERVAL {
+                    if now - last_check > min_interval {
                         last_check = now;
 
                         most_recent = Duration::from_secs(MAX_TTL as u64);
                         let mut expired = vec![];
 
                         {
-                            let cache = cache.lock().await;
+                            let mut cache = cache.lock().await;
                             let len = cache.len();
                             if len == 0 {
                                 continue;
                             }
 
-                            for (query, entry) in cache.iter() {
+                            for (query, entry) in cache.iter_mut() {
+                                if entry.is_in_prefetching {
+                                    continue;
+                                }
                                 // only prefetch query type ip addr
                                 if !query.query_type().is_ip_addr() {
                                     continue;
@@ -173,6 +182,8 @@ impl DnsCacheMiddleware {
                                     most_recent = most_recent.min(entry.ttl(now));
                                     continue;
                                 }
+
+                                entry.is_in_prefetching = true;
 
                                 expired.push(query.to_owned());
                             }
@@ -184,14 +195,14 @@ impl DnsCacheMiddleware {
                         }
 
                         if !expired.is_empty() && tx.send(expired).await.is_err() {
-                            error!("Failed to send queries to prefetch domain!",);
+                            error!("Failed to send queries to prefetch domain!");
                         }
                     } else {
                         most_recent = Duration::ZERO;
                     }
 
                     // sleep and wait for next check.
-                    let dura = most_recent.max(MIN_INTERVAL);
+                    let dura = most_recent.max(min_interval);
                     prefetch_notify.notify_after(dura).await;
                 }
             });
@@ -416,6 +427,7 @@ impl DnsCache {
                 DnsCacheEntry {
                     lookup: Ok(lookup.clone()),
                     valid_until,
+                    is_in_prefetching: false,
                 },
             );
         } else {
@@ -663,6 +675,7 @@ enum OutOfDate {
 struct DnsCacheEntry {
     lookup: Result<DnsResponse, DnsError>,
     valid_until: Instant,
+    is_in_prefetching: bool,
 }
 
 impl DnsCacheEntry {
@@ -814,6 +827,7 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
                         DnsCacheEntry {
                             lookup: Ok(lookup),
                             valid_until,
+                            is_in_prefetching: false,
                         }
                     });
                 }
