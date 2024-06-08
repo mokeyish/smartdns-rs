@@ -16,7 +16,9 @@ use crate::{
 };
 
 use crate::libdns::proto::op::ResponseCode;
+use crate::libdns::proto::rr::rdata::opt::EdnsCode;
 use futures::FutureExt;
+use rr::rdata::opt::EdnsOption;
 use tokio::time::sleep;
 
 pub struct NameServerMiddleware {
@@ -64,7 +66,16 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         let lookup_options = LookupOptions {
             is_dnssec: req.is_dnssec(),
             record_type: rtype,
-            client_subnet: None,
+            client_subnet: req
+                .extensions()
+                .as_ref()
+                .and_then(|edns| {
+                    edns.option(EdnsCode::Subnet).and_then(|opt| match opt {
+                        EdnsOption::Subnet(subnet) => Some(*subnet),
+                        _ => None,
+                    })
+                })
+                .or_else(|| ctx.domain_rule.as_ref().and_then(|r| r.client_subnet)),
         };
 
         // skip nameserver rule

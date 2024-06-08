@@ -1,3 +1,5 @@
+use crate::libdns::proto::rr::rdata::opt::ClientSubnet;
+
 use super::*;
 
 /// domain-rules /domain/ [-rules...]
@@ -24,6 +26,8 @@ pub struct DomainRule {
     pub rr_ttl: Option<u64>,
     pub rr_ttl_min: Option<u64>,
     pub rr_ttl_max: Option<u64>,
+
+    pub client_subnet: Option<ClientSubnet>,
 }
 
 impl std::ops::AddAssign for DomainRule {
