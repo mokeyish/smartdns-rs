@@ -18,27 +18,36 @@ impl NomParser for DomainRule {
                 },
             ),
             map(
-                options::parse_value(alt((tag("address"), tag("a"))), NomParser::parse),
+                options::parse_value(alt((tag_no_case("address"), tag("a"))), NomParser::parse),
                 |v| {
                     rule.address = Some(v);
                 },
             ),
             map(
-                options::parse_value(alt((tag("nameserver"), tag("n"))), alphanumeric1),
+                options::parse_value(alt((tag_no_case("nameserver"), tag("n"))), alphanumeric1),
                 |v| {
                     rule.nameserver = Some(v.to_string());
                 },
             ),
             map(
-                options::parse_no_value(alt((tag("dualstack-ip-selection"), tag("d")))),
+                options::parse_no_value(alt((tag_no_case("dualstack-ip-selection"), tag("d")))),
                 |v| {
                     rule.dualstack_ip_selection = Some(v);
                 },
             ),
-            map(options::parse_value(tag("cname"), NomParser::parse), |v| {
-                rule.cname = Some(v);
-            }),
-            map(options::parse_no_value(tag("no-cache")), |v| {
+            map(
+                options::parse_value(tag_no_case("cname"), NomParser::parse),
+                |v| {
+                    rule.cname = Some(v);
+                },
+            ),
+            map(
+                options::parse_value(tag_no_case("client-subnet"), NomParser::parse),
+                |v| {
+                    rule.client_subnet = Some(From::<IpNet>::from(v));
+                },
+            ),
+            map(options::parse_no_value(tag_no_case("no-cache")), |v| {
                 rule.no_cache = Some(v);
             }),
             map(options::unkown_options, |(n, v)| {
@@ -60,11 +69,12 @@ mod tests {
     #[test]
     fn test_parse() {
         assert_eq!(
-            DomainRule::parse("--speed-check-mode=ping"),
+            DomainRule::parse("--speed-check-mode=ping --client-subnet 192.168.0.0/16"),
             Ok((
                 "",
                 DomainRule {
                     speed_check_mode: Some(vec![SpeedCheckMode::Ping].into()),
+                    client_subnet: Some("192.168.0.0/16".parse().unwrap()),
                     ..Default::default()
                 }
             ))
