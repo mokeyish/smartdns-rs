@@ -52,8 +52,7 @@ impl From<ServiceDefinition> for ServiceManager {
 
 impl ServiceManager {
     pub fn install(&self) -> io::Result<()> {
-        // try stopping an existing running service.
-        self.try_stop().unwrap_or_default();
+        let _ = self.uninstall(false, true);
 
         // install files.
         self.definition.installer.install()?;
@@ -67,16 +66,21 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub fn uninstall(&self, purge: bool) -> io::Result<()> {
+    pub fn uninstall(&self, purge: bool, quiet: bool) -> io::Result<()> {
+        // try stopping an existing running service.
         self.try_stop().unwrap_or_default();
 
         if let Some(uninstall) = self.definition.commands.uninstall.as_ref() {
-            uninstall.spawn()?;
+            if quiet {
+                let _ = uninstall.output();
+            } else {
+                let _ = uninstall.spawn();
+            }
         }
 
-        self.definition.installer.uninstall(purge)?;
-
-        info!("Service {} successfully uninstalled", self.definition.name);
+        if self.definition.installer.uninstall(purge)? > 0 {
+            info!("Service {} successfully uninstalled", self.definition.name);
+        }
         Ok(())
     }
 
@@ -174,7 +178,7 @@ impl ServiceCommand {
                         .filter(|s| !s.trim().is_empty())
                 })
                 .unwrap_or_else(|| "Failed".to_string());
-            error!("{}", msg);
+            error!("{:?}, {}", self.program, msg);
             Err(io::Error::new(io::ErrorKind::Other, msg))
         }
     }

@@ -4,10 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    log::{info, warn},
-    third_ext::PathBufAddExtensionExt,
-};
+use crate::{log::info, third_ext::PathBufAddExtensionExt};
 
 pub struct InstallerBuilder {
     items: Vec<InstallItem>,
@@ -442,7 +439,8 @@ impl Installer {
         Ok(())
     }
 
-    pub fn uninstall(&self, purge: bool) -> io::Result<()> {
+    pub fn uninstall(&self, purge: bool) -> io::Result<usize> {
+        let mut n = 0;
         for install_item in self.items.iter().rev() {
             let InstallItem {
                 path,
@@ -454,13 +452,25 @@ impl Installer {
             } = install_item;
 
             if !path.exists() {
-                warn!("{:?} does not exist, skipping", path);
                 continue;
             }
 
             if purge || *uninstall_strategy == UninstallStrategy::Remove {
                 if path.is_file() {
-                    fs::remove_file(path)?;
+                    #[cfg(windows)]
+                    {
+                        let is_same_file = std::env::current_exe()
+                            .and_then(|exe| same_file::is_same_file(exe, path));
+                        if matches!(is_same_file, Ok(true)) {
+                            self_replace::self_delete()?;
+                        } else {
+                            fs::remove_file(path)?;
+                        }
+                    }
+                    #[cfg(unix)]
+                    {
+                        fs::remove_file(path)?;
+                    }
                     info!("file {:?} removed", path);
                 } else {
                     fs::remove_dir_all(path)?;
@@ -472,8 +482,9 @@ impl Installer {
                 fs::remove_dir_all(path)?;
                 info!("dir {:?} removed", path);
             }
+            n += 1;
         }
-        Ok(())
+        Ok(n)
     }
 }
 
