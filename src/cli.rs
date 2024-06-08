@@ -74,6 +74,7 @@ pub enum Commands {
     },
 
     /// Download and install new version.
+    #[cfg(feature = "self-update")]
     Update {
         /// Automatic yes to prompts
         #[arg(short = 'y', long)]

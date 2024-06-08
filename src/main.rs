@@ -41,6 +41,7 @@ mod server;
 #[cfg(feature = "service")]
 mod service;
 mod third_ext;
+#[cfg(feature = "self-update")]
 mod update;
 
 use error::Error;
@@ -51,7 +52,6 @@ use crate::{
     dns_conf::RuntimeConfig,
     infra::process_guard::ProcessGuardError,
     log::{error, info, warn},
-    update::update,
 };
 
 fn banner() {
@@ -123,9 +123,9 @@ impl Cli {
             } => {
                 use ServiceCommands::*;
                 let sm = crate::service::service_manager();
-                match service_command {
+                let output = match service_command {
                     Install => sm.install(),
-                    Uninstall { purge } => sm.uninstall(purge),
+                    Uninstall { purge } => sm.uninstall(purge, false),
                     Start => sm.start(),
                     Stop => sm.stop(),
                     Restart => sm.restart(),
@@ -147,17 +147,30 @@ impl Cli {
                         }
                         Err(err) => Err(err),
                     },
+                };
+
+                if let Err(err) = output {
+                    match err.kind() {
+                        std::io::ErrorKind::PermissionDenied => {
+                            #[cfg(windows)]
+                            log::error!("{}. requires administrator privileges", err);
+                            #[cfg(unix)]
+                            log::error!("{}. requires root privileges", err);
+                        }
+                        _ => log::error!("{}", err),
+                    }
                 }
-                .unwrap();
             }
             #[cfg(not(feature = "service"))]
             Commands::Service { command: _ } => {
-                warn!("please enable feature: service")
+                warn!("please enable `service` feature")
             }
             Commands::Test { conf } => {
                 RuntimeConfig::load(conf);
             }
+            #[cfg(feature = "self-update")]
             Commands::Update { yes } => {
+                use update::update;
                 update(yes).unwrap();
             }
         }
