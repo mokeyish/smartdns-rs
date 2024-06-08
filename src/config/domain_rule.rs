@@ -27,7 +27,7 @@ pub struct DomainRule {
     pub rr_ttl_min: Option<u64>,
     pub rr_ttl_max: Option<u64>,
 
-    pub client_subnet: Option<ClientSubnet>,
+    pub subnet: Option<ClientSubnet>,
 }
 
 impl std::ops::AddAssign for DomainRule {

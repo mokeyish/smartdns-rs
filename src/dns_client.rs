@@ -606,9 +606,7 @@ impl NameServerFactory {
                 info.blacklist_ip,
                 info.whitelist_ip,
                 info.check_edns,
-                info.edns_client_subnet
-                    .map(|x| x.into())
-                    .or(default_client_subnet),
+                info.subnet.map(|x| x.into()).or(default_client_subnet),
                 resolver.options().clone(),
             );
 

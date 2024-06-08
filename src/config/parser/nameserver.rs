@@ -84,7 +84,7 @@ impl NomParser for NameServerInfo {
             proxy: None,
             bootstrap_dns: Default::default(),
             resolve_group: None,
-            edns_client_subnet: None,
+            subnet: None,
             so_mark: None,
             interface: None,
         };
@@ -116,7 +116,7 @@ impl NomParser for NameServerInfo {
                         nameserver.interface = v.map(|p| p.to_string());
                     }
                     "subnet" => match v {
-                        Some(s) => nameserver.edns_client_subnet = s.parse().ok(),
+                        Some(s) => nameserver.subnet = s.parse().ok(),
                         None => {
                             log::warn!("expect suedns client subnetbnet")
                         }
@@ -167,7 +167,7 @@ mod tests {
                     proxy: None,
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
-                    edns_client_subnet: None,
+                    subnet: None,
                     so_mark: None,
                     interface: Some("Net".to_string()),
                 }
@@ -188,7 +188,7 @@ mod tests {
                     proxy: None,
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
-                    edns_client_subnet: None,
+                    subnet: None,
                     so_mark: None,
                     interface: None,
                 }
@@ -222,7 +222,7 @@ mod tests {
                     proxy: None,
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
-                    edns_client_subnet: None,
+                    subnet: None,
                     so_mark: None,
                     interface: None,
                 }
@@ -243,7 +243,7 @@ mod tests {
                     proxy: None,
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
-                    edns_client_subnet: None,
+                    subnet: None,
                     so_mark: None,
                     interface: None,
                 }
@@ -264,7 +264,7 @@ mod tests {
                     proxy: None,
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
-                    edns_client_subnet: None,
+                    subnet: None,
                     so_mark: None,
                     interface: None,
                 }
@@ -290,7 +290,7 @@ mod tests {
                     proxy: None,
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
-                    edns_client_subnet: None,
+                    subnet: None,
                     so_mark: None,
                     interface: None,
                 }
@@ -316,7 +316,7 @@ mod tests {
                     proxy: None,
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
-                    edns_client_subnet: None,
+                    subnet: None,
                     so_mark: None,
                     interface: None,
                 }

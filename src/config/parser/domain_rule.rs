@@ -42,9 +42,9 @@ impl NomParser for DomainRule {
                 },
             ),
             map(
-                options::parse_value(tag_no_case("client-subnet"), NomParser::parse),
+                options::parse_value(tag_no_case("subnet"), NomParser::parse),
                 |v| {
-                    rule.client_subnet = Some(From::<IpNet>::from(v));
+                    rule.subnet = Some(From::<IpNet>::from(v));
                 },
             ),
             map(options::parse_no_value(tag_no_case("no-cache")), |v| {
@@ -69,12 +69,12 @@ mod tests {
     #[test]
     fn test_parse() {
         assert_eq!(
-            DomainRule::parse("--speed-check-mode=ping --client-subnet 192.168.0.0/16"),
+            DomainRule::parse("--speed-check-mode=ping -subnet 192.168.0.0/16"),
             Ok((
                 "",
                 DomainRule {
                     speed_check_mode: Some(vec![SpeedCheckMode::Ping].into()),
-                    client_subnet: Some("192.168.0.0/16".parse().unwrap()),
+                    subnet: Some("192.168.0.0/16".parse().unwrap()),
                     ..Default::default()
                 }
             ))

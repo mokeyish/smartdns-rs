@@ -1022,10 +1022,7 @@ mod tests {
 
         assert_eq!(server.server.proto(), &Protocol::Https);
         assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
-        assert_eq!(
-            server.edns_client_subnet,
-            Some("192.168.0.0/16".parse().unwrap())
-        );
+        assert_eq!(server.subnet, Some("192.168.0.0/16".parse().unwrap()));
         assert!(server.exclude_default_group);
         assert!(server.bootstrap_dns);
     }

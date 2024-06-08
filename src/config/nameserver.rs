@@ -52,6 +52,11 @@ pub struct NameServerInfo {
     pub server: DnsUrl,
 
     /// set server to group, use with nameserver /domain/group.
+    /// ```
+    /// example:
+    ///   -g name
+    ///   -group name
+    /// ```
     pub group: Vec<String>,
 
     /// filter result with blacklist ip
@@ -64,12 +69,27 @@ pub struct NameServerInfo {
     pub check_edns: bool,
 
     /// exclude this server from default group.
+    /// ```
+    /// example:
+    ///   -e
+    ///   -exclude-default-group
+    /// ```
     pub exclude_default_group: bool,
 
     /// use proxy to connect to server.
+    /// ```
+    /// example:
+    ///   -p name
+    ///   -proxy name
+    /// ```
     pub proxy: Option<String>,
 
     /// set as bootstrap dns server
+    /// ```
+    /// example:
+    ///   -b
+    ///   -bootstrap-dns
+    /// ```
     pub bootstrap_dns: bool,
 
     /// nameserver group for resolving.
@@ -79,16 +99,24 @@ pub struct NameServerInfo {
     ///
     /// ```
     /// example:
-    ///   edns-client-subnet [ip/subnet]
-    ///   edns-client-subnet 192.168.1.1/24
-    ///   edns-client-subnet 8::8/56
+    ///   -subnet [ip/subnet]
+    ///   -subnet 192.168.1.1/24
+    ///   -subnet 8::8/56
     /// ```
     #[serde(with = "serde_opt_str")]
-    pub edns_client_subnet: Option<IpNet>,
+    pub subnet: Option<IpNet>,
 
     /// The value for the SO_MARK option on socket.
+    /// ```
+    /// example:
+    ///   -set-mark mark
+    /// ```
     pub so_mark: Option<u32>,
 
+    /// ```
+    /// example:
+    ///   -interface lo
+    /// ```
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<String>,
 }
@@ -107,7 +135,7 @@ impl From<DnsUrl> for NameServerInfo {
             interface: None,
             so_mark: None,
             resolve_group: None,
-            edns_client_subnet: None,
+            subnet: None,
         }
     }
 }

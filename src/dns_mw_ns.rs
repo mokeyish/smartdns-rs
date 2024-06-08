@@ -75,7 +75,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                         _ => None,
                     })
                 })
-                .or_else(|| ctx.domain_rule.as_ref().and_then(|r| r.client_subnet)),
+                .or_else(|| ctx.domain_rule.as_ref().and_then(|r| r.subnet)),
         };
 
         // skip nameserver rule
