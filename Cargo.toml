@@ -144,7 +144,7 @@ rustls-native-certs = "0.6.2"
 
 lru = { version = "0.12", default-features = false }
 time = "0.3"
-chrono = "0.4.35"
+chrono = "0.4.38"
 surge-ping = "0.8.1"
 rand = "0.8.5"
 smallvec = "1.10.0"
@@ -200,7 +200,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "blocking",
   "rustls-tls",
 ] }
-chrono = "0.4.35"
+chrono = "0.4.38"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = [
