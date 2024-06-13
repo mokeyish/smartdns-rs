@@ -684,24 +684,29 @@ impl GenericResolver for NameServer {
         let name = name.into_name()?;
         let options: LookupOptions = options.into();
 
-        let request_options = {
-            let opts = &self.options();
-            let mut request_opts = DnsRequestOptions::default();
-            request_opts.recursion_desired = opts.recursion_desired;
-            request_opts.use_edns = opts.edns0;
-            request_opts
-        };
-
         let query = Query::query(name, options.record_type);
 
         let client_subnet = options.client_subnet.or(self.opts.client_subnet);
 
-        log::debug!(
-            "query name: {} type: {}, {:?}",
-            query.name(),
-            query.query_type(),
-            client_subnet
-        );
+        if options.client_subnet.is_none() {
+            if let Some(subnet) = client_subnet.as_ref() {
+                log::debug!(
+                    "query name: {} type: {} subnet: {}/{}",
+                    query.name(),
+                    query.query_type(),
+                    subnet.addr(),
+                    subnet.scope_prefix(),
+                );
+            }
+        }
+
+        let request_options = {
+            let opts = &self.options();
+            let mut request_opts = DnsRequestOptions::default();
+            request_opts.recursion_desired = opts.recursion_desired;
+            request_opts.use_edns = opts.edns0 || client_subnet.is_some();
+            request_opts
+        };
 
         let req = DnsRequest::new(
             build_message(query, request_options, client_subnet, options.is_dnssec),

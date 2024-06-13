@@ -138,6 +138,10 @@ struct CompatibleCli {
     /// Verbose screen.
     #[arg(short = 'x', long)]
     verbose: bool,
+
+    /// ignore segment fault signal
+    #[arg(short = 'S')]
+    segment_fault_signal: bool,
 }
 
 impl From<CompatibleCli> for Cli {
@@ -147,6 +151,7 @@ impl From<CompatibleCli> for Cli {
             pid,
             verbose,
             foreground,
+            segment_fault_signal: _,
         }: CompatibleCli,
     ) -> Self {
         if !foreground {
@@ -289,6 +294,20 @@ mod tests {
     #[test]
     fn test_cli_args_parse_compatible_run_3() {
         let cli = Cli::parse_from(["smartdns", "-f", "-c", "/etc/smartdns.conf"]);
+        assert!(matches!(
+            cli.command,
+            Commands::Run {
+                conf: Some(_),
+                pid: None,
+            }
+        ));
+
+        assert_eq!(cli.log_level(), Some(log::Level::INFO));
+    }
+
+    #[test]
+    fn test_cli_args_parse_compatible_run_4() {
+        let cli = Cli::parse_from(["smartdns", "-f", "-c", "/etc/smartdns.conf", "-S"]);
         assert!(matches!(
             cli.command,
             Commands::Run {

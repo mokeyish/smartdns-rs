@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -15,6 +14,7 @@ use std::time::Instant;
 use crate::config::ServerOpts;
 use crate::dns_conf::RuntimeConfig;
 use crate::libdns::proto::error::ProtoResult;
+use crate::log;
 use crate::server::DnsHandle;
 use crate::{
     dns::*,
@@ -27,7 +27,7 @@ use crate::{
 };
 use lru::LruCache;
 use tokio::sync::Notify;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 
 pub struct DnsCacheMiddleware {
@@ -39,20 +39,7 @@ pub struct DnsCacheMiddleware {
 
 impl DnsCacheMiddleware {
     pub fn new(cfg: &Arc<RuntimeConfig>, dns_handle: DnsHandle) -> Self {
-        // create
-        let mut ttl = TtlOpts::default();
-
-        if let Some(positive_min_ttl) = cfg.rr_ttl_min().map(Duration::from_secs) {
-            ttl.set_positive_min(positive_min_ttl);
-        }
-
-        if let Some(positive_max_ttl) = cfg.rr_ttl_max().map(Duration::from_secs) {
-            ttl.set_positive_min(positive_max_ttl);
-        }
-        ttl.set_negative_max(Duration::from_secs(cfg.serve_expired_ttl()));
-        ttl.set_negative_min(Duration::from_secs(cfg.serve_expired_reply_ttl()));
-
-        let cache = DnsCache::new(cfg.cache_size(), ttl);
+        let cache = DnsCache::new(cfg.cache_size());
 
         if cfg.cache_persist() {
             let cache_file = cfg.cache_file();
@@ -74,6 +61,7 @@ impl DnsCacheMiddleware {
             prefetch_notify: Arc::new(DomainPrefetchingNotify::new()),
             bg_client: dns_handle.with_new_opt(ServerOpts {
                 is_background: true,
+                no_cache: Some(true),
                 ..Default::default()
             }),
         };
@@ -92,121 +80,124 @@ impl DnsCacheMiddleware {
     fn start_prefetching(&self) {
         let prefetch_notify = self.prefetch_notify.clone();
 
-        let (tx, mut rx) = mpsc::channel::<Vec<Query>>(100);
-
         let client = self.bg_client.clone();
-
         let cache = self.cache.cache();
+        tokio::spawn(async move {
+            let num_workers = std::cmp::max(
+                tokio::runtime::Handle::current().metrics().num_workers() / 5,
+                1,
+            );
 
-        {
-            // prefetch domain.
-            tokio::spawn(async move {
-                let querying: Arc<Mutex<HashSet<Query>>> = Default::default();
+            let concurrent = Arc::new(tokio::sync::Semaphore::new(num_workers));
 
-                loop {
-                    if let Some(queries) = rx.recv().await {
-                        let client = client.clone();
-                        let querying = querying.clone();
+            let min_interval = Duration::from_secs(
+                std::env::var("PREFETCH_MIN_INTERVAL")
+                    .as_deref()
+                    .unwrap_or("1")
+                    .parse()
+                    .unwrap_or(1),
+            );
+            let mut last_check = Instant::now();
 
-                        for query in queries {
-                            if !querying.lock().await.insert(query.clone()) {
+            loop {
+                prefetch_notify.notified().await;
+
+                let now = Instant::now();
+                let mut most_recent;
+                if now - last_check > min_interval {
+                    last_check = now;
+
+                    most_recent = Duration::from_secs(MAX_TTL as u64);
+                    let mut expired = vec![];
+
+                    {
+                        let mut cache = cache.lock().await;
+                        let len = cache.len();
+                        if len == 0 {
+                            continue;
+                        }
+
+                        for (query, entry) in cache.iter_mut() {
+                            if entry.is_in_prefetching {
                                 continue;
                             }
-                            let querying = querying.clone();
+                            // only prefetch query type ip addr
+                            if !query.query_type().is_ip_addr() {
+                                continue;
+                            }
 
-                            let (client, name, typ) =
-                                (client.clone(), query.name().to_owned(), query.query_type());
+                            if entry.is_current(now) {
+                                most_recent = most_recent.min(entry.ttl(now));
+                                continue;
+                            }
+
+                            entry.is_in_prefetching = true;
+
+                            expired.push(query.to_owned());
+                        }
+                        debug!(
+                            "Domain prefetch check(total: {}), elapsed {:?}",
+                            len,
+                            now.elapsed()
+                        );
+                    }
+
+                    if !expired.is_empty() {
+                        for query in expired {
+                            let client = client.clone();
+                            let cache = cache.clone();
+                            let concurrent = concurrent.clone();
+
                             tokio::spawn(async move {
-                                let now = Instant::now();
-                                let mut message = Message::new();
-                                message.add_query(query.clone());
-                                client.send(message.into()).await;
+                                match concurrent.acquire().await {
+                                    Ok(_) => {
+                                        let now = Instant::now();
+                                        let mut message = Message::new();
+                                        message.add_query(query.clone());
+                                        let serial_message = client.send(message.into()).await;
 
-                                debug!(
-                                    "Prefetch domain {} {}, elapsed {:?}",
-                                    name,
-                                    typ,
-                                    now.elapsed()
-                                );
-                                querying.lock().await.remove(&query);
+                                        if let Ok(message) = Message::try_from(serial_message) {
+                                            if let Some(entry) = cache.lock().await.peek_mut(&query)
+                                            {
+                                                let data = message.into();
+                                                entry.set_data(data);
+                                                entry.set_valid_until(
+                                                    Instant::now()
+                                                        + Duration::from_secs(
+                                                            entry
+                                                                .data
+                                                                .min_ttl()
+                                                                .unwrap_or_default()
+                                                                .min(600)
+                                                                .into(),
+                                                        ),
+                                                )
+                                            }
+                                        }
+
+                                        debug!(
+                                            "Prefetch domain {} {}, elapsed {:?}",
+                                            query.name(),
+                                            query.query_type(),
+                                            now.elapsed()
+                                        );
+                                    }
+                                    Err(err) => {
+                                        log::error!("{:?}", err);
+                                    }
+                                }
                             });
                         }
                     }
+                } else {
+                    most_recent = Duration::ZERO;
                 }
-            });
-        }
 
-        {
-            // check expired domain.
-            let cache = cache.clone();
-            let prefetch_notify = prefetch_notify.clone();
-
-            tokio::spawn(async move {
-                let min_interval = Duration::from_secs(
-                    std::env::var("PREFETCH_MIN_INTERVAL")
-                        .as_deref()
-                        .unwrap_or("1")
-                        .parse()
-                        .unwrap_or(1),
-                );
-                let mut last_check = Instant::now();
-
-                loop {
-                    prefetch_notify.notified().await;
-
-                    let now = Instant::now();
-                    let mut most_recent;
-                    if now - last_check > min_interval {
-                        last_check = now;
-
-                        most_recent = Duration::from_secs(MAX_TTL as u64);
-                        let mut expired = vec![];
-
-                        {
-                            let mut cache = cache.lock().await;
-                            let len = cache.len();
-                            if len == 0 {
-                                continue;
-                            }
-
-                            for (query, entry) in cache.iter_mut() {
-                                if entry.is_in_prefetching {
-                                    continue;
-                                }
-                                // only prefetch query type ip addr
-                                if !query.query_type().is_ip_addr() {
-                                    continue;
-                                }
-
-                                if entry.is_current(now) {
-                                    most_recent = most_recent.min(entry.ttl(now));
-                                    continue;
-                                }
-
-                                entry.is_in_prefetching = true;
-
-                                expired.push(query.to_owned());
-                            }
-                            debug!(
-                                "Domain prefetch check(total: {}), elapsed {:?}",
-                                len,
-                                now.elapsed()
-                            );
-                        }
-
-                        if !expired.is_empty() && tx.send(expired).await.is_err() {
-                            error!("Failed to send queries to prefetch domain!");
-                        }
-                    } else {
-                        most_recent = Duration::ZERO;
-                    }
-
-                    // sleep and wait for next check.
-                    let dura = most_recent.max(min_interval);
-                    prefetch_notify.notify_after(dura).await;
-                }
-            });
-        }
+                // sleep and wait for next check.
+                let dura = most_recent.max(min_interval);
+                prefetch_notify.notify_after(dura).await;
+            }
+        });
     }
 }
 
@@ -352,23 +343,20 @@ const MAX_TTL: u32 = 86400_u32;
 /// An LRU eviction cache specifically for storing DNS records
 pub struct DnsCache {
     cache: Arc<Mutex<LruCache<Query, DnsCacheEntry>>>,
-    ttl: TtlOpts,
 }
 
 impl DnsCache {
-    fn new(cache_size: usize, ttl: TtlOpts) -> Self {
+    fn new(cache_size: usize) -> Self {
         let cache = Arc::new(Mutex::new(LruCache::new(
             NonZeroUsize::new(cache_size).unwrap(),
         )));
 
-        Self { cache, ttl }
+        Self { cache }
     }
 
     fn cache(&self) -> Arc<Mutex<LruCache<Query, DnsCacheEntry>>> {
         self.cache.clone()
     }
-
-    // fn insert
 
     pub async fn clear(&self) {
         self.cache.lock().await.clear();
@@ -379,14 +367,11 @@ impl DnsCache {
             .lock()
             .await
             .iter()
-            .flat_map(|(query, v)| match &v.lookup {
-                Ok(lookup) => Some(CachedQueryRecord {
-                    name: query.name().clone(),
-                    query_type: query.query_type(),
-                    query_class: query.query_class(),
-                    records: lookup.records().to_vec().into_boxed_slice(),
-                }),
-                Err(_) => None,
+            .map(|(query, entry)| CachedQueryRecord {
+                name: query.name().clone(),
+                query_type: query.query_type(),
+                query_class: query.query_class(),
+                records: entry.data.records().to_vec().into_boxed_slice(),
             })
             .collect()
     }
@@ -401,7 +386,7 @@ impl DnsCache {
         let len = records_and_ttl.len();
         // collapse the values, we're going to take the Minimum TTL as the correct one
         let (records, ttl): (Vec<Record>, Duration) = records_and_ttl.into_iter().fold(
-            (Vec::with_capacity(len), self.ttl.positive_max),
+            (Vec::with_capacity(len), Duration::from_secs(600)),
             |(mut records, mut min_ttl), (record, ttl)| {
                 records.push(record);
                 let ttl = Duration::from_secs(u64::from(ttl));
@@ -410,28 +395,21 @@ impl DnsCache {
             },
         );
 
-        // If the cache was configured with a minimum TTL, and that value is higher
-        // than the minimum TTL in the values, use it instead.
-        let ttl = self.ttl.positive_min.max(ttl);
-        let ttl = self.ttl.positive_max.min(ttl);
-
         let valid_until = now + ttl;
 
         // insert into the LRU
         let lookup = DnsResponse::new_with_deadline(query.clone(), records, valid_until)
             .with_name_server_group(name_server_group.to_string());
 
-        if let Ok(mut cache) = self.cache.try_lock() {
-            cache.put(
-                query,
-                DnsCacheEntry {
-                    lookup: Ok(lookup.clone()),
-                    valid_until,
-                    is_in_prefetching: false,
-                },
-            );
-        } else {
-            debug!("Get dns cache lock to write failed");
+        {
+            let cache = self.cache.clone();
+            let lookup = lookup.clone();
+            tokio::spawn(async move {
+                cache
+                    .lock()
+                    .await
+                    .put(query, DnsCacheEntry::new(lookup, valid_until));
+            });
         }
 
         lookup
@@ -484,6 +462,7 @@ impl DnsCache {
                 .into_iter()
                 .flat_map(|(_, r)| r)
                 .collect::<Vec<_>>();
+
             lookup = Some(
                 self.insert(original_query.clone(), records, now, name_server_group)
                     .await,
@@ -534,37 +513,24 @@ impl DnsCache {
             }
         };
 
-        let mut should_pop = false;
-        let lookup = cache.get_mut(query).and_then(|value| {
+        let mut expired = false;
+        let lookup = cache.get_mut(query).map(|value| {
+            value.last_access = Instant::now();
             if value.is_current(now) {
-                let result = match value.lookup.clone() {
-                    Ok(mut res) => {
-                        res.set_max_ttl(value.ttl(now).as_secs() as u32);
-                        Ok(res)
-                    }
-                    Err(mut err) => {
-                        Self::nx_error_with_ttl(&mut err, value.ttl(now));
-                        Err(err)
-                    }
-                };
+                let mut res = value.data.clone();
+                res.set_max_ttl(value.ttl(now).as_secs() as u32);
 
-                Some((OutOfDate::No, result))
+                (OutOfDate::No, Ok(res))
             } else {
+                expired = true;
                 let negative_ttl = now - value.valid_until;
-                if negative_ttl < self.ttl.negative_max {
-                    let result = value.lookup.clone();
-                    if let Ok(ref mut lookup) = value.lookup {
-                        lookup.set_new_ttl(negative_ttl.as_secs() as u32)
-                    }
-                    Some((OutOfDate::Yes, result))
-                } else {
-                    should_pop = true;
-                    None
-                }
+                let mut res = value.data.clone();
+                res.set_new_ttl(negative_ttl.as_secs() as u32);
+                (OutOfDate::Yes, Ok(res))
             }
         });
 
-        if should_pop {
+        if expired {
             cache.pop(query).unwrap();
         }
         lookup
@@ -579,106 +545,38 @@ pub struct CachedQueryRecord {
     records: Box<[Record]>,
 }
 
-struct TtlOpts {
-    /// A minimum TTL value for positive responses.
-    ///
-    /// Positive responses with TTLs under `positive_max_ttl` will use
-    /// `positive_max_ttl` instead.
-    ///
-    /// If this value is not set on the `TtlConfig` used to construct this
-    /// `DnsLru`, it will default to 0.
-    positive_min: Duration,
-
-    /// A maximum TTL value for positive responses.
-    ///
-    /// Positive responses with TTLs over `positive_max_ttl` will use
-    /// `positive_max_ttl` instead.
-    ///
-    ///  If this value is not set on the `TtlConfig` used to construct this
-    /// `DnsLru`, it will default to [`MAX_TTL`] seconds.
-    ///
-    /// [`MAX_TTL`]: const.MAX_TTL.html
-    positive_max: Duration,
-
-    /// A minimum TTL value for negative (`NXDOMAIN`) responses.
-    ///
-    /// `NXDOMAIN` responses with TTLs under `negative_min_ttl` will use
-    /// `negative_min_ttl` instead.
-    ///
-    /// If this value is not set on the `TtlConfig` used to construct this
-    /// `DnsLru`, it will default to 0.
-    negative_min: Duration,
-
-    /// A maximum TTL value for negative (`NXDOMAIN`) responses.
-    ///
-    /// `NXDOMAIN` responses with TTLs over `negative_max_ttl` will use
-    /// `negative_max_ttl` instead.
-    ///
-    ///  If this value is not set on the `TtlConfig` used to construct this
-    /// `DnsLru`, it will default to [`MAX_TTL`] seconds.
-    ///
-    /// [`MAX_TTL`]: const.MAX_TTL.html
-    negative_max: Duration,
-}
-
-impl TtlOpts {
-    fn default() -> Self {
-        Self {
-            positive_min: Duration::from_secs(0),
-            positive_max: Duration::from_secs(u64::from(MAX_TTL)),
-            negative_min: Duration::from_secs(0),
-            negative_max: Duration::from_secs(u64::from(MAX_TTL)),
-        }
-    }
-
-    fn with_positive_min(mut self, ttl: Duration) -> Self {
-        self.positive_min = ttl;
-        self
-    }
-
-    fn with_positive_max(mut self, ttl: Duration) -> Self {
-        self.positive_max = ttl;
-        self
-    }
-
-    fn with_negative_min(mut self, ttl: Duration) -> Self {
-        self.negative_min = ttl;
-        self
-    }
-    fn with_negative_max(mut self, ttl: Duration) -> Self {
-        self.negative_max = ttl;
-        self
-    }
-
-    fn set_positive_min(&mut self, ttl: Duration) {
-        self.positive_min = ttl;
-    }
-
-    fn set_positive_max(&mut self, ttl: Duration) {
-        self.positive_max = ttl;
-    }
-
-    fn set_negative_min(&mut self, ttl: Duration) {
-        self.negative_min = ttl;
-    }
-    fn set_negative_max(&mut self, ttl: Duration) {
-        self.negative_max = ttl;
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutOfDate {
     Yes,
     No,
 }
 
-struct DnsCacheEntry {
-    lookup: Result<DnsResponse, DnsError>,
+struct DnsCacheEntry<T = DnsResponse> {
+    data: T,
     valid_until: Instant,
     is_in_prefetching: bool,
+    last_access: Instant,
 }
 
-impl DnsCacheEntry {
+impl<T> DnsCacheEntry<T> {
+    fn new(data: T, valid_until: Instant) -> Self {
+        Self {
+            data,
+            valid_until,
+            is_in_prefetching: false,
+            last_access: Instant::now(),
+        }
+    }
+
+    fn set_data(&mut self, data: T) {
+        self.data = data;
+        self.is_in_prefetching = false;
+    }
+
+    fn set_valid_until(&mut self, valid_until: Instant) {
+        self.valid_until = valid_until;
+    }
+
     /// Returns true if this set of ips is still valid
     fn is_current(&self, now: Instant) -> bool {
         now <= self.valid_until
@@ -794,7 +692,7 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
 
         let lookups = self
             .iter()
-            .filter_map(|(_, entry)| entry.lookup.clone().ok())
+            .map(|(_, entry)| entry.data.clone())
             .collect::<Vec<_>>();
 
         match cache_to_file(&lookups, path) {
@@ -823,12 +721,7 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
 
                     cache.put(query, {
                         let valid_until = lookup.valid_until();
-
-                        DnsCacheEntry {
-                            lookup: Ok(lookup),
-                            valid_until,
-                            is_in_prefetching: false,
-                        }
+                        DnsCacheEntry::new(lookup, valid_until)
                     });
                 }
                 info!(
@@ -877,85 +770,85 @@ mod tests {
         assert_eq!(&lookups[1], &lookup2[1]);
     }
 
-    #[test]
-    fn test_cache_persist() {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let lookup1 = create_lookup(
-                "abc.exmample.com.",
-                RData::A("127.0.0.1".parse().unwrap()),
-                3000,
-            );
-            let lookup2 = create_lookup(
-                "xyz.exmample.com.",
-                RData::AAAA("::1".parse().unwrap()),
-                3000,
-            );
+    #[tokio::test]
+    async fn test_cache_persist() {
+        let lookup1 = create_lookup(
+            "abc.exmample.com.",
+            RData::A("127.0.0.1".parse().unwrap()),
+            3000,
+        );
+        let lookup2 = create_lookup(
+            "xyz.exmample.com.",
+            RData::AAAA("::1".parse().unwrap()),
+            3000,
+        );
 
-            let cache = DnsCache::new(10, TtlOpts::default());
+        let cache = DnsCache::new(10);
 
-            let now = Instant::now();
+        let now = Instant::now();
 
-            cache
-                .insert_records(
-                    lookup1.query().clone(),
-                    lookup1.record_iter().cloned(),
-                    now,
-                    "default",
-                )
-                .await;
+        cache
+            .insert_records(
+                lookup1.query().clone(),
+                lookup1.record_iter().cloned(),
+                now,
+                "default",
+            )
+            .await;
 
-            cache
-                .insert_records(
-                    lookup2.query().clone(),
-                    lookup2.record_iter().cloned(),
-                    now,
-                    "default",
-                )
-                .await;
+        cache
+            .insert_records(
+                lookup2.query().clone(),
+                lookup2.record_iter().cloned(),
+                now,
+                "default",
+            )
+            .await;
 
-            assert!(cache.get(lookup1.query(), now).await.is_some());
+        sleep(Duration::from_millis(500)).await;
 
-            {
-                let lru_cache = cache.cache();
-                let mut lru_cache = lru_cache.lock().await;
-                assert_eq!(lru_cache.len(), 2);
+        assert!(cache.get(lookup1.query(), now).await.is_some());
 
-                lru_cache.persist("./logs/smartdns-test.cache");
+        {
+            let lru_cache = cache.cache();
+            let mut lru_cache = lru_cache.lock().await;
+            assert_eq!(lru_cache.len(), 2);
 
-                assert!(lru_cache.get(lookup1.query()).is_some());
+            lru_cache.persist("./logs/smartdns-test.cache");
 
-                lru_cache.clear();
+            assert!(lru_cache.get(lookup1.query()).is_some());
 
-                assert_eq!(lru_cache.len(), 0);
+            lru_cache.clear();
 
-                lru_cache.load("./logs/smartdns-test.cache");
+            assert_eq!(lru_cache.len(), 0);
 
-                assert_eq!(lru_cache.len(), 2);
+            lru_cache.load("./logs/smartdns-test.cache");
 
-                assert!(lru_cache
-                    .iter()
-                    .map(|(q, _)| q)
-                    .any(|q| q == lookup1.query()));
-                assert!(lru_cache
-                    .iter()
-                    .map(|(q, _)| q)
-                    .any(|q| q == lookup2.query()));
+            assert_eq!(lru_cache.len(), 2);
 
-                assert!(lru_cache.contains(lookup1.query()));
-                assert!(lru_cache.contains(lookup2.query()));
-            };
+            assert!(lru_cache
+                .iter()
+                .map(|(q, _)| q)
+                .any(|q| q == lookup1.query()));
+            assert!(lru_cache
+                .iter()
+                .map(|(q, _)| q)
+                .any(|q| q == lookup2.query()));
 
-            let res = cache.get(lookup1.query(), now).await;
+            assert!(lru_cache.contains(lookup1.query()));
+            assert!(lru_cache.contains(lookup2.query()));
+        };
 
-            assert!(res.is_some());
+        let res = cache.get(lookup1.query(), now).await;
 
-            let (out_of_date, res) = res.unwrap();
+        assert!(res.is_some());
 
-            assert_eq!(out_of_date, OutOfDate::No);
+        let (out_of_date, res) = res.unwrap();
 
-            let lookup = res.unwrap();
-            assert_eq!(lookup.query(), lookup1.query());
-            assert_eq!(lookup.records(), lookup1.records());
-        })
+        assert_eq!(out_of_date, OutOfDate::No);
+
+        let lookup = res.unwrap();
+        assert_eq!(lookup.query(), lookup1.query());
+        assert_eq!(lookup.records(), lookup1.records());
     }
 }

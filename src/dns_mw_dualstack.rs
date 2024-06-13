@@ -209,8 +209,8 @@ async fn multi_mode_ping_fastest(
                 match ping_res {
                     Ok(ping_out) => {
                         // ping success
-                        let ip = ping_out.destination().ip();
-                        let duration = ping_out.duration();
+                        let ip = ping_out.dest().ip_addr();
+                        let duration = ping_out.elapsed();
                         fastest_ip = Some((ip, duration));
                         break;
                     }

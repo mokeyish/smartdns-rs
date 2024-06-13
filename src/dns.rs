@@ -193,6 +193,17 @@ mod serial_message {
                 .into())
         }
     }
+
+    impl TryFrom<SerialMessage> for Message {
+        type Error = ProtoError;
+
+        fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
+            match value {
+                SerialMessage::Raw(message, _, _) => Ok(message),
+                SerialMessage::Bytes(bytes, _, _) => Message::from_vec(&bytes),
+            }
+        }
+    }
 }
 
 mod request {

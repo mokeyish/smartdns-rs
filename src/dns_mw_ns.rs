@@ -6,6 +6,8 @@ use std::{borrow::Borrow, net::IpAddr, time::Duration};
 use crate::dns_client::{LookupOptions, NameServer};
 
 use crate::infra::ipset::IpSet;
+use crate::infra::ping::{PingError, PingOutput};
+use crate::third_ext::FutureTimeoutExt;
 use crate::{
     config::{ResponseMode, SpeedCheckMode, SpeedCheckModeList},
     dns::*,
@@ -93,8 +95,14 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         };
 
         debug!(
-            "query name: {} type: {} via [Group: {}]",
-            name, rtype, group_name
+            "query name: {} type: {}{} via [Group: {}]",
+            name,
+            rtype,
+            match lookup_options.client_subnet.as_ref() {
+                Some(subnet) => format!("\tsubnet: {}/{}", subnet.addr(), subnet.scope_prefix()),
+                None => String::with_capacity(0),
+            },
+            group_name
         );
 
         ctx.source = LookupFrom::Server(group_name.to_string());
@@ -175,18 +183,17 @@ async fn lookup_ip(
     name: Name,
     options: &LookupIpOptions,
 ) -> Result<DnsResponse, LookupError> {
-    use crate::third_ext::FutureJoinAllExt;
     use futures_util::future::{select, select_all, Either};
     use ResponseMode::*;
 
     assert!(options.record_type.is_ip_addr());
 
-    let mut tasks = server
+    let mut query_tasks = server
         .iter()
         .map(|ns| per_nameserver_lookup_ip(ns, name.clone(), options).boxed())
         .collect::<Vec<_>>();
 
-    if tasks.is_empty() {
+    if query_tasks.is_empty() {
         return Err(ProtoErrorKind::NoConnections.into());
     }
 
@@ -208,11 +215,10 @@ async fn lookup_ip(
 
     let selected_ip = match response_strategy {
         FirstPing => {
-            let mut tasks = tasks;
             let mut ping_tasks = vec![];
-            let mut selected_ip = None;
+            let mut fastest_ip = None;
             loop {
-                let (fastest_ip, res) = match (tasks.len(), ping_tasks.len()) {
+                let (ping_res, query_res) = match (query_tasks.len(), ping_tasks.len()) {
                     (0, 0) => break,
                     (0, _) => {
                         let (fastest_ip, _, rest) = select_all(ping_tasks).await;
@@ -220,22 +226,22 @@ async fn lookup_ip(
                         (fastest_ip, None)
                     }
                     (_, 0) => {
-                        let (res, _idx, rest) = select_all(tasks).await;
-                        tasks = rest;
+                        let (res, _idx, rest) = select_all(query_tasks).await;
+                        query_tasks = rest;
                         (None, Some(res))
                     }
                     _ => {
                         let a = select_all(ping_tasks);
-                        let b = select_all(tasks);
+                        let b = select_all(query_tasks);
                         let c = select(a, b).await;
                         match c {
                             Either::Left(((fastest_ip, _, rest), other)) => {
                                 ping_tasks = rest;
-                                tasks = other.into_inner();
+                                query_tasks = other.into_inner();
                                 (fastest_ip, None)
                             }
                             Either::Right(((res, _, rest), other)) => {
-                                tasks = rest;
+                                query_tasks = rest;
                                 ping_tasks = other.into_inner();
                                 (None, Some(res))
                             }
@@ -243,12 +249,12 @@ async fn lookup_ip(
                     }
                 };
 
-                if let Some(fastest_ip) = fastest_ip {
-                    selected_ip = Some(fastest_ip);
+                if let Some(ip) = ping_res {
+                    fastest_ip = Some(ip);
                     break;
                 }
 
-                match res {
+                match query_res {
                     Some(v) => match v {
                         Ok(lookup) => {
                             let ip_addrs = lookup.ip_addrs();
@@ -273,17 +279,17 @@ async fn lookup_ip(
                 }
             }
 
-            let selected_ip = match selected_ip {
-                Some(selected_ip) => Some(selected_ip),
+            let selected_ip = match fastest_ip {
+                Some(ip) => Some(ip),
                 None => {
-                    let ip_addrs_map = ok_tasks.iter().flat_map(|r| r.ip_addrs()).fold(
+                    let ip_addr_stats = ok_tasks.iter().flat_map(|r| r.ip_addrs()).fold(
                         HashMap::<IpAddr, usize>::new(),
                         |mut map, ip| {
                             map.entry(ip).and_modify(|n| *n += 1).or_insert(1);
                             map
                         },
                     );
-                    ip_addrs_map
+                    ip_addr_stats
                         .into_iter()
                         .max_by_key(|(_, n)| *n)
                         .map(|(ip, _)| ip)
@@ -293,53 +299,128 @@ async fn lookup_ip(
             selected_ip
         }
         FastestIp => {
-            for res in tasks.join_all().await {
-                match res {
-                    Ok(v) => ok_tasks.push(v),
-                    Err(e) => err_tasks.push(e),
+            let mut ping_tasks = vec![];
+
+            let mut ip_addr_stats = HashMap::new();
+
+            let mut fastest_ip: Option<PingOutput> = None;
+
+            loop {
+                #[allow(clippy::type_complexity)]
+                let (ping_res, query_res): (
+                    Option<Result<PingOutput, PingError>>,
+                    Option<Result<DnsResponse, DnsError>>,
+                ) = match (query_tasks.len(), ping_tasks.len()) {
+                    (0, 0) => break,
+                    (0, _) => {
+                        let (res, _idx, rest) = select_all(ping_tasks).await;
+                        ping_tasks = rest;
+                        (Some(res), None)
+                    }
+                    (_, 0) => {
+                        let (res, _idx, rest) = select_all(query_tasks).await;
+                        query_tasks = rest;
+                        (None, Some(res))
+                    }
+                    _ => {
+                        let a = select_all(ping_tasks);
+                        let b = select_all(query_tasks);
+                        let c = select(a, b).await;
+                        match c {
+                            Either::Left(((res, _, rest), other)) => {
+                                ping_tasks = rest;
+                                query_tasks = other.into_inner();
+                                (Some(res), None)
+                            }
+                            Either::Right(((res, _, rest), other)) => {
+                                query_tasks = rest;
+                                ping_tasks = other.into_inner();
+                                (None, Some(res))
+                            }
+                        }
+                    }
+                };
+
+                if let Some(Ok(out)) = ping_res {
+                    if match fastest_ip.as_ref() {
+                        Some(t) => out.elapsed() < t.elapsed(),
+                        None => {
+                            // first get speed, add timeout
+                            query_tasks = query_tasks
+                                .into_iter()
+                                .map(|q| {
+                                    async {
+                                        match q.timeout(Duration::from_millis(200)).await {
+                                            Ok(t) => t,
+                                            Err(_) => Err(ProtoErrorKind::Timeout.into()),
+                                        }
+                                    }
+                                    .boxed()
+                                })
+                                .collect();
+
+                            true
+                        }
+                    } {
+                        fastest_ip = Some(out);
+                    }
+                }
+
+                if let Some(res) = query_res {
+                    match res {
+                        Ok(lookup) => {
+                            let ip_addrs = lookup.ip_addrs();
+
+                            for ip_addr in &ip_addrs {
+                                *ip_addr_stats.entry(*ip_addr).or_insert_with(|| {
+                                    ping_tasks.push(
+                                        multi_mode_ping(
+                                            name.clone(),
+                                            *ip_addr,
+                                            speed_check_mode.to_vec(),
+                                        )
+                                        .boxed(),
+                                    );
+                                    0u8
+                                }) += 1;
+                            }
+                            ok_tasks.push(lookup);
+                        }
+                        Err(err) => {
+                            err_tasks.push(err);
+                        }
+                    }
                 }
             }
 
-            if ok_tasks.is_empty() {
-                return Err(err_tasks.into_iter().next().unwrap()); // There is definitely one.
-            }
-
-            let ip_addrs_map = ok_tasks.iter().flat_map(|r| r.ip_addrs()).fold(
-                HashMap::<IpAddr, usize>::new(),
-                |mut map, ip| {
-                    map.entry(ip).and_modify(|n| *n += 1).or_insert(1);
-                    map
-                },
-            );
-
-            let mut ip_addrs = ip_addrs_map.keys().cloned().collect::<Vec<_>>();
-
-            match ip_addrs.len() {
-                0 => None,
-                1 => ip_addrs.pop(),
-                _ => {
-                    let fastest_ip =
-                        multi_mode_ping_fastest(name.clone(), ip_addrs, speed_check_mode.to_vec())
-                            .await;
-
-                    fastest_ip.or_else(|| {
-                        ip_addrs_map
-                            .into_iter()
-                            .max_by_key(|(_, n)| *n)
-                            .map(|(ip, _)| ip)
-                    })
-                }
+            match fastest_ip {
+                Some(fastest_ip) => Some(fastest_ip.dest().ip_addr()),
+                None => ip_addr_stats
+                    .into_iter()
+                    .max_by_key(|(_, n)| *n)
+                    .map(|(ip, _)| ip),
             }
         }
-        FastestResponse => loop {
-            let (res, _idx, rest) = select_all(tasks).await;
-            if rest.is_empty()
-                || matches!(&res, Ok(res) if res.answers().iter().any(|r| r.record_type() == options.record_type))
-            {
-                return res;
+        FastestResponse => {
+            let mut last_error = None;
+            loop {
+                let (res, _idx, rest) = select_all(query_tasks).await;
+                if rest.is_empty()
+                    || matches!(&res, Ok(res) if res.answers().iter().any(|r| r.record_type() == options.record_type))
+                {
+                    return res;
+                }
+
+                if let Err(err) = res {
+                    if matches!(last_error, Some(e) if e == err) {
+                        return Err(err);
+                    } else {
+                        last_error = Some(err);
+                    }
+                }
+                query_tasks = rest;
             }
-            tasks = rest;
-        },
+        }
     };
 
     if let Some(selected_ip) = selected_ip {
@@ -387,12 +468,12 @@ async fn multi_mode_ping_fastest(
                 match ping_res {
                     Ok(ping_out) => {
                         // ping success
-                        let ip = ping_out.destination().ip();
+                        let ip = ping_out.dest().ip_addr();
                         debug!(
                             "The fastest ip of {} is {}, delay: {:?}",
                             name,
                             ip,
-                            ping_out.duration()
+                            ping_out.elapsed()
                         );
                         fastest_ip = Some(ip);
                         break;
@@ -408,6 +489,44 @@ async fn multi_mode_ping_fastest(
     }
 
     fastest_ip
+}
+
+async fn multi_mode_ping(
+    name: Name,
+    ip_addr: IpAddr,
+    modes: Vec<SpeedCheckMode>,
+) -> Result<PingOutput, PingError> {
+    use crate::infra::ping::{ping, PingOptions};
+    let duration = Duration::from_millis(200);
+    let ping_ops = PingOptions::default().with_timeout_secs(2);
+
+    for mode in &modes {
+        let dest = mode.to_ping_addr(ip_addr);
+
+        let ping_task = ping(dest, ping_ops).boxed();
+        let timeout_task = sleep(duration).boxed();
+        match futures_util::future::select(ping_task, timeout_task).await {
+            futures::future::Either::Left((ping_res, _)) => match ping_res {
+                Ok(ping_out) => {
+                    debug!(
+                        "Speed test {} {:?} ping {:?} elapsed {:?}",
+                        name,
+                        mode,
+                        ip_addr,
+                        ping_out.elapsed()
+                    );
+                    return Ok(ping_out);
+                }
+                Err(_) => continue,
+            },
+            futures::future::Either::Right((_, _)) => {
+                // timeout
+                continue;
+            }
+        }
+    }
+
+    Err(PingError::Timeout)
 }
 
 async fn per_nameserver_lookup_ip(

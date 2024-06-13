@@ -36,6 +36,22 @@ pub enum LookupError {
     Io(Arc<io::Error>),
 }
 
+impl PartialEq for LookupError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::ResponseCode(l0), Self::ResponseCode(r0)) => l0 == r0,
+            (Self::Proto(l0), Self::Proto(r0)) => l0.to_string() == r0.to_string(),
+            (Self::ResolveError(l0), Self::ResolveError(r0)) => l0.to_string() == r0.to_string(),
+            #[cfg(feature = "hickory-recursor")]
+            (Self::RecursiveError(l0), Self::RecursiveError(r0)) => {
+                l0.to_string() == r0.to_string()
+            }
+            (Self::Io(l0), Self::Io(r0)) => l0.to_string() == r0.to_string(),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
 impl LookupError {
     pub fn is_nx_domain(&self) -> bool {
         matches!(self, Self::ResponseCode(resc) if resc.eq(&ResponseCode::NXDomain))
