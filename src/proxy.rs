@@ -138,7 +138,7 @@ impl Deref for UdpSocket {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProxyConfig {
     pub proto: ProxyProtocol,
     pub server: SocketAddr,
@@ -210,7 +210,7 @@ impl FromStr for ProxyConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProxyProtocol {
     Socks5,
     Http,
