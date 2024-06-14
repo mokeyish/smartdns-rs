@@ -196,7 +196,7 @@ impl From<crate::libdns::proto::op::Message> for JsonMessage {
                     name: r.name().to_string(),
                     r#type: r.record_type().into(),
                     TTL: r.ttl(),
-                    data: r.data().map(|r| r.to_string()).unwrap_or_default(),
+                    data: r.data().to_string(),
                 })
                 .collect(),
         }

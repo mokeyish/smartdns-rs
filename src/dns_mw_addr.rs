@@ -54,7 +54,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
                         if max_reply_ip_num > 0 {
                             let mut truncate = None;
                             for (i, r) in records.iter().enumerate() {
-                                if matches!(r.data(), Some(RData::A(_) | RData::AAAA(_))) {
+                                if matches!(r.data(), RData::A(_) | RData::AAAA(_)) {
                                     max_reply_ip_num -= 1;
                                     if max_reply_ip_num == 0 {
                                         truncate = Some(i + 1);
@@ -515,7 +515,7 @@ mod tests {
 
         let ip_count: u8 = lookup
             .record_iter()
-            .map(|r| matches!(r.data(), Some(RData::A(_) | RData::AAAA(_))) as u8)
+            .map(|r| matches!(r.data(), RData::A(_) | RData::AAAA(_)) as u8)
             .sum();
 
         assert_eq!(ip_count, 2);

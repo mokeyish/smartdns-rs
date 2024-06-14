@@ -24,8 +24,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsBogusMiddl
             if let Ok(lookup) = res.as_ref() {
                 for record in lookup.records() {
                     if match record.data() {
-                        Some(RData::A(ip)) if bogus_nxdomain.contains(ip.deref()) => true,
-                        Some(RData::AAAA(ip)) if bogus_nxdomain.contains(ip.deref()) => true,
+                        RData::A(ip) if bogus_nxdomain.contains(ip.deref()) => true,
+                        RData::AAAA(ip) if bogus_nxdomain.contains(ip.deref()) => true,
                         _ => false,
                     } {
                         return Err(ResponseCode::NXDomain.into());

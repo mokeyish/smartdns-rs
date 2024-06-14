@@ -1352,8 +1352,7 @@ mod bootstrap {
                         record_type,
                         records
                             .iter()
-                            .flat_map(|r| r.data().map(|d| d.ip_addr()))
-                            .flatten()
+                            .flat_map(|r| r.data().ip_addr())
                             .collect::<Vec<_>>()
                     );
 

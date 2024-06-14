@@ -223,13 +223,9 @@ mod tests {
             name: N,
             query_type: RecordType,
         ) -> Result<Vec<RData>, DnsError> {
-            self.lookup(name, query_type).await.map(|lookup| {
-                lookup
-                    .record_iter()
-                    .flat_map(|s| s.data())
-                    .cloned()
-                    .collect()
-            })
+            self.lookup(name, query_type)
+                .await
+                .map(|lookup| lookup.record_iter().map(|s| s.data()).cloned().collect())
         }
     }
 
