@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    hash::{DefaultHasher, Hash, Hasher},
     net::{IpAddr, SocketAddr},
     ops::Deref,
     path::PathBuf,
@@ -434,7 +435,7 @@ impl GenericResolver for NameServerGroup {
 
 pub struct NameServerFactory {
     tls_client_config: TlsClientConfigBundle,
-    cache: RwLock<HashMap<String, Arc<NameServer>>>,
+    cache: RwLock<HashMap<u64, Arc<NameServer>>>,
 }
 
 impl NameServerFactory {
@@ -455,14 +456,15 @@ impl NameServerFactory {
     ) -> Arc<NameServer> {
         use crate::libdns::resolver::name_server::NameServer as N;
 
-        let key = format!(
-            "{}: {}{:?}#{}@{}",
-            url.proto(),
-            **url,
-            proxy.as_ref().map(|s| s.to_string()),
-            so_mark.unwrap_or_default(),
-            device.as_deref().unwrap_or_default(),
-        );
+        let key = {
+            let mut hasher = DefaultHasher::new();
+            url.hash(&mut hasher);
+            proxy.hash(&mut hasher);
+            so_mark.hash(&mut hasher);
+            device.hash(&mut hasher);
+            resolver_opts.hash(&mut hasher);
+            hasher.finish()
+        };
 
         if let Some(ns) = self.cache.read().await.get(&key) {
             return ns.clone();
@@ -714,7 +716,7 @@ impl GenericResolver for NameServer {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub struct NameServerOpts {
     /// filter result with blacklist ip
     pub blacklist_ip: bool,
