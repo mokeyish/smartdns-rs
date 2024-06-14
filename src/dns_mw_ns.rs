@@ -54,8 +54,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     lookup
                         .answers()
                         .iter()
-                        .filter_map(|record| record.data().map(|data| data.ip_addr()))
-                        .flatten()
+                        .filter_map(|record| record.data().ip_addr())
                         .collect::<Vec<_>>()
                 );
                 ctx.no_cache = true;
@@ -345,9 +344,10 @@ async fn lookup_ip(
 
     if let Some(selected_ip) = selected_ip {
         for mut res in ok_tasks {
-            let record = res.take_answers().into_iter().find(
-                |r| matches!(r.data().and_then(|d| d.ip_addr()), Some(ip) if ip == selected_ip),
-            );
+            let record = res
+                .take_answers()
+                .into_iter()
+                .find(|r| matches!(r.data().ip_addr(), Some(ip) if ip == selected_ip));
             if let Some(record) = record {
                 res.add_answer(record);
                 return Ok(res);
@@ -454,8 +454,8 @@ async fn per_nameserver_lookup_ip(
             let answers = lookup
                 .answers()
                 .iter()
-                .filter(|record| match record.data().map(|data| data.ip_addr()) {
-                    Some(Some(ip)) => ip_filter(&ip),
+                .filter(|record| match record.data().ip_addr() {
+                    Some(ip) => ip_filter(&ip),
                     _ => false,
                 })
                 .cloned()

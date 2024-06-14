@@ -847,11 +847,11 @@ mod tests {
 
     use super::*;
 
-    fn create_lookup(name: &str, rr_type: RecordType, ttl: u64) -> DnsResponse {
+    fn create_lookup(name: &str, data: RData, ttl: u64) -> DnsResponse {
         let name: Name = name.parse().unwrap();
         let ttl = Duration::from_secs(ttl);
-        let query = Query::query(name.clone(), rr_type);
-        let records = vec![Record::with(name, rr_type, ttl.as_secs() as u32)];
+        let query = Query::query(name.clone(), data.record_type());
+        let records = vec![Record::from_rdata(name, ttl.as_secs() as u32, data)];
         let valid_until = Instant::now() + ttl;
         DnsResponse::new_with_deadline(query, records, valid_until)
     }
@@ -859,8 +859,12 @@ mod tests {
     #[test]
     fn test_lookup_serde() {
         let lookups = vec![
-            create_lookup("abc.exmample.com", RecordType::A, 30),
-            create_lookup("xyz.exmample.com.", RecordType::AAAA, 38),
+            create_lookup(
+                "abc.exmample.com",
+                RData::A("127.0.0.1".parse().unwrap()),
+                30,
+            ),
+            create_lookup("xyz.exmample.com.", RData::AAAA("::1".parse().unwrap()), 38),
         ];
 
         let mut data = vec![];
@@ -876,8 +880,16 @@ mod tests {
     #[test]
     fn test_cache_persist() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let lookup1 = create_lookup("abc.exmample.com.", RecordType::A, 3000);
-            let lookup2 = create_lookup("xyz.exmample.com.", RecordType::A, 3000);
+            let lookup1 = create_lookup(
+                "abc.exmample.com.",
+                RData::A("127.0.0.1".parse().unwrap()),
+                3000,
+            );
+            let lookup2 = create_lookup(
+                "xyz.exmample.com.",
+                RData::AAAA("::1".parse().unwrap()),
+                3000,
+            );
 
             let cache = DnsCache::new(10, TtlOpts::default());
 

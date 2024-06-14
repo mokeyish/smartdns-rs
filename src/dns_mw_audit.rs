@@ -110,10 +110,10 @@ impl DnsAuditRecord {
             for (i, record) in lookup
                 .records()
                 .iter()
-                .filter(|r| r.data().is_some())
+                // .filter(|r| r.data().is_some())
                 .enumerate()
             {
-                let data = record.data().unwrap();
+                let data = record.data();
 
                 if i > 0 {
                     out.push('|');

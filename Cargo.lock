@@ -131,6 +131,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-recursion"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b43422f69d8ff38f95f1b2bb76517c91589a924d1559a0e935d7c8ce0274c11"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "async-socks5"
 version = "0.6.0"
 source = "git+https://github.com/mokeyish/async-socks5.git?rev=f78eec5#f78eec58e8befd8b9615364b96e06fb2f20e009d"
@@ -158,9 +169,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "axum"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1236b4b292f6c4d6dc34604bb5120d85c3fe1d1aa596bd5cc52ca054d13e7b9e"
+checksum = "3a6c9af12842a67734c9a2e355436e5d03b22383ed60cf13cd0c18fbfe3dcbcf"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -182,7 +193,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
- "sync_wrapper",
+ "sync_wrapper 1.0.1",
  "tokio",
  "tower",
  "tower-layer",
@@ -205,7 +216,7 @@ dependencies = [
  "mime",
  "pin-project-lite",
  "rustversion",
- "sync_wrapper",
+ "sync_wrapper 0.1.2",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -1041,10 +1052,12 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hickory-proto"
-version = "0.24.0"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=18302fe#18302feebfe0171ebe3941682651269ef0f6ebb0"
+version = "0.24.1"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=5a41208#5a41208bb3a385459c979d28cbe782b4eb9ca485"
 dependencies = [
+ "async-recursion",
  "async-trait",
+ "bitflags 2.4.2",
  "bytes",
  "cfg-if",
  "data-encoding",
@@ -1074,9 +1087,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "hickory-recursor"
+version = "0.24.1"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=5a41208#5a41208bb3a385459c979d28cbe782b4eb9ca485"
+dependencies = [
+ "async-recursion",
+ "async-trait",
+ "bytes",
+ "cfg-if",
+ "enum-as-inner",
+ "futures-util",
+ "hickory-proto",
+ "hickory-resolver",
+ "lru-cache",
+ "parking_lot",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "hickory-resolver"
-version = "0.24.0"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=18302fe#18302feebfe0171ebe3941682651269ef0f6ebb0"
+version = "0.24.1"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=5a41208#5a41208bb3a385459c979d28cbe782b4eb9ca485"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -1098,8 +1132,8 @@ dependencies = [
 
 [[package]]
 name = "hickory-server"
-version = "0.24.0"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=18302fe#18302feebfe0171ebe3941682651269ef0f6ebb0"
+version = "0.24.1"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=5a41208#5a41208bb3a385459c979d28cbe782b4eb9ca485"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1108,6 +1142,7 @@ dependencies = [
  "futures-util",
  "h2",
  "hickory-proto",
+ "hickory-recursor",
  "hickory-resolver",
  "http",
  "ipnet",
@@ -1143,9 +1178,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
+checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
 dependencies = [
  "bytes",
  "fnv",
@@ -1852,9 +1887,9 @@ checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
 
 [[package]]
 name = "prefix-trie"
-version = "0.2.5"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85fe48f29e6e6fcf123d0d03d63028dbe4c4a738023d35d525df4882f4929418"
+checksum = "04cb065e4407d69a5a5265221262cceeafff7f1aabc545d01ed955cce92ee78b"
 dependencies = [
  "ipnet",
  "num-traits",
@@ -2141,7 +2176,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "sync_wrapper",
+ "sync_wrapper 0.1.2",
  "tokio",
  "tokio-rustls 0.25.0",
  "tower-service",
@@ -2765,6 +2800,12 @@ name = "sync_wrapper"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
+
+[[package]]
+name = "sync_wrapper"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7065abeca94b6a8a577f9bd45aa0867a2238b74e8eb67cf10d492bc39351394"
 
 [[package]]
 name = "synstructure"

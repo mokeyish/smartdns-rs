@@ -32,7 +32,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsNftsetMidd
                     let ips = lookup
                         .records()
                         .iter()
-                        .filter_map(|r| r.data().and_then(|d| d.ip_addr()))
+                        .filter_map(|r| r.data().ip_addr())
                         .collect::<Vec<_>>();
                     if !ips.is_empty() {
                         let nft = self.nft.clone();

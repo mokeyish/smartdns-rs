@@ -450,7 +450,7 @@ mod response {
             self.message()
                 .answers()
                 .iter()
-                .flat_map(|r| r.data().and_then(|d| d.ip_addr()))
+                .flat_map(|r| r.data().ip_addr())
         }
 
         pub fn set_valid_until_max(&mut self) {
