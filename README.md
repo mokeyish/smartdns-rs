@@ -162,7 +162,7 @@ cd smartdns-rs
 cargo install just
 
 # build
-just build
+just build --release
 
 # print help
 ./target/release/smartdns --help

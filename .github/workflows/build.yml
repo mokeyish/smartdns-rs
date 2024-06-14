@@ -10,14 +10,16 @@ on:
       features:
         type: string
         required: false
-        default: dns-over-tls,dns-over-https,dns-over-quic,dns-over-h3,dnssec,service,nft,self-update
+        default: default
+        description: Space or comma separated list of features to activate
 
   workflow_dispatch:
     inputs:
       features:
         type: string
         required: false
-        default: dns-over-tls,dns-over-https,dns-over-quic,dns-over-h3,dnssec,service,nft,self-update
+        default: default
+        description: Space or comma separated list of features to activate
 
 
 jobs:

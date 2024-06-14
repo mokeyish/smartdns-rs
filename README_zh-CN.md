@@ -161,7 +161,7 @@ cd smartdns-rs
 cargo install just
 
 # 编译
-just build
+just build --release
 
 # 查看命令帮助
 ./target/release/smartdns help

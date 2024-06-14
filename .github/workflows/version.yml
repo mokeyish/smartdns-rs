@@ -9,7 +9,7 @@ on:
         required: true
         type: choice
         options: [major, minor, patch, rc, beta, alpha]
-        default: 'minor'
+        default: 'patch'
 
 jobs:
   bump:
