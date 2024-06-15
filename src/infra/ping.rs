@@ -8,7 +8,19 @@ use std::{
 };
 use thiserror::Error;
 
-pub async fn ping(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutput, PingError>> {
+pub async fn ping(dest: PingAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
+    match dest {
+        PingAddr::Icmp(addr) => icmp::ping(addr, opts).await,
+        PingAddr::Tcp(addr) => tcp::ping(addr, opts).await,
+        PingAddr::Http(addr) => http::ping(addr, opts).await,
+        PingAddr::Https(addr) => https::ping(addr, opts).await,
+    }
+}
+
+pub async fn ping_batch(
+    dests: &[PingAddr],
+    opts: PingOptions,
+) -> Vec<Result<PingOutput, PingError>> {
     let mut outs = Vec::new();
 
     for dest in dests.iter() {
@@ -20,19 +32,6 @@ pub async fn ping(dests: &[PingAddr], opts: PingOptions) -> Vec<Result<PingOutpu
         })
     }
     outs
-}
-
-pub async fn ping_one<D: TryInto<PingAddr, Error = PingError>>(
-    dest: D,
-    opts: PingOptions,
-) -> Result<PingOutput, PingError> {
-    let dest = dest.try_into()?;
-    match dest {
-        PingAddr::Icmp(addr) => icmp::ping(addr, opts).await,
-        PingAddr::Tcp(addr) => tcp::ping(addr, opts).await,
-        PingAddr::Http(addr) => http::ping(addr, opts).await,
-        PingAddr::Https(addr) => https::ping(addr, opts).await,
-    }
 }
 
 pub async fn ping_fastest(
@@ -117,7 +116,7 @@ pub enum PingAddr {
 }
 
 impl PingAddr {
-    pub fn ip(self) -> IpAddr {
+    pub fn ip_addr(self) -> IpAddr {
         match self {
             PingAddr::Icmp(ip) => ip,
             PingAddr::Tcp(addr) => addr.ip(),
@@ -129,7 +128,7 @@ impl PingAddr {
 
 impl PartialEq<IpAddr> for PingAddr {
     fn eq(&self, other: &IpAddr) -> bool {
-        self.ip() == *other
+        self.ip_addr() == *other
     }
 }
 impl PartialEq<Ipv4Addr> for PingAddr {
@@ -187,7 +186,7 @@ impl TryFrom<&str> for PingAddr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PingOutput {
     seq: u16,
     duration: Duration,
@@ -201,12 +200,12 @@ impl PingOutput {
     }
 
     #[inline]
-    pub fn duration(&self) -> Duration {
+    pub fn elapsed(&self) -> Duration {
         self.duration
     }
 
     #[inline]
-    pub fn destination(&self) -> PingAddr {
+    pub fn dest(&self) -> PingAddr {
         self.destination
     }
 }
@@ -217,6 +216,8 @@ pub enum PingError {
     PingTargetParseError,
     #[error("addr parse error {0}")]
     AddrParseError(#[from] AddrParseError),
+    #[error("addr parse error {0}")]
+    AddrParseError2(String),
     #[error("Ping timeout")]
     Timeout,
     #[error("io error {0}")]
@@ -232,6 +233,7 @@ impl Clone for PingError {
         match self {
             Self::PingTargetParseError => Self::PingTargetParseError,
             Self::AddrParseError(arg0) => Self::AddrParseError(arg0.clone()),
+            Self::AddrParseError2(arg0) => Self::AddrParseError2(arg0.clone()),
             Self::Timeout => Self::Timeout,
             Self::IoError(err) => Self::IoError(err.kind().into()),
             Self::SurgeError => Self::SurgeError,
@@ -855,7 +857,7 @@ mod tests {
             .unwrap();
 
         rt.block_on(async {
-            let results = ping(
+            let results = ping_batch(
                 &[
                     "127.0.0.1".parse().unwrap(),
                     "icmp://223.6.6.6".parse().unwrap(),
@@ -908,7 +910,7 @@ mod tests {
             .build()
             .unwrap()
             .block_on(async {
-                let res = ping_one("https://1.1.1.1:443", Default::default())
+                let res = ping("https://1.1.1.1:443".parse().unwrap(), Default::default())
                     .await
                     .unwrap();
                 assert!(res.duration < Duration::from_secs(5))

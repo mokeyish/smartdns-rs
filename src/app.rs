@@ -15,11 +15,12 @@ use crate::{
     config::ServerOpts,
     dns::{DnsRequest, DnsResponse, SerialMessage},
     dns_conf::RuntimeConfig,
+    dns_error::LookupError,
     dns_mw::{DnsMiddlewareBuilder, DnsMiddlewareHandler},
     dns_mw_cache::DnsCache,
     log,
     server::{DnsHandle, IncomingDnsRequest, ServerHandle},
-    third_ext::FutureJoinAllExt as _,
+    third_ext::{FutureJoinAllExt as _, FutureTimeoutExt},
 };
 
 pub struct App {
@@ -412,7 +413,28 @@ async fn process(
                             response_header.set_authoritative(false);
 
                             let response = {
-                                match handler.search(&request, &server_opts).await {
+                                let res =
+                                    handler
+                                        .search(&request, &server_opts)
+                                        .timeout(Duration::from_secs(
+                                            if server_opts.is_background { 60 } else { 5 },
+                                        ))
+                                        .await
+                                        .unwrap_or_else(|_| {
+                                            let query = request.query().original().to_owned();
+                                            log::warn!(
+                                                "Query {} {} {} timeout.",
+                                                query.name(),
+                                                query.query_type(),
+                                                if server_opts.is_background {
+                                                    "in background"
+                                                } else {
+                                                    ""
+                                                }
+                                            );
+                                            Err(LookupError::no_records_found(query, 10))
+                                        });
+                                match res {
                                     Ok(lookup) => lookup,
                                     Err(e) => {
                                         if e.is_nx_domain() {

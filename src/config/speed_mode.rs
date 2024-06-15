@@ -48,7 +48,7 @@ impl std::fmt::Debug for SpeedCheckMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct SpeedCheckModeList(pub Vec<SpeedCheckMode>);
 
 impl SpeedCheckModeList {
@@ -69,6 +69,16 @@ impl From<Vec<SpeedCheckMode>> for SpeedCheckModeList {
             lst.push(mode);
         }
         lst
+    }
+}
+
+impl std::fmt::Debug for SpeedCheckModeList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, m) in self.0.iter().enumerate() {
+            let last = i == self.len() - 1;
+            write!(f, "{:?}{}", m, if !last { ", " } else { "" })?;
+        }
+        Ok(())
     }
 }
 

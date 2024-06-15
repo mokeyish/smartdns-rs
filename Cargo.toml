@@ -3,7 +3,7 @@ name = "smartdns"
 version = "0.8.4"
 authors = ["YISH <mokeyish@hotmail.com>"]
 edition = "2021"
-rust-version = "1.70.0"
+rust-version = "1.75.0"
 
 keywords = ["DNS", "BIND", "dig", "named", "dnssec", "SmartDNS", "Dnsmasq"]
 categories = ["network-programming"]

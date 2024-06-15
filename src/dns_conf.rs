@@ -134,6 +134,35 @@ impl RuntimeConfig {
                 DEFAULT_GROUP
             );
         }
+
+        info!(
+            "cache: {}",
+            if self.cache_size() > 0 {
+                format!("size({})", self.cache_size())
+            } else {
+                "OFF".to_string()
+            }
+        );
+
+        if self.cache_size() > 0 {
+            info!(
+                "cache persist: {}",
+                if self.cache_persist() { "YES" } else { "NO" }
+            );
+
+            info!(
+                "domain prefetch: {}",
+                if self.prefetch_domain() { "ON" } else { "OFF" }
+            );
+        }
+
+        info!(
+            "speed check mode: {}",
+            match self.speed_check_mode() {
+                Some(mode) => format!("{:?}", mode),
+                None => "OFF".to_string(),
+            }
+        );
     }
 
     pub fn server_name(&self) -> Name {
