@@ -164,7 +164,7 @@ async-http-proxy = { version = "1.2.5", features = [
   "basic-auth",
 ] }
 
-num-traits = "0.2.15"
+num-traits = "0.2.19"
 url = "2.5.1"
 # regex = "1"
 # rnp = "0.1"
