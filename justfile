@@ -63,6 +63,10 @@ patch: # require_patch-crate
   @#cargo patch-crate -f
 
 
+setcap:
+  sudo find ./target -type f -name smartdns -exec setcap CAP_SYS_ADMIN,CAP_NET_ADMIN,CAP_NET_RAW,CAP_NET_BIND_SERVICE+eip  {} \;
+  @find ./target -type f -name smartdns
+
 [private]
 @require_patch-crate:
   cargo patch-crate --version >/dev/null 2>&1 || cargo install patch-crate

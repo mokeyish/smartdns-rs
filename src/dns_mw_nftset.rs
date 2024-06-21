@@ -1,17 +1,13 @@
-use std::sync::Arc;
-
 use crate::config::ConfigForIP;
 use crate::dns::*;
-use crate::ffi::nft::Nft;
+use crate::ffi::nftset;
 use crate::middleware::*;
 
-pub struct DnsNftsetMiddleware {
-    nft: Arc<Nft>,
-}
+pub struct DnsNftsetMiddleware;
 
 impl DnsNftsetMiddleware {
-    pub fn new<T: Into<Arc<Nft>>>(nft: T) -> Self {
-        Self { nft: nft.into() }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -29,48 +25,37 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsNftsetMidd
             if let Some(rule) = &ctx.domain_rule {
                 let nftsets = rule.get(|n| n.nftset.as_ref().cloned());
                 if let Some(nftsets) = nftsets {
-                    let ips = lookup
+                    let ip_addrs = lookup
                         .records()
                         .iter()
                         .filter_map(|r| r.data().ip_addr())
                         .collect::<Vec<_>>();
-                    if !ips.is_empty() {
-                        let nft = self.nft.clone();
+
+                    if !ip_addrs.is_empty() {
                         tokio::spawn(async move {
-                            use std::net::IpAddr::*;
-                            let (ipv4s, ipv6s) = {
-                                let mut ipv4s = vec![];
-                                let mut ipv6s = vec![];
-                                for ip in ips {
-                                    match ip {
-                                        V4(ip) => ipv4s.push(ip),
-                                        V6(ip) => ipv6s.push(ip),
-                                    }
-                                }
-                                (ipv4s, ipv6s)
-                            };
-                            if !ipv4s.is_empty() {
+                            let (ipv4_addrs, ipv6_addrs): (Vec<_>, Vec<_>) =
+                                ip_addrs.into_iter().partition(|ip| ip.is_ipv4());
+
+                            if !ipv4_addrs.is_empty() {
                                 for nftset in &nftsets {
                                     if let ConfigForIP::V4(cfg) = nftset {
-                                        let _ = nft.add_ip_element(
-                                            cfg.family,
-                                            &cfg.table,
-                                            &cfg.name,
-                                            ipv4s.as_slice(),
-                                        );
+                                        for ip in ipv4_addrs.iter() {
+                                            let _ = nftset::add(
+                                                cfg.family, &cfg.table, &cfg.name, *ip, 0,
+                                            );
+                                        }
                                     }
                                 }
                             }
 
-                            if !ipv6s.is_empty() {
+                            if !ipv6_addrs.is_empty() {
                                 for nftset in &nftsets {
                                     if let ConfigForIP::V6(cfg) = nftset {
-                                        let _ = nft.add_ip_element(
-                                            cfg.family,
-                                            &cfg.table,
-                                            &cfg.name,
-                                            ipv6s.as_slice(),
-                                        );
+                                        for ip in ipv6_addrs.iter() {
+                                            let _ = nftset::add(
+                                                cfg.family, &cfg.table, &cfg.name, *ip, 0,
+                                            );
+                                        }
                                     }
                                 }
                             }

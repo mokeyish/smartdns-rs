@@ -180,33 +180,8 @@ impl App {
             // nftset
             #[cfg(all(feature = "nft", target_os = "linux"))]
             {
-                use crate::config::ConfigForIP;
                 use crate::dns_mw_nftset::DnsNftsetMiddleware;
-                use crate::ffi::nft::Nft;
-                let nftsets = cfg.valid_nftsets();
-                if !nftsets.is_empty() {
-                    let nft = Nft::new();
-                    if nft.avaliable() {
-                        let mut success = true;
-                        for i in nftsets {
-                            if let Err(err) = match i {
-                                ConfigForIP::V4(c) => nft.add_ipv4_set(c.family, &c.table, &c.name),
-                                ConfigForIP::V6(c) => nft.add_ipv6_set(c.family, &c.table, &c.name),
-                                _ => Ok(()),
-                            } {
-                                log::warn!("nft add set failed, {:?}, skipped", err);
-                                success = false;
-                                break;
-                            }
-                        }
-                        if success {
-                            middleware_builder =
-                                middleware_builder.with(DnsNftsetMiddleware::new(nft));
-                        }
-                    } else {
-                        log::warn!("nft is not avaliable, skipped.",);
-                    }
-                }
+                middleware_builder = middleware_builder.with(DnsNftsetMiddleware::new());
             }
 
             middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);

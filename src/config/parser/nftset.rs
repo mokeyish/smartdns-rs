@@ -11,8 +11,14 @@ impl NomParser for NftsetConfig {
             value("ip", tag("ip")),
         ));
 
-        let table = preceded(char('#'), alphanumeric1);
-        let name = preceded(char('#'), alphanumeric1);
+        let table = preceded(
+            char('#'),
+            take_while1(|c: char| c.is_ascii_alphanumeric() || c == '_'),
+        );
+        let name = preceded(
+            char('#'),
+            take_while1(|c: char| c.is_ascii_alphanumeric() || c == '_'),
+        );
 
         let (input, (family, table, name)) = tuple((family, table, name))(input)?;
         Ok((
@@ -66,13 +72,13 @@ mod tests {
     #[test]
     fn test() {
         assert_eq!(
-            NftsetConfig::parse("inet#tab1#dns4").unwrap(),
+            NftsetConfig::parse("inet#tab1#dns_4").unwrap(),
             (
                 "",
                 NftsetConfig {
                     family: "inet",
                     table: "tab1".to_string(),
-                    name: "dns4".to_string()
+                    name: "dns_4".to_string()
                 }
             )
         );
