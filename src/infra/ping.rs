@@ -39,6 +39,9 @@ pub async fn ping_fastest(
     opts: PingOptions,
 ) -> Result<PingOutput, PingError> {
     use futures_util::future::select_ok;
+    if dests.is_empty() {
+        return Err(PingError::NoAddress);
+    }
 
     let ping_tasks = dests.iter().map(|dst| match dst {
         PingAddr::Icmp(addr) => icmp::ping(*addr, opts).boxed(),
