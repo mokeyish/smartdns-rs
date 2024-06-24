@@ -152,7 +152,7 @@ jobs:
           path: ${{ env.archive_file }}  
       
       - name: Publish release
-        uses: softprops/action-gh-release@v2.0.5
+        uses: softprops/action-gh-release@v2.0.6
         if: ${{ startsWith(inputs.version, 'v') }}
         with:
           draft: false
