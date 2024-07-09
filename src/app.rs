@@ -34,10 +34,10 @@ pub struct App {
 }
 
 impl App {
-    fn new(conf: Option<PathBuf>) -> (Runtime, IncomingDnsRequest, Self) {
+    fn new(conf: Option<PathBuf>, guard: Option<AppGuard>) -> (Runtime, IncomingDnsRequest, Self) {
         let cfg = RuntimeConfig::load(conf);
 
-        let guard = {
+        let guard_fn = || {
             let log_guard = if cfg.log_enabled() {
                 Some(log::init_global_default(
                     cfg.log_file(),
@@ -72,6 +72,8 @@ impl App {
                 user_guard,
             }
         };
+
+        let guard = guard.unwrap_or_else(guard_fn);
 
         cfg.summary();
 
@@ -200,8 +202,8 @@ impl App {
     }
 }
 
-pub fn bootstrap(conf: Option<PathBuf>) {
-    let (runtime, mut incoming_request, app) = App::new(conf);
+fn bootstrap_(conf: Option<PathBuf>, guard: Option<AppGuard>) {
+    let (runtime, mut incoming_request, app) = App::new(conf.clone(), guard);
     let app = Arc::new(app);
 
     let _guarad = runtime.enter();
@@ -255,9 +257,9 @@ pub fn bootstrap(conf: Option<PathBuf>) {
 
     let shutdown_timeout = Duration::from_secs(5);
 
-    runtime.block_on(async move {
+    let restart = runtime.block_on(async move {
         use crate::signal;
-        let _ = signal::terminate().await;
+        let sig_ret = signal::terminate_or_restart_app().await;
         // close all servers.
         let mut shutdown_listeners = Default::default();
         std::mem::swap(listeners.write().await.deref_mut(), &mut shutdown_listeners);
@@ -266,9 +268,17 @@ pub fn bootstrap(conf: Option<PathBuf>) {
             .map(|server| server.shutdown())
             .join_all()
             .await;
+        matches!(sig_ret, Ok(true))
     });
 
     runtime.shutdown_timeout(shutdown_timeout);
+    if restart {
+        return bootstrap_(conf, Arc::into_inner(app).map(|app| app.guard))
+    }
+}
+
+pub fn bootstrap(conf: Option<PathBuf>) {
+    bootstrap_(conf, None)
 }
 
 async fn register_listeners(app: &Arc<App>) {

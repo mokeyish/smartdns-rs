@@ -215,15 +215,22 @@ mod signal {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     static TERMINATING: AtomicBool = AtomicBool::new(false);
+    static HANGUP: AtomicBool = AtomicBool::new(false);
 
-    pub async fn terminate() -> std::io::Result<()> {
+    // Ok(true) for restart, Ok(false) for terminate
+    pub async fn terminate_or_restart_app() -> std::io::Result<bool> {
         use tokio::signal::ctrl_c;
 
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            match signal(SignalKind::terminate()) {
-                Ok(mut terminate) => tokio::select! {
+            let sig_kind = match (signal(SignalKind::terminate()), signal(SignalKind::hangup())) {
+                (Ok(mut terminate), Ok(mut hangup)) => tokio::select! {
+                    _ = hangup.recv() => SignalKind::hangup(),
+                    _ = terminate.recv() => SignalKind::terminate(),
+                    _ = ctrl_c() => SignalKind::interrupt()
+                },
+                (Ok(mut terminate), _) => tokio::select! {
                     _ = terminate.recv() => SignalKind::terminate(),
                     _ = ctrl_c() => SignalKind::interrupt()
                 },
@@ -232,19 +239,31 @@ mod signal {
                     SignalKind::interrupt()
                 }
             };
+
+            if sig_kind == SignalKind::hangup() {
+                if !HANGUP.load(Ordering::Relaxed) {
+                    HANGUP.store(true, Ordering::Relaxed);
+                    super::info!("received SIGHUP, restarting app...");
+                }
+                Ok(true)
+            } else {
+                if !TERMINATING.load(Ordering::Relaxed) {
+                    TERMINATING.store(true, Ordering::Relaxed);
+                    super::info!("terminating...");
+                }
+                Ok(false)
+            }
         }
 
         #[cfg(not(unix))]
         {
             ctrl_c().await?;
+            if !TERMINATING.load(Ordering::Relaxed) {
+                TERMINATING.store(true, Ordering::Relaxed);
+                super::info!("terminating...");
+            }
+            Ok(false)
         }
-
-        if !TERMINATING.load(Ordering::Relaxed) {
-            TERMINATING.store(true, Ordering::Relaxed);
-            super::info!("terminating...");
-        }
-
-        Ok(())
     }
 }
 

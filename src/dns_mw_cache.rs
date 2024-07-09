@@ -48,7 +48,7 @@ impl DnsCacheMiddleware {
                 if cache_file.exists() {
                     cache.lock().await.load(cache_file.as_path());
                 }
-                crate::signal::terminate()
+                let _ = crate::signal::terminate_or_restart_app()
                     .await
                     .expect("failed to wait ctrl_c for persist cache.");
                 cache.lock().await.persist(cache_file.as_path());
