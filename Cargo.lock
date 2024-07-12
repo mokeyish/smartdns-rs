@@ -474,6 +474,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-targets 0.52.5",
 ]
@@ -2618,7 +2619,6 @@ dependencies = [
  "surge-ping",
  "sysinfo",
  "thiserror",
- "time",
  "tokio",
  "tokio-rustls 0.24.1",
  "tokio-util",

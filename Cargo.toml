@@ -145,8 +145,8 @@ rustls-pemfile = "1.0.2"
 rustls-native-certs = "0.6.2"
 
 lru = { version = "0.12", default-features = false }
-time = "0.3"
-chrono = "0.4.38"
+# time = "0.3"
+chrono = { version = "0.4.38", features = ["serde"]}
 surge-ping = "0.8.1"
 rand = "0.8.5"
 smallvec = "1.10.0"
