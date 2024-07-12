@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use chrono::DateTime;
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
@@ -372,6 +374,7 @@ impl DnsCache {
                 query_type: query.query_type(),
                 query_class: query.query_class(),
                 records: entry.data.records().to_vec().into_boxed_slice(),
+                last_access: entry.last_access,
             })
             .collect()
     }
@@ -515,7 +518,7 @@ impl DnsCache {
 
         let mut expired = false;
         let lookup = cache.get_mut(query).map(|value| {
-            value.last_access = Instant::now();
+            value.last_access = Local::now();
             if value.is_current(now) {
                 let mut res = value.data.clone();
                 res.set_max_ttl(value.ttl(now).as_secs() as u32);
@@ -540,6 +543,7 @@ impl DnsCache {
 #[derive(Deserialize, Serialize)]
 pub struct CachedQueryRecord {
     name: Name,
+    last_access: DateTime<Local>,
     query_type: RecordType,
     query_class: DNSClass,
     records: Box<[Record]>,
@@ -555,7 +559,7 @@ struct DnsCacheEntry<T = DnsResponse> {
     data: T,
     valid_until: Instant,
     is_in_prefetching: bool,
-    last_access: Instant,
+    last_access: DateTime<Local>,
 }
 
 impl<T> DnsCacheEntry<T> {
@@ -564,7 +568,7 @@ impl<T> DnsCacheEntry<T> {
             data,
             valid_until,
             is_in_prefetching: false,
-            last_access: Instant::now(),
+            last_access: Local::now(),
         }
     }
 

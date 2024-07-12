@@ -21,8 +21,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsNftsetMidd
     ) -> Result<DnsResponse, DnsError> {
         let res = next.run(ctx, req).await;
 
-        if let Ok(lookup) = res.as_ref() {
-            if let Some(rule) = &ctx.domain_rule {
+        if !ctx.server_opts.is_background {
+            if let (Ok(lookup), Some(rule)) = (res.as_ref(), &ctx.domain_rule) {
                 let nftsets = rule.get(|n| n.nftset.as_ref().cloned());
                 if let Some(nftsets) = nftsets {
                     let ip_addrs = lookup

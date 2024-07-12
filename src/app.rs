@@ -170,18 +170,18 @@ impl App {
                 ));
             }
 
-            // check if cache enabled.
-            if cfg.cache_size() > 0 {
-                let cache_middleware = DnsCacheMiddleware::new(&cfg, self.dns_handle.clone());
-                *self.cache.write().await = Some(cache_middleware.cache().clone());
-                middleware_builder = middleware_builder.with(cache_middleware);
-            }
-
             // nftset
             #[cfg(all(feature = "nft", target_os = "linux"))]
             {
                 use crate::dns_mw_nftset::DnsNftsetMiddleware;
                 middleware_builder = middleware_builder.with(DnsNftsetMiddleware::new());
+            }
+
+            // check if cache enabled.
+            if cfg.cache_size() > 0 {
+                let cache_middleware = DnsCacheMiddleware::new(&cfg, self.dns_handle.clone());
+                *self.cache.write().await = Some(cache_middleware.cache().clone());
+                middleware_builder = middleware_builder.with(cache_middleware);
             }
 
             middleware_builder = middleware_builder.with(DnsDualStackIpSelectionMiddleware);
