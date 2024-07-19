@@ -126,7 +126,7 @@ fn main() -> anyhow::Result<()> {
 
     println!(
         "cargo:rustc-env=CARGO_BUILD_TARGET={}",
-        std::env::var("TARGET").unwrap()
+        env::var("TARGET").unwrap()
     );
     Ok(())
 }
