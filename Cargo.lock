@@ -1083,7 +1083,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hickory-proto"
 version = "0.25.0-alpha.1"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.1#2b9cb0714561c7f4056bd48e5c6d7dd7e72a5796"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.2#12574058a1967f144a50f589a1ae3147f880c370"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -1119,7 +1119,7 @@ dependencies = [
 [[package]]
 name = "hickory-recursor"
 version = "0.25.0-alpha.1"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.1#2b9cb0714561c7f4056bd48e5c6d7dd7e72a5796"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.2#12574058a1967f144a50f589a1ae3147f880c370"
 dependencies = [
  "async-recursion",
  "async-trait",
@@ -1140,7 +1140,7 @@ dependencies = [
 [[package]]
 name = "hickory-resolver"
 version = "0.25.0-alpha.1"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.1#2b9cb0714561c7f4056bd48e5c6d7dd7e72a5796"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.2#12574058a1967f144a50f589a1ae3147f880c370"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -1163,7 +1163,7 @@ dependencies = [
 [[package]]
 name = "hickory-server"
 version = "0.25.0-alpha.1"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.1#2b9cb0714561c7f4056bd48e5c6d7dd7e72a5796"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.2#12574058a1967f144a50f589a1ae3147f880c370"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2593,6 +2593,7 @@ dependencies = [
  "futures",
  "futures-intrusive",
  "futures-util",
+ "glob",
  "hickory-proto",
  "hickory-resolver",
  "hickory-server",

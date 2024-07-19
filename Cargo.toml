@@ -131,12 +131,12 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.1", version = "0.25.0-alpha.1", features = ["serde-config"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.1", version = "0.25.0-alpha.1", features = [
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.2", version = "0.25.0-alpha.1", features = ["serde-config"]}
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.2", version = "0.25.0-alpha.1", features = [
   "serde-config",
   "system-config",
 ] }
-hickory-server = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.1", version = "0.25.0-alpha.1", features = ["resolver"], optional = true }
+hickory-server = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.2", version = "0.25.0-alpha.1", features = ["resolver"], optional = true }
 
 # ssl
 webpki-roots = "0.25.2"
@@ -155,6 +155,7 @@ hostname = "0.3"
 byte-unit = { version = "5.0.3", features = ["serde"]}
 ipnet = "2.7"
 which = { version = "6.0.1", optional = true }
+glob = "0.3.1"
 
 # process
 sysinfo = "0.29"

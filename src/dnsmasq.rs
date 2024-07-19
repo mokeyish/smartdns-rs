@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_read_dnsmasq_lease_file() {
-        let host_ips = read_lease_file("tests/test_confs/dhcp.leases", None).unwrap();
+        let host_ips = read_lease_file("tests/test_data/dhcp.leases", None).unwrap();
         assert_eq!(
             host_ips
                 .find(&Name::from_str("Andy-PC").unwrap())
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn test_lan_client_store_lookup() {
-        let store = LanClientStore::new("tests/test_confs/dhcp.leases", Default::default());
+        let store = LanClientStore::new("tests/test_data/dhcp.leases", Default::default());
 
         assert_eq!(
             store.lookup(&"iphone-abc".parse().unwrap(), RecordType::AAAA),
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_lan_client_store_lookup_fqdn() {
-        let store = LanClientStore::new("tests/test_confs/dhcp.leases", Default::default());
+        let store = LanClientStore::new("tests/test_data/dhcp.leases", Default::default());
 
         assert_eq!(
             store.lookup(&"iphone-abc.".parse().unwrap(), RecordType::AAAA),
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_lan_client_store_lookup_zone() {
-        let store = LanClientStore::new("tests/test_confs/dhcp.leases", Name::from_str("xyz").ok());
+        let store = LanClientStore::new("tests/test_data/dhcp.leases", Name::from_str("xyz").ok());
 
         assert_eq!(
             store.lookup(&"iphone-abc.xyz.".parse().unwrap(), RecordType::AAAA),
