@@ -14,6 +14,7 @@ mod domain_rule;
 mod domain_set;
 mod file_mode;
 mod forward_rule;
+mod glob_pattern;
 mod ipnet;
 mod listener;
 mod log_level;
@@ -96,10 +97,11 @@ pub enum OneConfig {
     DualstackIpSelection(bool),
     DualstackIpSelectionThreshold(u16),
     EdnsClientSubnet(IpNet),
+    ExpandPtrFromAddress(bool),
     ForceAAAASOA(bool),
     ForceQtypeSoa(RecordType),
     ForwardRule(ForwardRule),
-    HostsFile(PathBuf),
+    HostsFile(glob::Pattern),
     IgnoreIp(IpNet),
     Listener(ListenerConfig),
     LocalTtl(u64),
@@ -182,6 +184,10 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
             parse_item("edns-client-subnet"),
             OneConfig::EdnsClientSubnet,
         ),
+        map(
+            parse_item("expand-ptr-from-address"),
+            OneConfig::ExpandPtrFromAddress,
+        ),
         map(parse_item("force-AAAA-SOA"), OneConfig::ForceAAAASOA),
         map(parse_item("force-qtype-soa"), OneConfig::ForceQtypeSoa),
         map(parse_item("response"), OneConfig::ResponseMode),
@@ -199,17 +205,18 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("log-num"), OneConfig::LogNum),
         map(parse_item("log-size"), OneConfig::LogSize),
         map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
-        map(parse_item("mdns-lookup"), OneConfig::MdnsLookup),
-        map(parse_item("nameserver"), OneConfig::ForwardRule),
     ));
 
     let group3 = alt((
+        map(parse_item("mdns-lookup"), OneConfig::MdnsLookup),
+        map(parse_item("nameserver"), OneConfig::ForwardRule),
         map(parse_item("proxy-server"), OneConfig::ProxyConfig),
         map(parse_item("rr-ttl-reply-max"), OneConfig::RrTtlReplyMax),
         map(parse_item("rr-ttl-min"), OneConfig::RrTtlMin),
         map(parse_item("rr-ttl-max"), OneConfig::RrTtlMax),
         map(parse_item("rr-ttl"), OneConfig::RrTtl),
         map(parse_item("resolv-file"), OneConfig::ResolvFile),
+        map(parse_item("resolv-hostanme"), OneConfig::ResolvHostname),
         map(parse_item("response-mode"), OneConfig::ResponseMode),
         map(parse_item("server-name"), OneConfig::ServerName),
         map(parse_item("speed-check-mode"), OneConfig::SpeedMode),

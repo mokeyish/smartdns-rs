@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 use crate::libdns::proto::op::Query;
 use tokio::sync::RwLock;
 
-use crate::dns::*;
 use crate::libdns::resolver::Hosts;
 use crate::middleware::*;
+use crate::{dns::*, log};
 
 pub struct DnsHostsMiddleware(RwLock<Option<(Instant, Arc<Hosts>)>>);
 
@@ -41,19 +41,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
                 Some(v) => v,
                 None => {
                     let hosts = match ctx.cfg().hosts_file() {
-                        Some(file) => {
-                            if file.exists() {
-                                std::fs::OpenOptions::new()
-                                    .read(true)
-                                    .open(file)
-                                    .map(|f| Hosts::default().read_hosts_conf(f))
-                                    .unwrap_or_else(Err)
-                                    .unwrap_or_default()
-                            } else {
-                                Hosts::default()
-                            }
-                        }
-                        None => Hosts::new(),
+                        Some(pattern) => read_hosts(pattern.as_str()),
+                        None => Hosts::new(), // read from system hosts file
                     };
                     let hosts = Arc::new(hosts);
                     *self.0.write().await = Some((Instant::now(), hosts.clone()));
@@ -75,5 +64,113 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
         }
 
         next.run(ctx, req).await
+    }
+}
+
+fn read_hosts(pattern: &str) -> Hosts {
+    let mut hosts = Hosts::default();
+    match glob::glob(pattern) {
+        Ok(paths) => {
+            for entry in paths {
+                let path = match entry {
+                    Ok(path) => {
+                        if !path.is_file() {
+                            continue;
+                        }
+                        path
+                    }
+                    Err(err) => {
+                        log::error!("{}", err);
+                        continue;
+                    }
+                };
+
+                let file = match std::fs::OpenOptions::new().read(true).open(path) {
+                    Ok(file) => file,
+                    Err(err) => {
+                        log::error!("{}", err);
+                        continue;
+                    }
+                };
+
+                if let Err(err) = hosts.read_hosts_conf(file) {
+                    log::error!("{}", err);
+                }
+            }
+        }
+        Err(err) => {
+            log::error!("{}", err);
+        }
+    }
+    hosts
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{net::IpAddr, str::FromStr};
+
+    use crate::libdns::proto::rr::rdata::PTR;
+
+    use super::*;
+
+    use crate::{dns_conf::RuntimeConfig, dns_mw::*};
+
+    #[tokio::test()]
+    async fn test_query_ip() -> anyhow::Result<()> {
+        let cfg = RuntimeConfig::builder()
+            .with("hosts-file ./tests/test_data/hosts/a*.hosts")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(DnsHostsMiddleware::new()).build(cfg);
+
+        let lookup = mock.lookup("hi.a1", RecordType::A).await?;
+        let ip_addrs = lookup
+            .records()
+            .iter()
+            .flat_map(|r| r.data().ip_addr())
+            .collect::<Vec<_>>();
+        assert_eq!(ip_addrs, vec![IpAddr::from_str("1.1.1.1").unwrap()]);
+
+        let lookup = mock.lookup("hi.a2", RecordType::A).await?;
+        let ip_addrs = lookup
+            .records()
+            .iter()
+            .flat_map(|r| r.data().ip_addr())
+            .collect::<Vec<_>>();
+        assert_eq!(ip_addrs, vec![IpAddr::from_str("2.2.2.2").unwrap()]);
+
+        Ok(())
+    }
+
+    #[tokio::test()]
+    async fn test_query_ptr() -> anyhow::Result<()> {
+        let cfg = RuntimeConfig::builder()
+            .with("hosts-file ./tests/test_data/hosts/a*.hosts")
+            .with("expand-ptr-from-address yes")
+            .build();
+
+        let mock = DnsMockMiddleware::mock(DnsHostsMiddleware::new()).build(cfg);
+
+        let lookup = mock
+            .lookup("1.1.1.1.in-addr.arpa.", RecordType::PTR)
+            .await?;
+        let hostnames = lookup
+            .records()
+            .iter()
+            .flat_map(|r| r.data().as_ptr())
+            .collect::<Vec<_>>();
+        assert_eq!(hostnames, vec![&PTR("hi.a1.".parse().unwrap())]);
+
+        let lookup = mock
+            .lookup("2.2.2.2.in-addr.arpa.", RecordType::PTR)
+            .await?;
+        let hostnames = lookup
+            .records()
+            .iter()
+            .flat_map(|r| r.data().as_ptr())
+            .collect::<Vec<_>>();
+        assert_eq!(hostnames, vec![&PTR("hi.a2.".parse().unwrap())]);
+
+        Ok(())
     }
 }
