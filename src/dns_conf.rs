@@ -217,6 +217,12 @@ impl RuntimeConfig {
         self.hosts_file.as_deref()
     }
 
+    /// Whether to expand the address record corresponding to PTR record
+    #[inline]
+    pub fn expand_ptr_from_address(&self) -> bool {
+        self.expand_ptr_from_address.unwrap_or_default()
+    }
+
     /// whether resolv mdns
     #[inline]
     pub fn mdns_lookup(&self) -> bool {

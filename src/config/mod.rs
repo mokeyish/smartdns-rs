@@ -72,6 +72,8 @@ pub struct Config {
 
     pub hosts_file: Option<PathBuf>,
 
+    pub expand_ptr_from_address: Option<bool>,
+
     /// dns server run user
     ///
     /// ```

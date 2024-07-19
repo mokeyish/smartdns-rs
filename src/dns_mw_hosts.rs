@@ -27,8 +27,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
         next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
     ) -> Result<DnsResponse, DnsError> {
         let query = req.query().original();
-
-        if query.query_type().is_ip_addr() {
+        let is_ptr = query.query_type() == RecordType::PTR && ctx.cfg().expand_ptr_from_address();
+        if query.query_type().is_ip_addr() || is_ptr {
             let hosts = self.0.read().await.as_ref().and_then(|(read_time, hosts)| {
                 if Instant::now() - *read_time < EXPIRES {
                     Some(hosts.clone())
