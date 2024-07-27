@@ -670,29 +670,12 @@ mod https {
         time::{Duration, Instant},
     };
 
-    use rustls::ServerName;
     use tokio::net::TcpStream;
     use tokio_rustls::TlsConnector;
 
     use crate::third_ext::FutureTimeoutExt;
 
     use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
-
-    struct NoCertificateVerification;
-
-    impl rustls::client::ServerCertVerifier for NoCertificateVerification {
-        fn verify_server_cert(
-            &self,
-            _end_entity: &rustls::Certificate,
-            _intermediates: &[rustls::Certificate],
-            _server_name: &rustls::ServerName,
-            _scts: &mut dyn Iterator<Item = &[u8]>,
-            _ocsp: &[u8],
-            _now: std::time::SystemTime,
-        ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-            Ok(rustls::client::ServerCertVerified::assertion())
-        }
-    }
 
     #[inline]
     pub async fn ping(sock_addr: SocketAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
@@ -742,17 +725,20 @@ mod https {
     }
 
     async fn ping_https(addr: SocketAddr) -> Result<Duration, PingError> {
+        use rustls::pki_types::ServerName;
         let now = Instant::now();
         let config = Arc::new({
             let mut config = rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(
+                    crate::rustls::NoCertificateVerification,
+                ))
                 .with_no_client_auth();
             config.enable_sni = false;
             config
         });
 
-        let server_name = ServerName::IpAddress(addr.ip());
+        let server_name = ServerName::IpAddress(addr.ip().into());
 
         let connector = TlsConnector::from(config);
 

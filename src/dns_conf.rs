@@ -1464,19 +1464,29 @@ mod tests {
     }
 
     #[test]
-    #[cfg(failed_tests)]
     fn test_domain_set() {
+        use crate::collections::DomainSet;
+
         let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
 
-        assert!(!cfg.domain_sets.is_empty());
+        assert!(!cfg.domain_set_providers.is_empty());
 
-        let domain_set = cfg.domain_sets.values().nth(0).unwrap();
+        let domain_set_providers = cfg
+            .domain_set_providers
+            .get("block")
+            .map(|s| s.as_slice())
+            .unwrap_or_default();
 
-        assert!(domain_set.len() > 0);
+        let domain_set = domain_set_providers
+            .iter()
+            .flat_map(|p| p.get_domain_set().unwrap_or_default())
+            .collect::<DomainSet>();
 
-        assert!(domain_set.contains(&domain::Name::from_str("ads1.com").unwrap().into()));
-        assert!(!domain_set.contains(&domain::Name::from_str("ads2c.cn").unwrap().into()));
-        assert!(domain_set.is_match(&domain::Name::from_str("ads3.net").unwrap().into()));
-        assert!(domain_set.is_match(&domain::Name::from_str("q.ads3.net").unwrap().into()));
+        assert!(!domain_set.is_empty());
+
+        assert!(domain_set.contains(&"ads1.com".parse().unwrap()));
+        assert!(!domain_set.contains(&"ads2c.cn".parse().unwrap()));
+        // assert!(domain_set.is_match(&Name::from_str("ads3.net").unwrap().into()));
+        // assert!(domain_set.is_match(&Name::from_str("q.ads3.net").unwrap().into()));
     }
 }

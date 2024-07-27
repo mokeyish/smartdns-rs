@@ -1,7 +1,6 @@
 use std::{io, sync::Arc, time::Duration};
 
 use futures_util::StreamExt as _;
-use rustls::{Certificate, PrivateKey};
 use tokio::{net, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -14,6 +13,7 @@ use crate::{
         Protocol,
     },
     log,
+    rustls::{Certificate, PrivateKey},
     third_ext::FutureTimeoutExt,
 };
 

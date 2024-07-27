@@ -147,6 +147,14 @@ impl DomainSet {
     }
 }
 
+impl FromIterator<WildcardName> for DomainSet {
+    fn from_iter<T: IntoIterator<Item = WildcardName>>(iter: T) -> Self {
+        DomainSet(DomainMap(HashMap::from_iter(
+            iter.into_iter().map(|item| (item, ())),
+        )))
+    }
+}
+
 #[cfg(feature = "experimental-trie")]
 mod trie {
     use crate::third_ext::AsSlice;

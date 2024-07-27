@@ -81,7 +81,7 @@ pub async fn serve(
                 tls_listener,
                 dns_handle,
                 Duration::from_secs(idle_time),
-                (certificate.clone(), certificate_key.clone()),
+                (certificate.clone(), certificate_key.clone_key()),
             )?
         }
         #[cfg(feature = "dns-over-https")]

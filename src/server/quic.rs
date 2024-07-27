@@ -1,6 +1,6 @@
 use std::{io, time::Duration};
 
-use rustls::{Certificate, PrivateKey};
+use crate::rustls::{Certificate, PrivateKey};
 use tokio::{net, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 

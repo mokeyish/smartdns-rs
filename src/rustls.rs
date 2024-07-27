@@ -5,8 +5,11 @@ use std::{
     sync::Arc,
 };
 
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+pub type Certificate = CertificateDer<'static>;
+pub type PrivateKey = PrivateKeyDer<'static>;
+
 use rustls::ClientConfig;
-use rustls_native_certs::Certificate;
 
 use crate::{
     config::SslConfig,
@@ -43,22 +46,6 @@ impl TlsClientConfigBundle {
                 .dangerous()
                 .set_certificate_verifier(Arc::new(NoCertificateVerification));
 
-            struct NoCertificateVerification;
-
-            impl rustls::client::ServerCertVerifier for NoCertificateVerification {
-                fn verify_server_cert(
-                    &self,
-                    _end_entity: &rustls::Certificate,
-                    _intermediates: &[rustls::Certificate],
-                    _server_name: &rustls::ServerName,
-                    _scts: &mut dyn Iterator<Item = &[u8]>,
-                    _ocsp: &[u8],
-                    _now: std::time::SystemTime,
-                ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-                    Ok(rustls::client::ServerCertVerified::assertion())
-                }
-            }
-
             verify_off
         };
 
@@ -70,16 +57,11 @@ impl TlsClientConfigBundle {
     }
 
     fn create_tls_client_config(paths: &[PathBuf]) -> ClientConfig {
-        use rustls::{OwnedTrustAnchor, RootCertStore};
+        use rustls::RootCertStore;
 
-        let mut root_store = RootCertStore::empty();
-        root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
-            OwnedTrustAnchor::from_subject_spki_name_constraints(
-                ta.subject,
-                ta.spki,
-                ta.name_constraints,
-            )
-        }));
+        let mut root_store = RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.into(),
+        };
 
         let certs = {
             let certs1 = rustls_native_certs::load_native_certs().unwrap_or_else(|err| {
@@ -102,20 +84,69 @@ impl TlsClientConfigBundle {
         };
 
         for cert in certs {
-            root_store
-                .add(&rustls::Certificate(cert.0))
-                .unwrap_or_else(|err| {
-                    warn!("load certs from path failed.{}", err);
-                })
+            root_store.add(cert).unwrap_or_else(|err| {
+                warn!("load certs from path failed.{}", err);
+            })
         }
 
-        ClientConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
+        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
             .with_safe_default_protocol_versions()
             .unwrap()
             .with_root_certificates(root_store)
             .with_no_client_auth()
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct NoCertificateVerification;
+
+impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        use rustls::SignatureScheme::*;
+        vec![
+            RSA_PKCS1_SHA1,
+            ECDSA_SHA1_Legacy,
+            RSA_PKCS1_SHA256,
+            ECDSA_NISTP256_SHA256,
+            RSA_PKCS1_SHA384,
+            ECDSA_NISTP384_SHA384,
+            RSA_PKCS1_SHA512,
+            ECDSA_NISTP521_SHA512,
+            RSA_PSS_SHA256,
+            RSA_PSS_SHA384,
+            RSA_PSS_SHA512,
+            ED25519,
+            ED448,
+        ]
     }
 }
 
@@ -136,14 +167,13 @@ pub fn load_certs_from_path(path: &Path) -> Result<Vec<Certificate>, io::Error> 
 }
 
 fn load_pem_certs(path: &Path) -> Result<Vec<Certificate>, io::Error> {
-    let f = File::open(path)?;
-    let mut f = BufReader::new(f);
+    let mut file = BufReader::new(File::open(path)?);
 
-    match rustls_pemfile::certs(&mut f) {
-        Ok(contents) => Ok(contents.into_iter().map(Certificate).collect()),
-        Err(_) => Err(io::Error::new(
+    match rustls_pemfile::certs(&mut file).collect() {
+        Ok(certs) => Ok(certs),
+        Err(err) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Could not load PEM file {:?}", path),
+            format!("Could not load PEM file {} {:?}", err, path),
         )),
     }
 }
@@ -153,7 +183,7 @@ pub fn load_certificate_and_key(
     cert_file: Option<&Path>,
     key_file: Option<&Path>,
     typ: &'static str,
-) -> Result<(Vec<rustls::Certificate>, rustls::PrivateKey), Error> {
+) -> Result<(Vec<Certificate>, PrivateKey), Error> {
     use crate::libdns::proto::rustls::tls_server::{read_cert, read_key};
 
     let certificate_path = ssl_config
