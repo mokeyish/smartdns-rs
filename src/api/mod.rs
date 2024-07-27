@@ -7,7 +7,6 @@ use axum::{
     Json, Router,
 };
 use axum_server::{tls_rustls::RustlsConfig, Handle};
-use rustls::{Certificate, PrivateKey};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -22,6 +21,7 @@ mod nameserver;
 mod serve_dns;
 mod settings;
 
+use crate::rustls::{Certificate, PrivateKey};
 use crate::{app::App, server::DnsHandle};
 
 type StatefulRouter = Router<Arc<ServeState>>;
@@ -49,8 +49,11 @@ pub async fn serve(
         .with_state(state.clone())
         .into_make_service_with_connect_info::<SocketAddr>();
 
-    let certificate = certificate.into_iter().map(|c| c.0).collect::<Vec<_>>();
-    let certificate_key = certificate_key.0;
+    let certificate = certificate
+        .into_iter()
+        .map(|c| c.as_ref().to_vec())
+        .collect::<Vec<_>>();
+    let certificate_key = certificate_key.secret_der().to_vec();
 
     let tcp_listener = tcp_listener.into_std()?;
     let rustls_config = RustlsConfig::from_der(certificate, certificate_key).await?;

@@ -970,7 +970,7 @@ impl From<RecordType> for LookupOptions {
 }
 
 /// > An EDNS buffer size of 1232 bytes will avoid fragmentation on nearly all current networks.
-/// https://dnsflagday.net/2020/
+/// > https://dnsflagday.net/2020/
 const MAX_PAYLOAD_LEN: u16 = 1232;
 
 fn build_message(
@@ -1023,7 +1023,10 @@ mod connection_provider {
 
     use crate::libdns::proto;
     use crate::libdns::proto::{iocompat::AsyncIoTokioAsStd, TokioTime};
-    use crate::libdns::resolver::{name_server::RuntimeProvider, TokioHandle};
+    use crate::libdns::resolver::{
+        name_server::{QuicSocketBinder, RuntimeProvider},
+        TokioHandle,
+    };
 
     /// The Tokio Runtime for async execution
     #[derive(Clone)]
@@ -1128,6 +1131,27 @@ mod connection_provider {
                     .map(setup_socket)
             })
         }
+
+        #[cfg(any(feature = "dns-over-quic", feature = "dns-over-h3"))]
+        fn quic_binder(&self) -> Option<&dyn QuicSocketBinder> {
+            Some(&TokioQuicSocketBinder)
+        }
+    }
+
+    #[cfg(any(feature = "dns-over-quic", feature = "dns-over-h3"))]
+    struct TokioQuicSocketBinder;
+
+    #[cfg(any(feature = "dns-over-quic", feature = "dns-over-h3"))]
+    impl QuicSocketBinder for TokioQuicSocketBinder {
+        fn bind_quic(
+            &self,
+            local_addr: SocketAddr,
+            _server_addr: SocketAddr,
+        ) -> Result<Arc<dyn quinn::AsyncUdpSocket>, io::Error> {
+            use quinn::Runtime;
+            let socket = std::net::UdpSocket::bind(local_addr)?;
+            quinn::TokioRuntime.wrap_udp_socket(socket)
+        }
     }
 
     #[async_trait]
@@ -1209,17 +1233,6 @@ mod connection_provider {
                     .send_to(buf, target)
                     .await
                     .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string())),
-            }
-        }
-    }
-
-    #[cfg(any(feature = "dns-over-quic", feature = "dns-over-h3"))]
-    impl proto::udp::QuicLocalAddr for UdpSocket {
-        fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
-            use UdpSocket::*;
-            match self {
-                Tokio(s) => s.local_addr(),
-                Proxy(s) => s.get_ref().local_addr(),
             }
         }
     }

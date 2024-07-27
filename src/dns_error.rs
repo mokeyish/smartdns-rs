@@ -25,12 +25,6 @@ pub enum LookupError {
     /// Resolve Error
     #[error("Forward resolution error: {0}")]
     ResolveError(#[from] ResolveError),
-
-    /// Recursive Resolver Error
-    #[cfg(feature = "hickory-recursor")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "recursor")))]
-    #[error("Recursive resolution error: {0}")]
-    RecursiveError(#[from] create::libdns::recursor::Error),
     /// An underlying IO error occurred
     #[error("io error: {0}")]
     Io(Arc<io::Error>),
@@ -42,10 +36,6 @@ impl PartialEq for LookupError {
             (Self::ResponseCode(l0), Self::ResponseCode(r0)) => l0 == r0,
             (Self::Proto(l0), Self::Proto(r0)) => l0.to_string() == r0.to_string(),
             (Self::ResolveError(l0), Self::ResolveError(r0)) => l0.to_string() == r0.to_string(),
-            #[cfg(feature = "hickory-recursor")]
-            (Self::RecursiveError(l0), Self::RecursiveError(r0)) => {
-                l0.to_string() == r0.to_string()
-            }
             (Self::Io(l0), Self::Io(r0)) => l0.to_string() == r0.to_string(),
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
