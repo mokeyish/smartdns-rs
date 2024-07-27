@@ -57,6 +57,7 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst
           # - target: arch64-unknown-linux-musl
+          #   os: ubuntu-latest
           #   archive: tar.gz tar.xz tar.zst
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
@@ -71,9 +72,11 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst
           - target: mips-unknown-linux-musl
+            os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst
-          # - target: mips64-unknown-linux-muslabi64
-          #   archive: tar.gz tar.xz tar.zst
+          - target: mips64-unknown-linux-muslabi64
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
           - target: aarch64-linux-android
             os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst
