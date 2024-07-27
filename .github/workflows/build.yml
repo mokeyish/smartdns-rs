@@ -70,10 +70,8 @@ jobs:
           - target: arm-unknown-linux-musleabihf
             os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst
-          # - target: mips-unknown-linux-musl
-          #   archive: tar.gz tar.xz tar.zst
-          # - target: mips-unknown-linux-musl
-          #   archive: tar.gz tar.xz tar.zst
+          - target: mips-unknown-linux-musl
+            archive: tar.gz tar.xz tar.zst
           # - target: mips64-unknown-linux-muslabi64
           #   archive: tar.gz tar.xz tar.zst
           - target: aarch64-linux-android
