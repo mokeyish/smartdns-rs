@@ -193,7 +193,7 @@ self_update = { version = "0.40.0", default-features = false, features=["archive
 
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.57", features = [
+windows = { version = "0.58", features = [
   "Win32_System_Console",
   "Win32_Foundation",
 ] }
