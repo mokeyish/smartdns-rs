@@ -93,6 +93,17 @@ mod tests {
         );
 
         assert_eq!(
+            DomainRule::parse("-c none"),
+            Ok((
+                "",
+                DomainRule {
+                    speed_check_mode: Some(vec![SpeedCheckMode::None].into()),
+                    ..Default::default()
+                }
+            ))
+        );
+
+        assert_eq!(
             DomainRule::parse("-a -"),
             Ok((
                 "",
