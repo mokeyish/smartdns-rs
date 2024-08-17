@@ -4,6 +4,7 @@ use crate::infra::ping::PingAddr;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub enum SpeedCheckMode {
+    None,
     Ping,
     Tcp(u16),
     Http(u16),
@@ -11,33 +12,44 @@ pub enum SpeedCheckMode {
 }
 
 impl SpeedCheckMode {
-    pub fn to_ping_addr(self, ip_addr: IpAddr) -> PingAddr {
-        match self {
-            SpeedCheckMode::Ping => PingAddr::Icmp(ip_addr),
-            SpeedCheckMode::Tcp(port) => PingAddr::Tcp(SocketAddr::new(ip_addr, port)),
-            SpeedCheckMode::Http(port) => PingAddr::Http(SocketAddr::new(ip_addr, port)),
-            SpeedCheckMode::Https(port) => PingAddr::Https(SocketAddr::new(ip_addr, port)),
-        }
+    pub fn is_none(&self) -> bool {
+        matches!(self, SpeedCheckMode::None)
+    }
+
+    pub fn to_ping_addr(self, ip_addr: IpAddr) -> Option<PingAddr> {
+        use SpeedCheckMode::*;
+        Some(match self {
+            None => return Default::default(),
+            Ping => PingAddr::Icmp(ip_addr),
+            Tcp(port) => PingAddr::Tcp(SocketAddr::new(ip_addr, port)),
+            Http(port) => PingAddr::Http(SocketAddr::new(ip_addr, port)),
+            Https(port) => PingAddr::Https(SocketAddr::new(ip_addr, port)),
+        })
     }
 
     pub fn to_ping_addrs(self, ip_addrs: &[IpAddr]) -> Vec<PingAddr> {
-        ip_addrs.iter().map(|ip| self.to_ping_addr(*ip)).collect()
+        ip_addrs
+            .iter()
+            .flat_map(|ip| self.to_ping_addr(*ip))
+            .collect()
     }
 }
 
 impl std::fmt::Debug for SpeedCheckMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use SpeedCheckMode::*;
         match self {
-            SpeedCheckMode::Ping => write!(f, "ICMP"),
-            SpeedCheckMode::Tcp(port) => write!(f, "TCP:{port}"),
-            SpeedCheckMode::Http(port) => {
+            None => write!(f, "None"),
+            Ping => write!(f, "ICMP"),
+            Tcp(port) => write!(f, "TCP:{port}"),
+            Http(port) => {
                 if *port == 80 {
                     write!(f, "HTTP")
                 } else {
                     write!(f, "HTTP:{port}")
                 }
             }
-            SpeedCheckMode::Https(port) => {
+            Https(port) => {
                 if *port == 443 {
                     write!(f, "HTTPS")
                 } else {

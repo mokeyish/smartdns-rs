@@ -197,18 +197,23 @@ async fn lookup_ip(
         return Err(ProtoErrorKind::NoConnections.into());
     }
 
-    // ignore
-    let response_strategy = if options.no_speed_check || options.speed_check_mode.is_none() {
+    // ignore speed check
+    let mut response_strategy = if options.no_speed_check || options.speed_check_mode.is_none() {
         FastestResponse
     } else {
         options.response_strategy
     };
 
-    let speed_check_mode = options
+    let mut speed_check_mode = options
         .speed_check_mode
         .as_ref()
         .map(|m| m.as_slice())
         .unwrap_or_default();
+
+    if speed_check_mode.iter().any(|m| m.is_none()) {
+        response_strategy = FastestResponse; // ignore speed check
+        speed_check_mode = &[];
+    }
 
     let mut ok_tasks = vec![];
     let mut err_tasks = vec![];
@@ -501,7 +506,10 @@ async fn multi_mode_ping(
     let ping_ops = PingOptions::default().with_timeout_secs(2);
 
     for mode in &modes {
-        let dest = mode.to_ping_addr(ip_addr);
+        let dest = match mode.to_ping_addr(ip_addr) {
+            Some(addr) => addr,
+            None => return Err(PingError::NoAddress),
+        };
 
         let ping_task = ping(dest, ping_ops).boxed();
         let timeout_task = sleep(duration).boxed();

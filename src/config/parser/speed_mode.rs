@@ -22,6 +22,7 @@ impl NomParser for SpeedCheckMode {
     fn parse(input: &str) -> IResult<&str, Self> {
         use SpeedCheckMode::*;
 
+        let none = value(None, tag_no_case("none"));
         let ping = value(Ping, tag_no_case("ping"));
         let tcp = map(preceded(tag_no_case("tcp"), preceded(char(':'), u16)), Tcp);
         let http = map(
@@ -39,7 +40,7 @@ impl NomParser for SpeedCheckMode {
             Https,
         );
 
-        alt((ping, tcp, https, http))(input)
+        alt((none, ping, tcp, https, http))(input)
     }
 }
 
