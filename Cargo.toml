@@ -214,7 +214,7 @@ anyhow = "1.0"
 
 
 [target.'cfg(target_os = "linux")'.build-dependencies]
-cc = "1.0"
+cc = "1.1"
 bindgen = "0.69.4"
 
 
