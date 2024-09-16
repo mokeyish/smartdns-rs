@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    hash::{DefaultHasher, Hash, Hasher},
-    net::{IpAddr, SocketAddr},
+    hash::Hash,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     ops::Deref,
     path::PathBuf,
     slice::Iter,
@@ -32,7 +32,7 @@ use crate::{
 };
 
 use crate::libdns::resolver::{
-    config::{NameServerConfig, Protocol, ResolverOpts, TlsClientConfig},
+    config::{Protocol, ResolverOpts, TlsClientConfig},
     name_server::GenericConnector,
     TryParseIp,
 };
@@ -40,12 +40,13 @@ use crate::libdns::resolver::{
 use crate::{
     dns_conf::NameServerInfo,
     dns_error::LookupError,
-    dns_url::DnsUrl,
     log::{debug, info, warn},
 };
 
 use bootstrap::BootstrapResolver;
 use connection_provider::TokioRuntimeProvider;
+
+use connection_provider::{ConnectionProvider, RawNameServer, RawNameServerConfig};
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
@@ -53,7 +54,6 @@ pub const MAX_TTL: u32 = 86400_u32;
 
 #[derive(Default)]
 pub struct DnsClientBuilder {
-    resolver_opts: ResolverOpts,
     server_infos: Vec<NameServerInfo>,
     ca_file: Option<PathBuf>,
     ca_path: Option<PathBuf>,
@@ -94,7 +94,6 @@ impl DnsClientBuilder {
 
     pub async fn build(self) -> DnsClient {
         let DnsClientBuilder {
-            resolver_opts,
             server_infos,
             ca_file,
             ca_path,
@@ -102,125 +101,210 @@ impl DnsClientBuilder {
             client_subnet,
         } = self;
 
-        let factory = NameServerFactory::new(TlsClientConfigBundle::new(ca_path, ca_file));
+        let tls_client_config = TlsClientConfigBundle::new(ca_path, ca_file);
+        let mut default_group_servers = HashMap::new();
+        let mut server_instances = HashMap::new();
 
-        bootstrap::set_resolver(
-            async {
-                let mut bootstrap_infos = server_infos
-                    .iter()
-                    .filter(|info| {
-                        info.bootstrap_dns && {
-                            if info.server.ip().is_none() {
-                                warn!("bootstrap-dns must use ip addess, {:?}", info.server.host());
-                                false
-                            } else {
-                                true
-                            }
+        let bootstrap = async {
+            let mut bootstrap_servers = server_infos
+                .iter()
+                .filter(|info| {
+                    info.bootstrap_dns && {
+                        if info.server.ip().is_none() {
+                            warn!("bootstrap-dns must use ip addess, {:?}", info.server.host());
+                            false
+                        } else {
+                            true
                         }
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                if bootstrap_infos.is_empty() {
-                    bootstrap_infos = server_infos
-                        .iter()
-                        .filter(|info| info.server.ip().is_some() && info.proxy.is_none())
-                        .cloned()
-                        .collect::<Vec<_>>()
-                }
-
-                if bootstrap_infos.is_empty() {
-                    warn!("not bootstrap-dns found, use system_conf instead.");
-                } else {
-                    bootstrap_infos.dedup();
-                }
-
-                if !bootstrap_infos.is_empty() {
-                    for info in &bootstrap_infos {
-                        info!("bootstrap-dns {}", info.server.to_string());
                     }
-                }
+                })
+                .cloned()
+                .collect::<Vec<_>>();
 
-                let resolver: Arc<BootstrapResolver> = if !bootstrap_infos.is_empty() {
-                    let new_resolver = factory
-                        .create_name_server_group(
-                            &bootstrap_infos,
-                            &Default::default(),
-                            client_subnet,
-                        )
-                        .await;
-                    BootstrapResolver::new(new_resolver.into())
-                } else {
-                    BootstrapResolver::from_system_conf()
-                }
-                .into();
-
-                resolver
+            if bootstrap_servers.is_empty() {
+                bootstrap_servers = server_infos
+                    .iter()
+                    .filter(|info| info.server.ip().is_some() && info.proxy.is_none())
+                    .cloned()
+                    .collect::<Vec<_>>()
             }
-            .await,
-        )
+
+            if bootstrap_servers.is_empty() {
+                warn!("not bootstrap-dns found, use system_conf instead.");
+            } else {
+                bootstrap_servers.dedup();
+            }
+
+            if !bootstrap_servers.is_empty() {
+                for info in &bootstrap_servers {
+                    info!("bootstrap-dns {}", info.server.to_string());
+                }
+            }
+
+            let boot = Arc::new(BootstrapResolver::from_system_conf());
+
+            let resolver: Arc<BootstrapResolver> = if !bootstrap_servers.is_empty() {
+                let servers = bootstrap_servers
+                    .into_iter()
+                    .flat_map(|server_config| {
+                        let server = server_instances
+                            .entry(server_config.clone())
+                            .or_insert_with(|| {
+                                let proxy = server_config
+                                    .proxy
+                                    .as_deref()
+                                    .map(|n| proxies.get(n))
+                                    .unwrap_or_default()
+                                    .cloned();
+                                match NameServer::new(
+                                    server_config.clone(),
+                                    proxy,
+                                    Some(tls_client_config.clone()),
+                                    None,
+                                    client_subnet,
+                                ) {
+                                    Ok(s) => {
+                                        let s = Arc::new(s);
+                                        if !server_config.exclude_default_group {
+                                            default_group_servers.insert(server_config, s.clone());
+                                        }
+
+                                        Some(s)
+                                    }
+                                    Err(err) => {
+                                        let url = server_config.server.to_string();
+                                        log::error!(
+                                            "failed to create nameserver {url}, error: {err}"
+                                        );
+                                        None
+                                    }
+                                }
+                            });
+
+                        server.clone()
+                    })
+                    .collect();
+
+                let new_resolver = NameServerGroup {
+                    resolver_opts: boot.as_ref().deref().options().clone(),
+                    servers,
+                };
+
+                Arc::new(BootstrapResolver::new(new_resolver.into()))
+            } else {
+                boot
+            };
+
+            resolver
+        }
         .await;
 
-        let server_groups: HashMap<NameServerGroupName, HashSet<NameServerInfo>> =
-            server_infos.iter().fold(HashMap::new(), |mut map, info| {
-                let mut group_names = info
-                    .group
-                    .iter()
-                    .map(|s| s.deref())
-                    .map(NameServerGroupName::from)
-                    .collect::<Vec<_>>();
+        assert!(!bootstrap.is_empty(), "no bootstrap nameserver found.");
 
-                if group_names.is_empty() {
-                    group_names.push(NameServerGroupName::Default);
-                }
-
-                for name in group_names {
-                    if name != NameServerGroupName::Default
-                        && !info.exclude_default_group
-                        && map
-                            .entry(NameServerGroupName::Default)
+        let server_config_groups: HashMap<String, HashSet<NameServerInfo>> = server_infos
+            .iter()
+            .fold(HashMap::new(), |mut map, server_config| {
+                if server_config.group.is_empty() {
+                    map.entry("".to_string())
+                        .or_default()
+                        .insert(server_config.clone());
+                } else {
+                    for name in server_config.group.iter() {
+                        map.entry(name.to_string())
                             .or_default()
-                            .insert(info.clone())
-                    {
-                        debug!("append {} to default group.", info.server.to_string());
+                            .insert(server_config.clone());
                     }
-
-                    map.entry(name).or_default().insert(info.clone());
                 }
                 map
             });
 
-        let mut servers = HashMap::with_capacity(server_groups.len());
+        let mut server_groups = HashMap::with_capacity(server_config_groups.len());
 
-        for (group_name, group) in server_groups {
-            let group = group.into_iter().collect::<Vec<_>>();
-            let resolver = Default::default();
+        let resolver_opts = Arc::new(bootstrap.options().clone());
+
+        for (group_name, group) in server_config_groups {
+            let server_configs = group.into_iter().collect::<Vec<_>>();
+
+            let mut servers = vec![];
+
+            for server_config in server_configs {
+                let server = server_instances
+                    .entry(server_config.clone())
+                    .or_insert_with(|| {
+                        let proxy = server_config
+                            .proxy
+                            .as_deref()
+                            .map(|n| proxies.get(n))
+                            .unwrap_or_default()
+                            .cloned();
+
+                        match NameServer::new(
+                            server_config.clone(),
+                            proxy,
+                            Some(tls_client_config.clone()),
+                            Some(bootstrap.clone()),
+                            client_subnet,
+                        ) {
+                            Ok(s) => {
+                                let s = Arc::new(s);
+                                if !server_config.exclude_default_group {
+                                    default_group_servers.insert(server_config, s.clone());
+                                }
+
+                                Some(s)
+                            }
+                            Err(err) => {
+                                let url = server_config.server.to_string();
+                                log::error!("failed to create nameserver {url}, error: {err}");
+                                None
+                            }
+                        }
+                    });
+
+                if let Some(s) = server {
+                    servers.push(s.clone());
+                }
+            }
+
+            let server_group = NameServerGroup {
+                resolver_opts: resolver_opts.clone(),
+                servers,
+            };
+
+            if group_name.is_empty() {
+                continue;
+            }
+
             debug!(
-                "create name server {:?}, servers {}",
+                "create nameserver group {:?}, servers {}",
                 group_name,
-                group.len()
+                server_group.len()
             );
-            servers.insert(group_name.clone(), (group, resolver));
+
+            server_groups.insert(group_name.clone(), Arc::new(server_group));
         }
 
+        let default = if default_group_servers.is_empty() {
+            bootstrap.as_ref().deref().clone()
+        } else {
+            Arc::new(NameServerGroup {
+                resolver_opts,
+                servers: default_group_servers.into_values().collect(),
+            })
+        };
+
         DnsClient {
-            resolver_opts,
-            servers,
-            factory,
-            proxies,
-            client_subnet,
+            default,
+            bootstrap,
+            servers: server_groups,
         }
     }
 }
 
 pub struct DnsClient {
-    resolver_opts: ResolverOpts,
-    #[allow(clippy::type_complexity)]
-    servers:
-        HashMap<NameServerGroupName, (Vec<NameServerInfo>, RwLock<Option<Arc<NameServerGroup>>>)>,
-    factory: NameServerFactory,
-    proxies: Arc<HashMap<String, ProxyConfig>>,
-    client_subnet: Option<ClientSubnet>,
+    default: Arc<NameServerGroup>,
+    bootstrap: Arc<BootstrapResolver>,
+    servers: HashMap<String, Arc<NameServerGroup>>,
 }
 
 impl DnsClient {
@@ -229,38 +313,11 @@ impl DnsClient {
     }
 
     pub async fn default(&self) -> Arc<NameServerGroup> {
-        match self.get_server_group(NameServerGroupName::Default).await {
-            Some(server) => server,
-            None => bootstrap::resolver().await.as_ref().into(),
-        }
+        self.deref().clone()
     }
 
-    pub async fn get_server_group<N: Into<NameServerGroupName>>(
-        &self,
-        name: N,
-    ) -> Option<Arc<NameServerGroup>> {
-        let name = name.into();
-        match self.servers.get(&name) {
-            Some((infos, entry_lock)) => {
-                let entry = entry_lock.read().await;
-
-                if entry.is_none() {
-                    drop(entry);
-
-                    debug!("initialize name server {:?}", name);
-                    let ns = Arc::new(
-                        self.factory
-                            .create_name_server_group(infos, &self.proxies, self.client_subnet)
-                            .await,
-                    );
-                    entry_lock.write().await.replace(ns.clone());
-                    Some(ns)
-                } else {
-                    entry.as_ref().cloned()
-                }
-            }
-            None => None,
-        }
+    pub async fn get_server_group(&self, name: &str) -> Option<Arc<NameServerGroup>> {
+        self.servers.get(name).cloned()
     }
 
     pub async fn lookup_nameserver(
@@ -268,117 +325,21 @@ impl DnsClient {
         name: Name,
         record_type: RecordType,
     ) -> Option<DnsResponse> {
-        bootstrap::resolver()
-            .await
-            .local_lookup(name, record_type)
-            .await
+        self.bootstrap.local_lookup(name, record_type).await
     }
 }
 
-#[async_trait::async_trait]
-impl GenericResolver for DnsClient {
-    fn options(&self) -> &ResolverOpts {
-        &self.resolver_opts
-    }
-
-    #[inline]
-    async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
-        &self,
-        name: N,
-        options: O,
-    ) -> Result<DnsResponse, LookupError> {
-        let ns = self.default().await;
-        GenericResolver::lookup(ns.as_ref(), name, options).await
-    }
-}
-
-#[derive(Clone, Eq)]
-pub enum NameServerGroupName {
-    Bootstrap,
-    Default,
-    Name(String),
-}
-
-impl NameServerGroupName {
-    pub fn new(name: &str) -> Self {
-        match name.to_lowercase().as_str() {
-            "bootstrap" => NameServerGroupName::Bootstrap,
-            "default" => NameServerGroupName::Default,
-            _ => NameServerGroupName::Name(name.to_string()),
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Bootstrap => "bootstrap",
-            Self::Default => "default",
-            Self::Name(n) => n.as_str(),
-        }
-    }
-
-    #[inline]
-    pub fn is_default(&self) -> bool {
-        self.as_str() == "default"
-    }
-}
-
-impl std::hash::Hash for NameServerGroupName {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            NameServerGroupName::Bootstrap => "bootstrap".hash(state),
-            NameServerGroupName::Default => "default".hash(state),
-            NameServerGroupName::Name(n) => n.to_lowercase().as_str().hash(state),
-        }
-    }
-}
-
-impl std::fmt::Debug for NameServerGroupName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Bootstrap => write!(f, "[Group: Bootstrap]"),
-            Self::Default => write!(f, "[Group: Default]"),
-            Self::Name(name) => write!(f, "[Group: {}]", name),
-        }
-    }
-}
-
-impl From<&str> for NameServerGroupName {
-    #[inline]
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl Deref for NameServerGroupName {
-    type Target = str;
+impl std::ops::Deref for DnsClient {
+    type Target = Arc<NameServerGroup>;
 
     fn deref(&self) -> &Self::Target {
-        match self {
-            NameServerGroupName::Bootstrap => "Bootstrap",
-            NameServerGroupName::Default => "Default",
-            NameServerGroupName::Name(s) => s.as_str(),
-        }
-    }
-}
-
-impl PartialEq for NameServerGroupName {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Name(l0), Self::Name(r0)) => l0.eq_ignore_ascii_case(r0),
-            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-        }
-    }
-}
-
-impl Default for NameServerGroupName {
-    fn default() -> Self {
-        Self::Default
+        &self.default
     }
 }
 
 #[derive(Default)]
 pub struct NameServerGroup {
-    resolver_opts: ResolverOpts,
+    resolver_opts: Arc<ResolverOpts>,
     servers: Vec<Arc<NameServer>>,
 }
 
@@ -396,6 +357,10 @@ impl NameServerGroup {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.servers.is_empty()
+    }
+
+    fn options(&self) -> &Arc<ResolverOpts> {
+        &self.resolver_opts
     }
 }
 
@@ -433,70 +398,59 @@ impl GenericResolver for NameServerGroup {
     }
 }
 
-pub struct NameServerFactory {
-    tls_client_config: TlsClientConfigBundle,
-    cache: RwLock<HashMap<u64, Arc<NameServer>>>,
+pub enum NameServer {
+    IpAddress((Arc<RawNameServer>, Arc<NameServerOpts>)),
+    DomainName {
+        domain: String,
+        config: RawNameServerConfig,
+        opts: Arc<NameServerOpts>,
+        connection_provider: ConnectionProvider,
+        resolver: Arc<BootstrapResolver>,
+        inner: RwLock<HashMap<IpAddr, Arc<RawNameServer>>>,
+    },
 }
 
-impl NameServerFactory {
-    pub fn new(tls_client_config: TlsClientConfigBundle) -> Self {
-        Self {
-            tls_client_config,
-            cache: Default::default(),
-        }
+impl From<RawNameServerConfig> for NameServer {
+    fn from(config: RawNameServerConfig) -> Self {
+        Self::IpAddress((
+            Arc::new(RawNameServer::new(
+                config,
+                Default::default(),
+                Default::default(),
+            )),
+            Default::default(),
+        ))
     }
+}
 
-    pub async fn create(
-        &self,
-        url: &VerifiedDnsUrl,
+impl NameServer {
+    pub fn new(
+        config: NameServerInfo,
         proxy: Option<ProxyConfig>,
-        so_mark: Option<u32>,
-        device: Option<String>,
-        resolver_opts: NameServerOpts,
-    ) -> Arc<NameServer> {
-        use crate::libdns::resolver::name_server::NameServer as N;
-
-        let key = {
-            let mut hasher = DefaultHasher::new();
-            url.hash(&mut hasher);
-            proxy.hash(&mut hasher);
-            so_mark.hash(&mut hasher);
-            device.hash(&mut hasher);
-            resolver_opts.hash(&mut hasher);
-            hasher.finish()
-        };
-
-        if let Some(ns) = self.cache.read().await.get(&key) {
-            return ns.clone();
-        }
-
-        let config = Self::create_config_from_url(url, self.tls_client_config.clone());
-
-        let inner = N::<GenericConnector<TokioRuntimeProvider>>::new(
-            config,
-            resolver_opts.deref().to_owned(),
-            GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device)),
-        );
-
-        let ns = Arc::new(NameServer {
-            opts: resolver_opts,
-            inner,
-        });
-        self.cache.write().await.insert(key, ns.clone());
-        ns
-    }
-
-    fn create_config_from_url(
-        url: &VerifiedDnsUrl,
-        tls_client_config: TlsClientConfigBundle,
-    ) -> NameServerConfig {
+        tls_client_config: Option<TlsClientConfigBundle>,
+        resolver: Option<Arc<BootstrapResolver>>,
+        default_client_subnet: Option<ClientSubnet>,
+    ) -> anyhow::Result<Self> {
         use crate::libdns::resolver::config::Protocol::*;
 
-        let addr = url.addr();
+        let url = &config.server;
+
+        let ip_addr = url.ip();
+        let port = url.port();
+
+        let socket_addr = SocketAddr::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port);
+
+        if ip_addr.is_none() && resolver.is_none() {
+            anyhow::bail!("Parameter resolver is required for non-ip upstream");
+        }
 
         let tls_dns_name = Some(url.host().to_string());
 
         let tls_config = if url.proto().is_encrypted() {
+            let Some(tls_client_config) = tls_client_config else {
+                anyhow::bail!("Parameter tls_client_config is required for Encrypted upstream");
+            };
+
             let config = if !url.ssl_verify() {
                 tls_client_config.verify_off
             } else if url.sni_off() {
@@ -510,9 +464,27 @@ impl NameServerFactory {
             None
         };
 
-        match url.proto() {
+        let opts = Arc::new(NameServerOpts::new(
+            config.blacklist_ip,
+            config.whitelist_ip,
+            config.check_edns,
+            config.subnet.map(|x| x.into()).or(default_client_subnet),
+            resolver
+                .as_ref()
+                .map(|r| r.options().clone())
+                .unwrap_or_default(),
+        ));
+
+        let so_mark = config.so_mark;
+        let device = config.interface;
+
+        let provider = GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device));
+
+        use crate::libdns::resolver::config::NameServerConfig;
+
+        let config = match url.proto() {
             Udp => NameServerConfig {
-                socket_addr: addr,
+                socket_addr,
                 protocol: Protocol::Udp,
                 tls_dns_name: None,
                 tls_config: None,
@@ -520,7 +492,7 @@ impl NameServerFactory {
                 bind_addr: None,
             },
             Tcp => NameServerConfig {
-                socket_addr: addr,
+                socket_addr,
                 protocol: Protocol::Tcp,
                 tls_dns_name: None,
                 tls_config: None,
@@ -529,7 +501,7 @@ impl NameServerFactory {
             },
             #[cfg(feature = "dns-over-https")]
             Https => NameServerConfig {
-                socket_addr: addr,
+                socket_addr,
                 protocol: Protocol::Https,
                 tls_dns_name,
                 trust_negative_responses: true,
@@ -538,7 +510,7 @@ impl NameServerFactory {
             },
             #[cfg(feature = "dns-over-quic")]
             Quic => NameServerConfig {
-                socket_addr: addr,
+                socket_addr,
                 protocol: Protocol::Quic,
                 tls_dns_name,
                 trust_negative_responses: true,
@@ -547,7 +519,7 @@ impl NameServerFactory {
             },
             #[cfg(feature = "dns-over-tls")]
             Tls => NameServerConfig {
-                socket_addr: addr,
+                socket_addr,
                 protocol: Protocol::Tls,
                 tls_dns_name,
                 trust_negative_responses: true,
@@ -556,7 +528,7 @@ impl NameServerFactory {
             },
             #[cfg(feature = "dns-over-h3")]
             H3 => NameServerConfig {
-                socket_addr: addr,
+                socket_addr,
                 protocol: Protocol::H3,
                 tls_dns_name,
                 trust_negative_responses: true,
@@ -564,116 +536,98 @@ impl NameServerFactory {
                 tls_config,
             },
             _ => todo!(),
-        }
+        };
+
+        Ok(if ip_addr.is_some() {
+            Self::IpAddress((
+                Arc::new(RawNameServer::new(
+                    config,
+                    opts.as_ref().deref().clone(),
+                    provider,
+                )),
+                opts,
+            ))
+        } else {
+            Self::DomainName {
+                domain: url.host().to_string(),
+                config,
+                opts,
+                connection_provider: provider,
+                inner: Default::default(),
+                resolver: resolver.unwrap(),
+            }
+        })
     }
 
-    async fn create_name_server_group(
-        &self,
-        infos: &[NameServerInfo],
-        proxies: &HashMap<String, ProxyConfig>,
-        default_client_subnet: Option<ClientSubnet>,
-    ) -> NameServerGroup {
-        let mut servers = vec![];
+    async fn handle(&self) -> Option<Arc<connection_provider::RawNameServer>> {
+        match self {
+            NameServer::IpAddress((v, _)) => Some(v.clone()),
+            NameServer::DomainName {
+                domain,
+                config,
+                opts,
+                connection_provider,
+                inner,
+                resolver,
+            } => {
+                {
+                    let read = inner.read().await;
 
-        let resolver = bootstrap::resolver().await;
-
-        for info in infos {
-            let url = info.server.clone();
-            let verified_urls = match TryInto::<VerifiedDnsUrl>::try_into(url) {
-                Ok(url) => vec![url],
-                Err(url) => {
-                    if let Some(domain) = url.domain() {
-                        match resolver.lookup_ip(domain).await {
-                            Ok(lookup_ip) => lookup_ip
-                                .ip_addrs()
-                                .into_iter()
-                                .map_while(|ip| {
-                                    let mut url = url.clone();
-                                    url.set_ip(ip);
-                                    TryInto::<VerifiedDnsUrl>::try_into(url).ok()
-                                })
-                                .collect::<Vec<_>>(),
-                            Err(err) => {
-                                warn!("lookup ip: {domain} failed, {err}");
-                                vec![]
-                            }
+                    if !read.is_empty() {
+                        if let Some(handle) = read.values().next().cloned() {
+                            return Some(handle);
                         }
-                    } else {
-                        vec![]
                     }
                 }
-            };
 
-            let nameserver_opts = NameServerOpts::new(
-                info.blacklist_ip,
-                info.whitelist_ip,
-                info.check_edns,
-                info.subnet.map(|x| x.into()).or(default_client_subnet),
-                resolver.options().clone(),
-            );
+                let ip_addrs = match resolver.lookup_ip(domain).await {
+                    Ok(lookup_ip) => lookup_ip.ip_addrs().into_iter().collect::<Vec<_>>(),
+                    Err(err) => {
+                        warn!("lookup ip: {domain} failed, {err}");
+                        vec![]
+                    }
+                };
 
-            let proxy = info
-                .proxy
-                .as_deref()
-                .map(|n| proxies.get(n))
-                .unwrap_or_default()
-                .cloned();
+                let mut write = inner.write().await;
 
-            for url in verified_urls {
-                servers.push(
-                    self.create(
-                        &url,
-                        proxy.clone(),
-                        info.so_mark,
-                        info.interface.clone(),
-                        nameserver_opts.clone(),
-                    )
-                    .await,
-                )
+                for ip_addr in ip_addrs {
+                    if write.contains_key(&ip_addr) {
+                        continue;
+                    }
+
+                    let mut config = config.clone();
+                    config.socket_addr.set_ip(ip_addr);
+
+                    let opts = opts.clone();
+                    let connection_provider = connection_provider.clone();
+
+                    let handle = Arc::new(RawNameServer::new(
+                        config,
+                        opts.as_ref().deref().clone(),
+                        connection_provider,
+                    ));
+                    write.insert(ip_addr, handle.clone());
+                    return Some(handle);
+                }
+
+                write.values().next().cloned()
             }
         }
-
-        NameServerGroup {
-            resolver_opts: resolver.options().to_owned(),
-            servers,
-        }
-    }
-}
-
-pub struct NameServer {
-    opts: NameServerOpts,
-    inner: crate::libdns::resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>,
-}
-
-impl NameServer {
-    fn new(
-        config: NameServerConfig,
-        opts: NameServerOpts,
-        proxy: Option<ProxyConfig>,
-        so_mark: Option<u32>,
-        device: Option<String>,
-    ) -> Self {
-        use crate::libdns::resolver::name_server::NameServer as N;
-
-        let inner = N::<GenericConnector<TokioRuntimeProvider>>::new(
-            config,
-            opts.resolver_opts.clone(),
-            GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device)),
-        );
-
-        Self { opts, inner }
     }
 
     #[inline]
     pub fn options(&self) -> &NameServerOpts {
-        &self.opts
+        match self {
+            NameServer::IpAddress((_, opts)) => opts,
+            NameServer::DomainName { opts, .. } => opts,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl GenericResolver for NameServer {
     fn options(&self) -> &ResolverOpts {
-        &self.opts
+        &self.options().resolver_opts
     }
 
     async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
@@ -681,12 +635,13 @@ impl GenericResolver for NameServer {
         name: N,
         options: O,
     ) -> Result<DnsResponse, LookupError> {
+        use crate::libdns::proto::error::ProtoErrorKind;
         let name = name.into_name()?;
         let options: LookupOptions = options.into();
 
         let query = Query::query(name, options.record_type);
 
-        let client_subnet = options.client_subnet.or(self.opts.client_subnet);
+        let client_subnet = options.client_subnet.or(self.options().client_subnet);
 
         if options.client_subnet.is_none() {
             if let Some(subnet) = client_subnet.as_ref() {
@@ -713,7 +668,9 @@ impl GenericResolver for NameServer {
             request_options,
         );
 
-        let ns = self.inner.clone();
+        let Some(ns) = self.handle().await else {
+            return Err(ProtoErrorKind::NoConnections.into());
+        };
 
         let res = ns.send(req).first_answer().await?;
 
@@ -910,39 +867,6 @@ where
     }
 }
 
-pub struct VerifiedDnsUrl(DnsUrl);
-
-impl VerifiedDnsUrl {
-    pub fn ip(&self) -> IpAddr {
-        self.0.ip().expect("VerifiedDnsUrl must have ip.")
-    }
-
-    pub fn addr(&self) -> SocketAddr {
-        self.0
-            .addr()
-            .expect("VerifiedDnsUrl must have socket address.")
-    }
-}
-
-impl Deref for VerifiedDnsUrl {
-    type Target = DnsUrl;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::convert::TryFrom<DnsUrl> for VerifiedDnsUrl {
-    type Error = DnsUrl;
-
-    fn try_from(value: DnsUrl) -> Result<Self, Self::Error> {
-        if value.ip().is_none() {
-            return Err(value);
-        }
-        Ok(Self(value))
-    }
-}
-
 #[derive(Clone)]
 pub struct LookupOptions {
     pub is_dnssec: bool,
@@ -1028,8 +952,12 @@ mod connection_provider {
         TokioHandle,
     };
 
+    pub type RawNameServer =
+        crate::libdns::resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>;
+    pub type RawNameServerConfig = crate::libdns::resolver::config::NameServerConfig;
+    pub type ConnectionProvider = GenericConnector<TokioRuntimeProvider>;
     /// The Tokio Runtime for async execution
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     pub struct TokioRuntimeProvider {
         proxy: Option<ProxyConfig>,
         so_mark: Option<u32>,
@@ -1239,27 +1167,8 @@ mod connection_provider {
 }
 
 mod bootstrap {
-    use crate::libdns::resolver::config::{NameServerConfigGroup, ResolverConfig};
-
     use super::*;
-
-    static RESOLVER: RwLock<Option<Arc<BootstrapResolver>>> = RwLock::const_new(None);
-
-    pub async fn resolver() -> Arc<BootstrapResolver> {
-        let lock = RESOLVER.read().await;
-        if lock.is_none() {
-            drop(lock);
-            let resolver = Arc::new(BootstrapResolver::from_system_conf());
-            set_resolver(resolver.clone()).await;
-            resolver
-        } else {
-            lock.as_ref().unwrap().clone()
-        }
-    }
-
-    pub async fn set_resolver(resolver: Arc<BootstrapResolver>) {
-        *(RESOLVER.write().await) = Some(resolver)
-    }
+    use crate::libdns::resolver::config::{NameServerConfigGroup, ResolverConfig};
 
     pub struct BootstrapResolver<T: GenericResolver = NameServerGroup>
     where
@@ -1327,19 +1236,23 @@ mod bootstrap {
             let mut name_servers = vec![];
 
             for config in resolv_config.name_servers() {
-                name_servers.push(Arc::new(super::NameServer::new(
-                    config.clone(),
-                    Default::default(),
-                    None,
-                    None,
-                    None,
-                )));
+                name_servers.push(Arc::new(config.clone().into()));
             }
 
+            let resolv_opts = Arc::new(resolv_opts);
+
             Self::new(Arc::new(NameServerGroup {
-                resolver_opts: resolv_opts.to_owned(),
+                resolver_opts: resolv_opts.clone(),
                 servers: name_servers,
             }))
+        }
+    }
+
+    impl<T: GenericResolver + Sync + Send> std::ops::Deref for BootstrapResolver<T> {
+        type Target = Arc<T>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.resolver
         }
     }
 
@@ -1432,16 +1345,6 @@ mod tests {
             .into_iter()
             .any(|i| i == "223.5.5.5".parse::<IpAddr>().unwrap()
                 || i == "223.6.6.6".parse::<IpAddr>().unwrap()));
-    }
-
-    #[test]
-    fn test_name_server_group_name() {
-        let a = NameServerGroupName::from("bootstrap");
-        let b = NameServerGroupName::from("Bootstrap");
-        assert_eq!(a, b);
-        let a = NameServerGroupName::from("abc");
-        let b = NameServerGroupName::from("Abc");
-        assert_eq!(a, b);
     }
 
     async fn query_google(client: &DnsClient) -> bool {
