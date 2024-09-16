@@ -317,6 +317,9 @@ impl DnsClient {
     }
 
     pub async fn get_server_group(&self, name: &str) -> Option<Arc<NameServerGroup>> {
+        if name == "" || name.eq_ignore_ascii_case("default") {
+            return Some(self.default.clone());
+        }
         self.servers.get(name).cloned()
     }
 
