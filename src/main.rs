@@ -42,7 +42,7 @@ mod server;
 mod service;
 mod third_ext;
 #[cfg(feature = "self-update")]
-mod update;
+mod updater;
 
 use error::Error;
 use infra::middleware;
@@ -169,9 +169,8 @@ impl Cli {
                 RuntimeConfig::load(conf);
             }
             #[cfg(feature = "self-update")]
-            Commands::Update { yes } => {
-                use update::update;
-                update(yes).unwrap();
+            Commands::Update { yes, version } => {
+                updater::update(yes, version.as_deref()).unwrap();
             }
         }
     }
