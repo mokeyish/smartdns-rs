@@ -741,7 +741,7 @@ impl RuntimeConfigBuilder {
     }
 
     pub fn load_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn std::error::Error>> {
-        let path = find_path(path, self.conf_file.as_ref());
+        let path = resolve_filepath(path, self.conf_file.as_ref());
 
         if path.exists() {
             if self.conf_file.is_none() {
@@ -834,7 +834,7 @@ impl RuntimeConfigBuilder {
                 DomainSetProvider(mut v) => {
                     use crate::config::DomainSetProvider;
                     if let DomainSetProvider::File(provider) = &mut v {
-                        provider.file = find_path(&provider.file, self.conf_file.as_ref());
+                        provider.file = resolve_filepath(&provider.file, self.conf_file.as_ref());
                     }
                     self.domain_set_providers
                         .entry(v.name().to_string())
@@ -856,28 +856,62 @@ impl RuntimeConfigBuilder {
     }
 }
 
-pub fn find_path<P: AsRef<Path>>(path: P, base_conf_file: Option<&PathBuf>) -> PathBuf {
-    let mut path = path.as_ref().to_path_buf();
-    if !path.exists() && !path.is_absolute() {
-        if let Some(base_conf_file) = base_conf_file {
-            if let Some(parent) = base_conf_file.parent() {
-                let mut new_path = parent.join(path.as_path());
+fn resolve_filepath<P: AsRef<Path>>(filepath: P, base_file: Option<&PathBuf>) -> PathBuf {
+    let filepath = filepath.as_ref();
+    if filepath.is_file() {
+        return filepath.to_path_buf();
+    }
 
-                if !new_path.exists()
-                    && matches!(base_conf_file.file_name(), Some(file_name) if file_name == OsStr::new("smartdns.conf"))
+    if !filepath.is_absolute() {
+        if let Some(base_conf_file) = base_file {
+            if let Some(dir) = base_conf_file.parent() {
+                let new_path = dir.join(filepath);
+
+                if new_path.is_file() {
+                    return new_path;
+                }
+
+                if matches!(base_conf_file.file_name(), Some(file_name) if file_name == OsStr::new("smartdns.conf"))
                 {
                     // eg: /etc/smartdns.d/custom.conf
-                    new_path = parent.join("smartdns.d").join(path.as_path());
+                    let new_path = dir.join("smartdns.d").join(filepath);
+
+                    if new_path.is_file() {
+                        return new_path;
+                    }
                 }
 
-                if new_path.exists() {
-                    path = new_path;
+                if let Ok(new_path) = std::env::current_dir().map(|dir| dir.join(filepath)) {
+                    if new_path.is_file() {
+                        return new_path;
+                    }
                 }
+
+                if let Some(new_path) = std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|dir| dir.join(filepath)))
+                {
+                    if new_path.is_file() {
+                        return new_path;
+                    }
+                }
+            }
+        }
+    } else {
+        // try to resolve absolute path by extracting its file_name
+        if let Some(new_path) = filepath.file_name().map(|f| resolve_filepath(f, base_file)) {
+            if new_path.is_file() {
+                log::warn!(
+                    "File {} not found, but {} found",
+                    filepath.display(),
+                    new_path.display()
+                );
+                return new_path;
             }
         }
     }
 
-    path
+    filepath.to_path_buf()
 }
 
 #[cfg(test)]
