@@ -12,6 +12,10 @@ on:
         required: false
         default: default
         description: Space or comma separated list of features to activate
+      prerelease:
+        type: boolean
+        description: "Identify the release as a prerelease. Defaults to false"
+        required: false
 
   workflow_dispatch:
     inputs:
@@ -159,6 +163,7 @@ jobs:
         if: ${{ startsWith(inputs.version, 'v') }}
         with:
           draft: false
+          prerelease: ${{ inputs.prerelease }}
           tag_name: ${{ inputs.version }}
           files: |
             ${{ env.archive_file }} 
