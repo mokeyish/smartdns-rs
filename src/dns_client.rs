@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    ops::Deref,
+    ops::{Deref, DerefMut},
     path::PathBuf,
     slice::Iter,
     sync::Arc,
@@ -409,7 +409,7 @@ pub enum NameServer {
         opts: Arc<NameServerOpts>,
         connection_provider: ConnectionProvider,
         resolver: Arc<BootstrapResolver>,
-        inner: RwLock<HashMap<IpAddr, Arc<RawNameServer>>>,
+        inner: RwLock<(Vec<Arc<RawNameServer>>, HashSet<IpAddr>)>,
     },
 }
 
@@ -576,9 +576,21 @@ impl NameServer {
                 {
                     let read = inner.read().await;
 
-                    if !read.is_empty() {
-                        if let Some(handle) = read.values().next().cloned() {
-                            return Some(handle);
+                    let (servers, _) = read.deref();
+
+                    if let Some(first) = servers.first().cloned() {
+                        if servers.len() > 1 {
+                            let mut servers = servers.to_vec();
+                            servers.sort_unstable();
+                            if matches!(servers.first(), Some(s) if *s == first) {
+                                // Still first, return directly
+                                return Some(first);
+                            }
+                        } else {
+                            // There is only one, return directly.
+                            // todo:// determine if it failed, but it requires `is_connected` public.
+                            // https://github.com/hickory-dns/hickory-dns/blob/78f9b27649d3ee1b9894c22aedcdc9bad2daf331/crates/resolver/src/name_server/name_server.rs#L85
+                            return Some(first);
                         }
                     }
                 }
@@ -592,9 +604,10 @@ impl NameServer {
                 };
 
                 let mut write = inner.write().await;
+                let (servers, seen) = write.deref_mut();
 
                 for ip_addr in ip_addrs {
-                    if write.contains_key(&ip_addr) {
+                    if seen.contains(&ip_addr) {
                         continue;
                     }
 
@@ -604,16 +617,18 @@ impl NameServer {
                     let opts = opts.clone();
                     let connection_provider = connection_provider.clone();
 
-                    let handle = Arc::new(RawNameServer::new(
+                    let server = Arc::new(RawNameServer::new(
                         config,
                         opts.as_ref().deref().clone(),
                         connection_provider,
                     ));
-                    write.insert(ip_addr, handle.clone());
-                    return Some(handle);
+                    seen.insert(ip_addr);
+                    servers.push(server);
                 }
 
-                write.values().next().cloned()
+                servers.sort_unstable();
+
+                servers.first().cloned()
             }
         }
     }
@@ -959,6 +974,7 @@ mod connection_provider {
         crate::libdns::resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>;
     pub type RawNameServerConfig = crate::libdns::resolver::config::NameServerConfig;
     pub type ConnectionProvider = GenericConnector<TokioRuntimeProvider>;
+
     /// The Tokio Runtime for async execution
     #[derive(Clone, Default)]
     pub struct TokioRuntimeProvider {
