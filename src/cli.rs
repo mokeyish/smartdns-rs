@@ -79,6 +79,9 @@ pub enum Commands {
         /// Automatic yes to prompts
         #[arg(short = 'y', long)]
         yes: bool,
+
+        /// The target version to update to
+        version: Option<String>,
     },
 
     /// Manage the Smart-DNS service (install, uninstall, start, stop, restart).
