@@ -12,6 +12,8 @@ pub struct DomainRule {
 
     pub cname: Option<CName>,
 
+    pub srv: Option<SRV>,
+
     /// The mode of speed checking.
     pub speed_check_mode: Option<SpeedCheckModeList>,
 

@@ -26,6 +26,7 @@ mod proxy_config;
 mod record_type;
 mod response_mode;
 mod speed_mode;
+mod srv;
 
 use super::*;
 
@@ -70,6 +71,8 @@ impl NomParser for String {
 /// one line config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
+#[allow(clippy::upper_case_acronyms)]
+#[allow(clippy::large_enum_variant)]
 pub enum OneConfig {
     Address(AddressRule),
     AuditEnable(bool),
@@ -87,7 +90,8 @@ pub enum OneConfig {
     CacheSize(usize),
     CaFile(PathBuf),
     CaPath(PathBuf),
-    CName(ConfigForDomain<CName>),
+    CNAME(ConfigForDomain<CName>),
+    SRV(ConfigForDomain<SRV>),
     ConfFile(PathBuf),
     DnsmasqLeaseFile(PathBuf),
     Domain(Name),
@@ -192,7 +196,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("force-qtype-soa"), OneConfig::ForceQtypeSoa),
         map(parse_item("response"), OneConfig::ResponseMode),
         map(parse_item("prefetch-domain"), OneConfig::PrefetchDomain),
-        map(parse_item("cname"), OneConfig::CName),
+        map(parse_item("cname"), OneConfig::CNAME),
         map(parse_item("num-workers"), OneConfig::NumWorkers),
         map(parse_item("domain"), OneConfig::Domain),
         map(parse_item("hosts-file"), OneConfig::HostsFile),
@@ -226,6 +230,10 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         ),
         map(parse_item("serve-expired-ttl"), OneConfig::ServeExpiredTtl),
         map(parse_item("serve-expired"), OneConfig::ServeExpired),
+    ));
+
+    let group4 = alt((
+        map(parse_item("srv-record"), OneConfig::SRV),
         map(parse_item("resolv-hostname"), OneConfig::ResolvHostname),
         map(parse_item("tcp-idle-time"), OneConfig::TcpIdleTime),
         map(parse_item("nftset"), OneConfig::NftSet),
@@ -233,7 +241,8 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(NomParser::parse, OneConfig::Listener),
         map(NomParser::parse, OneConfig::Server),
     ));
-    terminated(alt((group1, group2, group3)), comment)(input)
+
+    terminated(alt((group1, group2, group3, group4)), comment)(input)
 }
 
 #[cfg(test)]
