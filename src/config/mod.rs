@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     infra::{file_mode::FileMode, ipset::IpSet},
-    libdns::proto::rr::{Name, RecordType},
+    libdns::proto::rr::{rdata::SRV, Name, RecordType},
     log::Level,
     proxy::ProxyConfig,
     third_ext::serde_str,
@@ -49,6 +49,7 @@ pub type ForwardRules = Vec<ForwardRule>;
 pub type AddressRules = Vec<AddressRule>;
 pub type DomainRules = Vec<ConfigForDomain<DomainRule>>;
 pub type CNameRules = Vec<ConfigForDomain<CName>>;
+pub type SrvRecords = Vec<ConfigForDomain<SRV>>;
 
 #[derive(Default)]
 pub struct Config {
@@ -233,6 +234,8 @@ pub struct Config {
     pub domain_rules: DomainRules,
 
     pub cnames: CNameRules,
+
+    pub srv_records: SrvRecords,
 
     /// The proxy server for upstream querying.
     pub proxy_servers: HashMap<String, ProxyConfig>,

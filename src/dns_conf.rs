@@ -618,6 +618,7 @@ impl RuntimeConfigBuilder {
             &cfg.forward_rules,
             &domain_sets,
             &cfg.cnames,
+            &cfg.srv_records,
             &cfg.nftsets,
         );
 
@@ -780,7 +781,7 @@ impl RuntimeConfigBuilder {
                 BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
                 CacheFile(v) => self.cache.file = Some(v),
                 CachePersist(v) => self.cache.persist = Some(v),
-                CName(v) => self.cnames.push(v),
+                CNAME(v) => self.cnames.push(v),
                 ExpandPtrFromAddress(v) => self.expand_ptr_from_address = Some(v),
                 NftSet(config) => self.nftsets.push(config),
                 Server(server) => self.nameservers.push(server),
@@ -825,6 +826,7 @@ impl RuntimeConfigBuilder {
                 ConfFile(v) => self.load_file(v).expect("load_file failed"),
                 DnsmasqLeaseFile(v) => self.dnsmasq_lease_file = Some(v),
                 ResolvFile(v) => self.resolv_file = Some(v),
+                SRV(v) => self.srv_records.push(v),
                 DomainRule(v) => self.domain_rules.push(v),
                 ForwardRule(v) => self.forward_rules.push(v),
                 User(v) => self.user = Some(v),

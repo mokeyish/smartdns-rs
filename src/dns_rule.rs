@@ -6,7 +6,7 @@ use crate::{
     collections::DomainMap,
     config::{
         AddressRules, CNameRules, ConfigForDomain, ConfigForIP, Domain, DomainRule, DomainRules,
-        DomainSets, ForwardRules, NftsetConfig,
+        DomainSets, ForwardRules, NftsetConfig, SrvRecords,
     },
 };
 
@@ -22,6 +22,7 @@ impl DomainRuleMap {
         forward_rules: &ForwardRules,
         domain_sets: &DomainSets,
         cnames: &CNameRules,
+        srv_records: &SrvRecords,
         nftsets: &Vec<ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>>,
     ) -> Self {
         let mut name_rule_map = HashMap::<WildcardName, DomainRule>::new();
@@ -92,6 +93,22 @@ impl DomainRuleMap {
             };
             for name in names {
                 name_rule_map.entry(name).or_default().cname = Some(rule.config.clone())
+            }
+        }
+
+        // set srv
+        for rule in srv_records {
+            let names = match &rule.domain {
+                Domain::Name(name) => {
+                    vec![name.clone()]
+                }
+                Domain::Set(s) => domain_sets
+                    .get(s)
+                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            };
+            for name in names {
+                name_rule_map.entry(name).or_default().srv = Some(rule.config.clone())
             }
         }
 
@@ -222,6 +239,7 @@ mod tests {
                     address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
             ],
+            &Default::default(),
             &Default::default(),
             &Default::default(),
             &Default::default(),
