@@ -28,7 +28,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddl
         };
 
         match cname {
-            Some(cname) => {
+            Some(mut cname) => {
                 if req.query().query_type() == RecordType::CNAME {
                     let local_ttl = ctx.cfg().local_ttl();
 
@@ -46,8 +46,21 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddl
                 } else {
                     let mut ctx =
                         DnsContext::new(&cname, ctx.cfg().clone(), ctx.server_opts().clone());
-                    let req = req.with_cname(cname);
-                    next.run(&mut ctx, &req).await
+
+                    if !cname.is_fqdn() {
+                        cname.set_fqdn(true);
+                    }
+                    let new_req = req.with_cname(cname);
+                    match next.run(&mut ctx, &new_req).await {
+                        Ok(mut lookup) => {
+                            std::mem::swap(
+                                lookup.queries_mut(),
+                                &mut vec![req.query().original().clone()],
+                            );
+                            Ok(lookup)
+                        }
+                        Err(err) => Err(err),
+                    }
                 }
             }
             None => next.run(ctx, req).await,
