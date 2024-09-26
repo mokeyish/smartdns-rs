@@ -80,7 +80,7 @@ pub fn setup_udp_socket(
     }
 
     // set UDP_CONNRESET off to ignore UdpSocket's WSAECONNRESET error
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", target_env = "msvc"))]
     {
         // https://github.com/mokeyish/smartdns-rs/issues/391
         // https://github.com/shadowsocks/shadowsocks-rust/blob/3b47fa67fac6c2bded73616a284f26c6159cbe9a/src/relay/sys/windows/mod.rs#L17
