@@ -196,6 +196,7 @@ self_update = { version = "0.40.0", default-features = false, features=["archive
 windows = { version = "0.57", features = [
   "Win32_System_Console",
   "Win32_Foundation",
+  "Win32_Networking", "Win32_Networking_WinSock", "Win32_System_IO", # set UDP_CONNRESET off
 ] }
 windows-service = "0.7.0"
 self_update = { version = "0.40.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }

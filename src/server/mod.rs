@@ -2,6 +2,7 @@
 mod https;
 #[cfg(feature = "legacy_dns_server")]
 mod legacy;
+mod net;
 #[cfg(not(feature = "legacy_dns_server"))]
 mod protocol;
 #[cfg(feature = "dns-over-quic")]
@@ -49,18 +50,28 @@ pub async fn serve(
     certificate_key_file: Option<&Path>,
 ) -> Result<ServerHandle, crate::Error> {
     use crate::rustls::load_certificate_and_key;
-    use net::{bind_to, tcp, udp};
+    use net::{bind_to, setup_tcp_socket, setup_udp_socket};
     use std::time::Duration;
 
     let dns_handle = handle.with_new_opt(listener_config.server_opts().clone());
 
     let token = match listener_config {
         ListenerConfig::Udp(listener) => {
-            let udp_socket = bind_to(udp, listener.sock_addr(), listener.device(), "UDP");
+            let udp_socket = bind_to(
+                setup_udp_socket,
+                listener.sock_addr(),
+                listener.device(),
+                "UDP",
+            );
             udp::serve(udp_socket, dns_handle)
         }
         ListenerConfig::Tcp(listener) => {
-            let tcp_listener = bind_to(tcp, listener.sock_addr(), listener.device(), "TCP");
+            let tcp_listener = bind_to(
+                setup_tcp_socket,
+                listener.sock_addr(),
+                listener.device(),
+                "TCP",
+            );
             tcp::serve(tcp_listener, dns_handle, Duration::from_secs(idle_time))
         }
         #[cfg(feature = "dns-over-tls")]
@@ -75,7 +86,12 @@ pub async fn serve(
                 LISTENER_TYPE,
             )?;
 
-            let tls_listener = bind_to(tcp, listener.sock_addr(), listener.device(), LISTENER_TYPE);
+            let tls_listener = bind_to(
+                setup_tcp_socket,
+                listener.sock_addr(),
+                listener.device(),
+                LISTENER_TYPE,
+            );
 
             tls::serve(
                 tls_listener,
@@ -96,8 +112,12 @@ pub async fn serve(
                 LISTENER_TYPE,
             )?;
 
-            let https_listener =
-                bind_to(tcp, listener.sock_addr(), listener.device(), LISTENER_TYPE);
+            let https_listener = bind_to(
+                setup_tcp_socket,
+                listener.sock_addr(),
+                listener.device(),
+                LISTENER_TYPE,
+            );
 
             let app = app.clone();
             https::serve(
@@ -121,7 +141,12 @@ pub async fn serve(
                 LISTENER_TYPE,
             )?;
 
-            let quic_listener = bind_to(udp, listener.sock_addr(), listener.device(), "QUIC");
+            let quic_listener = bind_to(
+                setup_udp_socket,
+                listener.sock_addr(),
+                listener.device(),
+                "QUIC",
+            );
 
             quic::serve(
                 quic_listener,
@@ -268,101 +293,5 @@ fn sanitize_src_address(src: SocketAddr) -> Result<(), String> {
     match src.ip() {
         IpAddr::V4(v4) => verify_v4(v4),
         IpAddr::V6(v6) => verify_v6(v6),
-    }
-}
-
-mod net {
-    use crate::log;
-    use std::{io, net::SocketAddr};
-    use tokio::net::{TcpListener, UdpSocket};
-
-    pub fn bind_to<T>(
-        func: impl Fn(SocketAddr, Option<&str>, &str) -> io::Result<T>,
-        sock_addr: SocketAddr,
-        bind_device: Option<&str>,
-        bind_type: &str,
-    ) -> T {
-        func(sock_addr, bind_device, bind_type).unwrap_or_else(|err| {
-            panic!("cound not bind to {bind_type}: {sock_addr}, {err}");
-        })
-    }
-
-    pub fn tcp(
-        sock_addr: SocketAddr,
-        bind_device: Option<&str>,
-        bind_type: &str,
-    ) -> io::Result<TcpListener> {
-        let device_note = bind_device
-            .map(|device| format!("@{device}"))
-            .unwrap_or_default();
-
-        log::debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
-        let tcp_listener = std::net::TcpListener::bind(sock_addr)?;
-
-        {
-            let sock_ref = socket2::SockRef::from(&tcp_listener);
-            sock_ref.set_nonblocking(true)?;
-            sock_ref.set_reuse_address(true)?;
-
-            #[cfg(target_os = "macos")]
-            sock_ref.set_reuse_port(true)?;
-
-            #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-            if let Some(device) = bind_device {
-                sock_ref.bind_device(Some(device.as_bytes()))?;
-            }
-        }
-
-        let tcp_listener = TcpListener::from_std(tcp_listener)?;
-
-        log::info!(
-            "listening for {} on {:?}{}",
-            bind_type,
-            tcp_listener
-                .local_addr()
-                .expect("could not lookup local address"),
-            device_note
-        );
-
-        Ok(tcp_listener)
-    }
-
-    pub fn udp(
-        sock_addr: SocketAddr,
-        bind_device: Option<&str>,
-        bind_type: &str,
-    ) -> io::Result<UdpSocket> {
-        let device_note = bind_device
-            .map(|device| format!("@{device}"))
-            .unwrap_or_default();
-
-        log::debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
-        let udp_socket = std::net::UdpSocket::bind(sock_addr)?;
-
-        {
-            let sock_ref = socket2::SockRef::from(&udp_socket);
-            sock_ref.set_nonblocking(true)?;
-            sock_ref.set_reuse_address(true)?;
-
-            #[cfg(target_os = "macos")]
-            sock_ref.set_reuse_port(true)?;
-
-            #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-            if let Some(device) = bind_device {
-                sock_ref.bind_device(Some(device.as_bytes()))?;
-            }
-        }
-
-        let udp_socket = UdpSocket::from_std(udp_socket)?;
-
-        log::info!(
-            "listening for {} on {:?}{}",
-            bind_type,
-            udp_socket
-                .local_addr()
-                .expect("could not lookup local address"),
-            device_note
-        );
-        Ok(udp_socket)
     }
 }
