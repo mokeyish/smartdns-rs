@@ -54,4 +54,7 @@ pub struct CacheConfig {
     ///   serve-expired-reply-ttl 30
     /// ```
     pub serve_expired_reply_ttl: Option<u64>,
+
+    /// cache save interval
+    pub checkpoint_time: Option<u64>,
 }

@@ -88,6 +88,7 @@ pub enum OneConfig {
     CacheFile(PathBuf),
     CachePersist(bool),
     CacheSize(usize),
+    CacheCheckpointTime(u64),
     CaFile(PathBuf),
     CaPath(PathBuf),
     CNAME(ConfigForDomain<CName>),
@@ -162,13 +163,20 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("blacklist-ip"), OneConfig::BlacklistIp),
         map(parse_item("cache-file"), OneConfig::CacheFile),
         map(parse_item("cache-persist"), OneConfig::CachePersist),
+        map(parse_item("cache-size"), OneConfig::CacheSize),
+        map(
+            parse_item("cache-checkpoint-time"),
+            OneConfig::CacheCheckpointTime,
+        ),
         map(parse_item("ca-file"), OneConfig::CaFile),
         map(parse_item("ca-path"), OneConfig::CaPath),
         map(parse_item("conf-file"), OneConfig::ConfFile),
-        map(parse_item("cache-size"), OneConfig::CacheSize),
         map(parse_item("domain-rules"), OneConfig::DomainRule),
         map(parse_item("domain-rule"), OneConfig::DomainRule),
         map(parse_item("domain-set"), OneConfig::DomainSetProvider),
+    ));
+
+    let group2 = alt((
         map(
             parse_item("dnsmasq-lease-file"),
             OneConfig::DnsmasqLeaseFile,
@@ -177,9 +185,6 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
             parse_item("dualstack-ip-allow-force-AAAA"),
             OneConfig::DualstackIpAllowForceAAAA,
         ),
-    ));
-
-    let group2 = alt((
         map(
             parse_item("dualstack-ip-selection"),
             OneConfig::DualstackIpSelection,
@@ -207,11 +212,11 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("log-filter"), OneConfig::LogFilter),
         map(parse_item("log-level"), OneConfig::LogLevel),
         map(parse_item("log-num"), OneConfig::LogNum),
-        map(parse_item("log-size"), OneConfig::LogSize),
-        map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
     ));
 
     let group3 = alt((
+        map(parse_item("log-size"), OneConfig::LogSize),
+        map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
         map(parse_item("mdns-lookup"), OneConfig::MdnsLookup),
         map(parse_item("nameserver"), OneConfig::ForwardRule),
         map(parse_item("proxy-server"), OneConfig::ProxyConfig),
