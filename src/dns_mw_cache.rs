@@ -46,14 +46,26 @@ impl DnsCacheMiddleware {
         if cfg.cache_persist() {
             let cache_file = cfg.cache_file();
             let cache = cache.cache();
+            let cache_checkpoint_time = cfg.cache_checkpoint_time();
             tokio::spawn(async move {
                 if cache_file.exists() {
                     cache.lock().await.load(cache_file.as_path());
                 }
-                crate::signal::terminate()
-                    .await
-                    .expect("failed to wait ctrl_c for persist cache.");
-                cache.lock().await.persist(cache_file.as_path());
+                let mut interval =
+                    tokio::time::interval(Duration::from_secs(cache_checkpoint_time));
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            cache.lock().await.persist(cache_file.as_path());
+                            log::debug!("save cache to {}", cache_file.display());
+                        }
+                        _ = crate::signal::terminate() => {
+                            cache.lock().await.persist(cache_file.as_path());
+                            log::debug!("save cache to {}", cache_file.display());
+                            break;
+                        }
+                    };
+                }
             });
         }
 

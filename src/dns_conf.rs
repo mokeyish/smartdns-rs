@@ -257,10 +257,16 @@ impl RuntimeConfig {
         self.cache.size.unwrap_or(512)
     }
 
-    ///  enable persist cache when restart
+    /// enable persist cache when restart
     #[inline]
     pub fn cache_persist(&self) -> bool {
         self.cache.persist.unwrap_or(false)
+    }
+
+    /// cache save interval
+    #[inline]
+    pub fn cache_checkpoint_time(&self) -> u64 {
+        self.cache.checkpoint_time.unwrap_or(24 * 60 * 60)
     }
 
     /// cache persist file
@@ -781,6 +787,7 @@ impl RuntimeConfigBuilder {
                 BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
                 CacheFile(v) => self.cache.file = Some(v),
                 CachePersist(v) => self.cache.persist = Some(v),
+                CacheCheckpointTime(v) => self.cache.checkpoint_time = Some(v),
                 CNAME(v) => self.cnames.push(v),
                 ExpandPtrFromAddress(v) => self.expand_ptr_from_address = Some(v),
                 NftSet(config) => self.nftsets.push(config),
