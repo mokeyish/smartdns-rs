@@ -543,7 +543,7 @@ impl RuntimeConfig {
         &self.cnames
     }
 
-    pub fn valid_nftsets(&self) -> Vec<&ConfigForIP<NftsetConfig>> {
+    pub fn valid_nftsets(&self) -> Vec<&ConfigForIP<NFTsetConfig>> {
         self.nftsets
             .iter()
             .flat_map(|x| &x.config)
@@ -625,6 +625,7 @@ impl RuntimeConfigBuilder {
             &domain_sets,
             &cfg.cnames,
             &cfg.srv_records,
+            &cfg.https_records,
             &cfg.nftsets,
         );
 
@@ -790,7 +791,8 @@ impl RuntimeConfigBuilder {
                 CacheCheckpointTime(v) => self.cache.checkpoint_time = Some(v),
                 CNAME(v) => self.cnames.push(v),
                 ExpandPtrFromAddress(v) => self.expand_ptr_from_address = Some(v),
-                NftSet(config) => self.nftsets.push(config),
+                NftSet(v) => self.nftsets.push(v),
+                HttpsRecord(v) => self.https_records.push(v),
                 Server(server) => self.nameservers.push(server),
                 ResponseMode(mode) => self.response_mode = Some(mode),
                 ResolvHostname(v) => self.resolv_hostname = Some(v),
@@ -833,7 +835,7 @@ impl RuntimeConfigBuilder {
                 ConfFile(v) => self.load_file(v).expect("load_file failed"),
                 DnsmasqLeaseFile(v) => self.dnsmasq_lease_file = Some(v),
                 ResolvFile(v) => self.resolv_file = Some(v),
-                SRV(v) => self.srv_records.push(v),
+                SrvRecord(v) => self.srv_records.push(v),
                 DomainRule(v) => self.domain_rules.push(v),
                 ForwardRule(v) => self.forward_rules.push(v),
                 User(v) => self.user = Some(v),
@@ -1531,5 +1533,12 @@ mod tests {
         assert!(!domain_set.contains(&"ads2c.cn".parse().unwrap()));
         // assert!(domain_set.is_match(&Name::from_str("ads3.net").unwrap().into()));
         // assert!(domain_set.is_match(&Name::from_str("q.ads3.net").unwrap().into()));
+    }
+
+    #[test]
+    fn test_parse_https_record() {
+        let cfg = RuntimeConfig::builder().with("https-record #").build();
+        assert_eq!(cfg.https_records.len(), 1);
+        assert_eq!(cfg.https_records[0].config, HttpsRecordRule::SOA);
     }
 }

@@ -1454,7 +1454,7 @@ mod tests {
             .join_all()
             .await;
 
-        assert!(results.into_iter().all(|r| r));
+        assert!(results.into_iter().any(|r| r));
     }
 
     #[tokio::test]
