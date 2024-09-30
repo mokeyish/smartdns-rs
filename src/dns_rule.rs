@@ -6,7 +6,7 @@ use crate::{
     collections::DomainMap,
     config::{
         AddressRules, CNameRules, ConfigForDomain, ConfigForIP, Domain, DomainRule, DomainRules,
-        DomainSets, ForwardRules, NftsetConfig, SrvRecords,
+        DomainSets, ForwardRules, HttpsRecords, NFTsetConfig, SrvRecords,
     },
 };
 
@@ -16,6 +16,7 @@ pub struct DomainRuleMap {
 }
 
 impl DomainRuleMap {
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         domain_rules: &DomainRules,
         address_rules: &AddressRules,
@@ -23,24 +24,24 @@ impl DomainRuleMap {
         domain_sets: &DomainSets,
         cnames: &CNameRules,
         srv_records: &SrvRecords,
-        nftsets: &Vec<ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>>,
+        https_records: &HttpsRecords,
+        nftsets: &Vec<ConfigForDomain<Vec<ConfigForIP<NFTsetConfig>>>>,
     ) -> Self {
+        let expand_domain = |domain: &Domain| match &domain {
+            Domain::Name(name) => {
+                vec![name.clone()]
+            }
+            Domain::Set(s) => domain_sets
+                .get(s)
+                .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
+                .unwrap_or_default(),
+        };
+
         let mut name_rule_map = HashMap::<WildcardName, DomainRule>::new();
 
         // append domain_rules
-
         for rule in domain_rules {
-            let names = match &rule.domain {
-                Domain::Name(name) => {
-                    vec![name.clone()]
-                }
-                Domain::Set(s) => domain_sets
-                    .get(s)
-                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-            };
-
-            for name in names {
+            for name in expand_domain(&rule.domain) {
                 // overide
                 *(name_rule_map.entry(name).or_default()) += rule.config.clone();
             }
@@ -48,82 +49,41 @@ impl DomainRuleMap {
 
         // append address rule
         for rule in address_rules.iter() {
-            let names = match &rule.domain {
-                Domain::Name(name) => {
-                    vec![name.clone()]
-                }
-                Domain::Set(s) => domain_sets
-                    .get(s)
-                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-            };
-
-            for name in names {
-                name_rule_map.entry(name).or_default().address = Some(rule.address);
+            for name in expand_domain(&rule.domain) {
+                (name_rule_map.entry(name).or_default()).address = Some(rule.address);
             }
         }
 
         // append forward rule
         for rule in forward_rules.iter() {
-            let names = match &rule.domain {
-                Domain::Name(name) => {
-                    vec![name.clone()]
-                }
-                Domain::Set(s) => domain_sets
-                    .get(s)
-                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-            };
-
-            for name in names {
+            for name in expand_domain(&rule.domain) {
                 name_rule_map.entry(name).or_default().nameserver = Some(rule.nameserver.clone())
             }
         }
 
         // set cname
         for rule in cnames {
-            let names = match &rule.domain {
-                Domain::Name(name) => {
-                    vec![name.clone()]
-                }
-                Domain::Set(s) => domain_sets
-                    .get(s)
-                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-            };
-            for name in names {
+            for name in expand_domain(&rule.domain) {
                 name_rule_map.entry(name).or_default().cname = Some(rule.config.clone())
             }
         }
 
         // set srv
         for rule in srv_records {
-            let names = match &rule.domain {
-                Domain::Name(name) => {
-                    vec![name.clone()]
-                }
-                Domain::Set(s) => domain_sets
-                    .get(s)
-                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-            };
-            for name in names {
+            for name in expand_domain(&rule.domain) {
                 name_rule_map.entry(name).or_default().srv = Some(rule.config.clone())
             }
         }
 
-        for rule in nftsets {
-            let names = match &rule.domain {
-                Domain::Name(name) => {
-                    vec![name.clone()]
-                }
-                Domain::Set(s) => domain_sets
-                    .get(s)
-                    .map(|v| v.iter().map(|n| n.to_owned()).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-            };
+        // set https
+        for rule in https_records {
+            for name in expand_domain(&rule.domain) {
+                name_rule_map.entry(name).or_default().https = Some(rule.config.clone())
+            }
+        }
 
-            for name in names {
+        for rule in nftsets {
+            for name in expand_domain(&rule.domain) {
                 name_rule_map.entry(name).or_default().nftset = Some(rule.config.clone());
             }
         }
@@ -175,7 +135,11 @@ impl DomainRuleTreeNode {
     }
 
     pub fn get<T>(&self, f: impl Fn(&Self) -> Option<T>) -> Option<T> {
-        f(self).or_else(|| self.zone().map(|z| f(z)).unwrap_or_default())
+        f(self).or_else(|| self.zone().and_then(|z| f(z)))
+    }
+
+    pub fn get_ref<T>(&self, f: impl Fn(&Self) -> Option<&T>) -> Option<&T> {
+        f(self).or_else(|| self.zone().and_then(|z| f(z)))
     }
 }
 
@@ -239,6 +203,7 @@ mod tests {
                     address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
                 },
             ],
+            &Default::default(),
             &Default::default(),
             &Default::default(),
             &Default::default(),

@@ -25,9 +25,13 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
 
 [features]
 
-default = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "self-update" ]
+default = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "self-update" ]
 
-homebrew = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft" ]
+homebrew = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all" ]
+
+nom-recipes-all =["nom-recipes-ipv4", "nom-recipes-ipv6"]
+nom-recipes-ipv4 = []
+nom-recipes-ipv6 = []
 
 failed_tests = []
 disable_icmp_ping = []

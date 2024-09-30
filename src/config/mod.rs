@@ -7,7 +7,10 @@ use std::{
 
 use crate::{
     infra::{file_mode::FileMode, ipset::IpSet},
-    libdns::proto::rr::{rdata::SRV, Name, RecordType},
+    libdns::proto::rr::{
+        rdata::{HTTPS, SRV},
+        Name, RecordType,
+    },
     log::Level,
     proxy::ProxyConfig,
     third_ext::serde_str,
@@ -48,8 +51,9 @@ pub type DomainSets = HashMap<String, HashSet<WildcardName>>;
 pub type ForwardRules = Vec<ForwardRule>;
 pub type AddressRules = Vec<AddressRule>;
 pub type DomainRules = Vec<ConfigForDomain<DomainRule>>;
-pub type CNameRules = Vec<ConfigForDomain<CName>>;
+pub type CNameRules = Vec<ConfigForDomain<CNameRule>>;
 pub type SrvRecords = Vec<ConfigForDomain<SRV>>;
+pub type HttpsRecords = Vec<ConfigForDomain<HttpsRecordRule>>;
 
 #[derive(Default)]
 pub struct Config {
@@ -237,10 +241,12 @@ pub struct Config {
 
     pub srv_records: SrvRecords,
 
+    pub https_records: HttpsRecords,
+
     /// The proxy server for upstream querying.
     pub proxy_servers: HashMap<String, ProxyConfig>,
 
-    pub nftsets: Vec<ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>>,
+    pub nftsets: Vec<ConfigForDomain<Vec<ConfigForIP<NFTsetConfig>>>>,
 
     pub resolv_file: Option<PathBuf>,
     pub domain_set_providers: HashMap<String, Vec<DomainSetProvider>>,
@@ -274,7 +280,7 @@ pub enum ConfigForIP<T: Sized + parser::NomParser> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NftsetConfig {
+pub struct NFTsetConfig {
     pub family: &'static str,
     pub table: String,
     pub name: String,
@@ -331,7 +337,7 @@ pub enum Ignorable<T> {
     Value(T),
 }
 
-pub type CName = Ignorable<Name>;
+pub type CNameRule = Ignorable<Name>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AddressRule {
@@ -347,6 +353,18 @@ pub struct ForwardRule {
     #[serde(with = "serde_str")]
     pub domain: Domain,
     pub nameserver: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[allow(clippy::upper_case_acronyms)]
+pub enum HttpsRecordRule {
+    SOA,
+    Ignore,
+    Filter {
+        no_ipv4_hint: bool,
+        no_ipv6_hint: bool,
+    },
+    RecordData(HTTPS),
 }
 
 macro_rules! impl_from_str {

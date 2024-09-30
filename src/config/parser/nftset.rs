@@ -1,8 +1,8 @@
 use super::*;
 
-use super::NftsetConfig;
+use super::NFTsetConfig;
 
-impl NomParser for NftsetConfig {
+impl NomParser for NFTsetConfig {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Self> {
         let family = alt((
@@ -23,7 +23,7 @@ impl NomParser for NftsetConfig {
         let (input, (family, table, name)) = tuple((family, table, name))(input)?;
         Ok((
             input,
-            NftsetConfig {
+            NFTsetConfig {
                 family,
                 table: table.to_string(),
                 name: name.to_string(),
@@ -32,18 +32,18 @@ impl NomParser for NftsetConfig {
     }
 }
 
-impl NomParser for ConfigForIP<NftsetConfig> {
+impl NomParser for ConfigForIP<NFTsetConfig> {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Self> {
         let v4 = preceded(
             tag("#4:"),
-            verify(NftsetConfig::parse, |x| {
+            verify(NFTsetConfig::parse, |x| {
                 x.family == "inet" || x.family == "ip"
             }),
         );
         let v6 = preceded(
             tag("#6:"),
-            verify(NftsetConfig::parse, |x| {
+            verify(NFTsetConfig::parse, |x| {
                 x.family == "inet" || x.family == "ip6"
             }),
         );
@@ -56,11 +56,11 @@ impl NomParser for ConfigForIP<NftsetConfig> {
     }
 }
 
-impl NomParser for Vec<ConfigForIP<NftsetConfig>> {
+impl NomParser for Vec<ConfigForIP<NFTsetConfig>> {
     fn parse(input: &str) -> IResult<&str, Self> {
         separated_list1(
             tuple((space0, char(','), space0)),
-            ConfigForIP::<NftsetConfig>::parse,
+            ConfigForIP::<NFTsetConfig>::parse,
         )(input)
     }
 }
@@ -72,10 +72,10 @@ mod tests {
     #[test]
     fn test() {
         assert_eq!(
-            NftsetConfig::parse("inet#tab1#dns_4").unwrap(),
+            NFTsetConfig::parse("inet#tab1#dns_4").unwrap(),
             (
                 "",
-                NftsetConfig {
+                NFTsetConfig {
                     family: "inet",
                     table: "tab1".to_string(),
                     name: "dns_4".to_string()
@@ -84,10 +84,10 @@ mod tests {
         );
 
         assert_eq!(
-            NftsetConfig::parse("inet#tab1#dns4").unwrap(),
+            NFTsetConfig::parse("inet#tab1#dns4").unwrap(),
             (
                 "",
-                NftsetConfig {
+                NFTsetConfig {
                     family: "inet",
                     table: "tab1".to_string(),
                     name: "dns4".to_string()
@@ -96,10 +96,10 @@ mod tests {
         );
 
         assert_eq!(
-            NftsetConfig::parse("ip6#tab1#dns6").unwrap(),
+            NFTsetConfig::parse("ip6#tab1#dns6").unwrap(),
             (
                 "",
-                NftsetConfig {
+                NFTsetConfig {
                     family: "ip6",
                     table: "tab1".to_string(),
                     name: "dns6".to_string()
@@ -111,10 +111,10 @@ mod tests {
     #[test]
     fn test_ip() {
         assert_eq!(
-            ConfigForIP::<NftsetConfig>::parse("#4:inet#tab#dns4").unwrap(),
+            ConfigForIP::<NFTsetConfig>::parse("#4:inet#tab#dns4").unwrap(),
             (
                 "",
-                ConfigForIP::V4(NftsetConfig {
+                ConfigForIP::V4(NFTsetConfig {
                     family: "inet",
                     table: "tab".to_string(),
                     name: "dns4".to_string(),
@@ -123,10 +123,10 @@ mod tests {
         );
 
         assert_eq!(
-            ConfigForIP::<NftsetConfig>::parse("#6:ip6#tab#dns6").unwrap(),
+            ConfigForIP::<NFTsetConfig>::parse("#6:ip6#tab#dns6").unwrap(),
             (
                 "",
-                ConfigForIP::V6(NftsetConfig {
+                ConfigForIP::V6(NFTsetConfig {
                     family: "ip6",
                     table: "tab".to_string(),
                     name: "dns6".to_string(),
@@ -135,7 +135,7 @@ mod tests {
         );
 
         assert_eq!(
-            ConfigForIP::<NftsetConfig>::parse("-").unwrap(),
+            ConfigForIP::<NFTsetConfig>::parse("-").unwrap(),
             ("", ConfigForIP::None)
         );
     }

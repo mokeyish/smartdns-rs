@@ -6,6 +6,7 @@ use std::str::FromStr;
 use crate::libdns::proto::rr::rdata::PTR;
 use ipnet::IpNet;
 
+use crate::config::HttpsRecordRule;
 use crate::dns::*;
 use crate::dns_conf::RuntimeConfig;
 use crate::infra::ipset::IpSet;
@@ -101,11 +102,72 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                 }
             }
             RecordType::SRV => {
-                if let Some(srv) = ctx.domain_rule.as_ref().and_then(|r| r.srv.clone()) {
+                if let Some(srv) = ctx
+                    .domain_rule
+                    .as_ref()
+                    .and_then(|r| r.get_ref(|r| r.srv.as_ref()))
+                {
                     return Ok(DnsResponse::from_rdata(
                         req.query().original().to_owned(),
-                        RData::SRV(srv),
+                        RData::SRV(srv.clone()),
                     ));
+                }
+            }
+            RecordType::HTTPS => {
+                if let Some(https_rule) = ctx
+                    .domain_rule
+                    .as_ref()
+                    .and_then(|r| r.get_ref(|r| r.https.as_ref()))
+                {
+                    match https_rule {
+                        HttpsRecordRule::Ignore => (),
+                        HttpsRecordRule::SOA => {
+                            return Ok(DnsResponse::from_rdata(
+                                req.query().original().to_owned(),
+                                RData::default_soa(),
+                            ));
+                        }
+                        HttpsRecordRule::Filter {
+                            no_ipv4_hint,
+                            no_ipv6_hint,
+                        } => {
+                            use crate::libdns::proto::rr::rdata::{svcb::SvcParamKey, SVCB};
+                            let no_ipv4_hint = *no_ipv4_hint;
+                            let no_ipv6_hint = *no_ipv6_hint;
+                            return match next.run(ctx, req).await {
+                                Ok(mut lookup) => {
+                                    for record in lookup.answers_mut() {
+                                        if let Some(https) = record.data_mut().as_https_mut() {
+                                            let svc_params = https
+                                                .svc_params()
+                                                .iter()
+                                                .filter(|(k, _)| match k {
+                                                    SvcParamKey::Ipv4Hint => !no_ipv4_hint,
+                                                    SvcParamKey::Ipv6Hint => !no_ipv6_hint,
+                                                    _ => true,
+                                                })
+                                                .cloned()
+                                                .collect();
+
+                                            https.0 = SVCB::new(
+                                                https.svc_priority(),
+                                                https.target_name().clone(),
+                                                svc_params,
+                                            );
+                                        }
+                                    }
+                                    Ok(lookup)
+                                }
+                                Err(err) => Err(err),
+                            };
+                        }
+                        HttpsRecordRule::RecordData(https) => {
+                            return Ok(DnsResponse::from_rdata(
+                                req.query().original().to_owned(),
+                                RData::HTTPS(https.clone()),
+                            ))
+                        }
+                    }
                 }
             }
             _ => (),

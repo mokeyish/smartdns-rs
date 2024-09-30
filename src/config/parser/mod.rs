@@ -15,11 +15,13 @@ mod domain_set;
 mod file_mode;
 mod forward_rule;
 mod glob_pattern;
+mod https_record;
 mod ipnet;
 mod listener;
 mod log_level;
 mod nameserver;
 mod nftset;
+mod nom_recipes;
 mod options;
 mod path;
 mod proxy_config;
@@ -27,6 +29,7 @@ mod record_type;
 mod response_mode;
 mod speed_mode;
 mod srv;
+mod svcb;
 
 use super::*;
 
@@ -91,8 +94,9 @@ pub enum OneConfig {
     CacheCheckpointTime(u64),
     CaFile(PathBuf),
     CaPath(PathBuf),
-    CNAME(ConfigForDomain<CName>),
-    SRV(ConfigForDomain<SRV>),
+    CNAME(ConfigForDomain<CNameRule>),
+    SrvRecord(ConfigForDomain<SRV>),
+    HttpsRecord(ConfigForDomain<HttpsRecordRule>),
     ConfFile(PathBuf),
     DnsmasqLeaseFile(PathBuf),
     Domain(Name),
@@ -119,7 +123,7 @@ pub enum OneConfig {
     LogFilter(String),
     MaxReplyIpNum(u8),
     MdnsLookup(bool),
-    NftSet(ConfigForDomain<Vec<ConfigForIP<NftsetConfig>>>),
+    NftSet(ConfigForDomain<Vec<ConfigForIP<NFTsetConfig>>>),
     NumWorkers(usize),
     PrefetchDomain(bool),
     ProxyConfig(NamedProxyConfig),
@@ -205,6 +209,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("num-workers"), OneConfig::NumWorkers),
         map(parse_item("domain"), OneConfig::Domain),
         map(parse_item("hosts-file"), OneConfig::HostsFile),
+        map(parse_item("https-record"), OneConfig::HttpsRecord),
         map(parse_item("local-ttl"), OneConfig::LocalTtl),
         map(parse_item("log-console"), OneConfig::LogConsole),
         map(parse_item("log-file-mode"), OneConfig::LogFileMode),
@@ -238,7 +243,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
     ));
 
     let group4 = alt((
-        map(parse_item("srv-record"), OneConfig::SRV),
+        map(parse_item("srv-record"), OneConfig::SrvRecord),
         map(parse_item("resolv-hostname"), OneConfig::ResolvHostname),
         map(parse_item("tcp-idle-time"), OneConfig::TcpIdleTime),
         map(parse_item("nftset"), OneConfig::NftSet),
@@ -264,7 +269,7 @@ mod tests {
                 "",
                 OneConfig::NftSet(ConfigForDomain {
                     domain: Domain::Name("www.example.com".parse().unwrap()),
-                    config: vec![ConfigForIP::V4(NftsetConfig {
+                    config: vec![ConfigForIP::V4(NFTsetConfig {
                         family: "inet",
                         table: "tab".to_string(),
                         name: "dns4".to_string()
@@ -279,7 +284,7 @@ mod tests {
                 "",
                 OneConfig::NftSet(ConfigForDomain {
                     domain: Domain::Name("www.example.com".parse().unwrap()),
-                    config: vec![ConfigForIP::V4(NftsetConfig {
+                    config: vec![ConfigForIP::V4(NFTsetConfig {
                         family: "inet",
                         table: "tab".to_string(),
                         name: "dns4".to_string()
