@@ -124,7 +124,7 @@ server https://1.1.1.1/dns-query  -bootstrap-dns -exclude-default-group
 server https://8.8.8.8/dns-query  -bootstrap-dns -exclude-default-group
 
 # Configure default upstream server
-server https://cloudflare-dns/dns-query
+server https://cloudflare-dns.com/dns-query
 server https://dns.quad9.net/dns-query
 server https://dns.google/dns-query
 
