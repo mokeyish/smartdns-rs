@@ -17,10 +17,13 @@ pub use crate::libdns::proto::{
     rr::{self, rdata::SOA, Name, RData, Record, RecordType},
 };
 
-pub use crate::libdns::resolver::{
-    config::{NameServerConfig, NameServerConfigGroup, Protocol},
-    error::{ResolveError, ResolveErrorKind},
-    lookup::Lookup,
+pub use crate::libdns::{
+    proto::xfer::Protocol,
+    resolver::{
+        config::{NameServerConfig, NameServerConfigGroup},
+        error::{ResolveError, ResolveErrorKind},
+        lookup::Lookup,
+    },
 };
 
 #[derive(Clone)]

@@ -1,4 +1,4 @@
-use crate::libdns::resolver::config::Protocol;
+use crate::libdns::proto::xfer::Protocol;
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::net::SocketAddr;

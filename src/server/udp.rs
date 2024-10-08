@@ -2,7 +2,9 @@ use super::{reap_tasks, sanitize_src_address, DnsHandle};
 use crate::{
     dns::SerialMessage,
     libdns::{
-        proto::{error::ProtoError, udp::UdpStream, xfer::DnsStreamHandle},
+        proto::{
+            error::ProtoError, runtime::TokioRuntimeProvider, udp::UdpStream, DnsStreamHandle,
+        },
         Protocol,
     },
     log,
@@ -19,7 +21,7 @@ pub fn serve(socket: net::UdpSocket, handler: DnsHandle) -> CancellationToken {
         // create the new UdpStream, the IP address isn't relevant, and ideally goes essentially no where.
         //   the address used is acquired from the inbound queries
         let (mut stream, stream_handle) =
-            UdpStream::with_bound(socket, ([127, 255, 255, 254], 0).into());
+            UdpStream::<TokioRuntimeProvider>::with_bound(socket, ([127, 255, 255, 254], 0).into());
 
         let mut inner_join_set = JoinSet::new();
         loop {

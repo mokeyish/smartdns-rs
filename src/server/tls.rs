@@ -9,7 +9,7 @@ use super::{reap_tasks, sanitize_src_address, DnsHandle};
 use crate::{
     dns::SerialMessage,
     libdns::{
-        proto::{iocompat::AsyncIoTokioAsStd, xfer::DnsStreamHandle as _},
+        proto::{runtime::iocompat::AsyncIoTokioAsStd, xfer::DnsStreamHandle as _},
         Protocol,
     },
     log,

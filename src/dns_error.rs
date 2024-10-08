@@ -78,6 +78,7 @@ impl LookupError {
             negative_ttl: None,
             response_code: ResponseCode::ServFail,
             trusted: true,
+            ns: None,
         }
         .into()
     }
