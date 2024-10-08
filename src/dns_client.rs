@@ -485,10 +485,12 @@ impl NameServer {
 
         use crate::libdns::resolver::config::NameServerConfig;
 
-        let config = match url.proto() {
+        let protocol = *url.proto();
+
+        let config = match protocol {
             Udp => NameServerConfig {
                 socket_addr,
-                protocol: Protocol::Udp,
+                protocol,
                 trust_negative_responses: true,
                 tls_dns_name: None,
                 tls_config: None,
@@ -497,7 +499,7 @@ impl NameServer {
             },
             Tcp => NameServerConfig {
                 socket_addr,
-                protocol: Protocol::Tcp,
+                protocol,
                 trust_negative_responses: true,
                 tls_dns_name: None,
                 tls_config: None,
@@ -507,7 +509,7 @@ impl NameServer {
             #[cfg(feature = "dns-over-https")]
             Https => NameServerConfig {
                 socket_addr,
-                protocol: Protocol::Https,
+                protocol,
                 tls_dns_name,
                 tls_config,
                 trust_negative_responses: true,
@@ -517,7 +519,7 @@ impl NameServer {
             #[cfg(feature = "dns-over-quic")]
             Quic => NameServerConfig {
                 socket_addr,
-                protocol: Protocol::Quic,
+                protocol,
                 tls_dns_name,
                 tls_config,
                 trust_negative_responses: true,
@@ -527,7 +529,7 @@ impl NameServer {
             #[cfg(feature = "dns-over-tls")]
             Tls => NameServerConfig {
                 socket_addr,
-                protocol: Protocol::Tls,
+                protocol,
                 tls_dns_name,
                 tls_config,
                 trust_negative_responses: true,
@@ -537,14 +539,14 @@ impl NameServer {
             #[cfg(feature = "dns-over-h3")]
             H3 => NameServerConfig {
                 socket_addr,
-                protocol: Protocol::H3,
+                protocol,
                 tls_dns_name,
                 tls_config,
                 trust_negative_responses: true,
                 bind_addr: None,
-                http_endpoint: None,
+                http_endpoint: Some(url.path().to_string()),
             },
-            _ => todo!(),
+            _ => unimplemented!(),
         };
 
         Ok(if ip_addr.is_some() {
