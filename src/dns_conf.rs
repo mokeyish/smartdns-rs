@@ -390,8 +390,7 @@ impl RuntimeConfig {
 
     #[inline]
     pub fn local_ttl(&self) -> u64 {
-        self.local_ttl
-            .unwrap_or_else(|| self.rr_ttl_min().unwrap_or_default())
+        self.local_ttl.or_else(|| self.rr_ttl_min()).unwrap_or(10)
     }
 
     /// Maximum number of IPs returned to the client|8|number of IPs, 1~16
