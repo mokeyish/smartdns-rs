@@ -50,8 +50,8 @@ impl DnsUrl {
     pub fn path(&self) -> &str {
         match self.proto {
             Protocol::Https | Protocol::H3 => match self.path.as_ref() {
-                Some(p) => p,
-                None => "/dns-query",
+                Some(p) if !p.is_empty() => p,
+                _ => "/dns-query",
             },
             _ => "",
         }
@@ -514,8 +514,8 @@ mod tests {
         assert_eq!(url.proto, Protocol::H3);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "");
-        assert_eq!(url.to_string(), "h3://dns.adguard-dns.com");
+        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.to_string(), "h3://dns.adguard-dns.com/dns-query");
         assert!(url.ip().is_none());
     }
 
@@ -529,6 +529,45 @@ mod tests {
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
+        assert!(url.ip().is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "dns-over-h3")]
+    fn test_parse_h3_3() {
+        let url = DnsUrl::from_str("https://dns.adguard-dns.com/#h3").unwrap();
+
+        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.port(), 443);
+        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
+        assert!(url.ip().is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "dns-over-h3")]
+    fn test_parse_h3_4() {
+        let url = DnsUrl::from_str("https://dns.adguard-dns.com#h3").unwrap();
+
+        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.port(), 443);
+        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
+        assert!(url.ip().is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "dns-over-h3")]
+    fn test_parse_h3_5() {
+        let url = DnsUrl::from_str("https://dns.adguard-dns.com/2dns-query#h3").unwrap();
+
+        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.port(), 443);
+        assert_eq!(url.path(), "/2dns-query");
+        assert_eq!(url.to_string(), "https://dns.adguard-dns.com/2dns-query#h3");
         assert!(url.ip().is_none());
     }
 
