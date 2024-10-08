@@ -3,8 +3,6 @@ mod https;
 #[cfg(feature = "legacy_dns_server")]
 mod legacy;
 mod net;
-#[cfg(not(feature = "legacy_dns_server"))]
-mod protocol;
 #[cfg(feature = "dns-over-quic")]
 mod quic;
 mod tcp;
@@ -33,12 +31,7 @@ use crate::{
 };
 
 #[cfg(feature = "legacy_dns_server")]
-pub use crate::libdns::server::server::Protocol;
-#[cfg(feature = "legacy_dns_server")]
 pub use legacy::serve;
-
-#[cfg(not(feature = "legacy_dns_server"))]
-pub use protocol::Protocol;
 
 #[cfg(not(feature = "legacy_dns_server"))]
 pub async fn serve(

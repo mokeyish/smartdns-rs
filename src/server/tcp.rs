@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     dns::SerialMessage,
     libdns::{
-        proto::{iocompat::AsyncIoTokioAsStd, tcp::TcpStream, xfer::DnsStreamHandle as _},
+        proto::runtime::iocompat::AsyncIoTokioAsStd,
+        proto::{tcp::TcpStream, xfer::DnsStreamHandle as _},
         Protocol,
     },
     log,

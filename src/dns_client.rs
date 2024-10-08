@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    hash::Hash,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -31,8 +30,9 @@ use crate::{
     rustls::TlsClientConfigBundle,
 };
 
+use crate::libdns::proto::xfer::Protocol;
 use crate::libdns::resolver::{
-    config::{Protocol, ResolverOpts, TlsClientConfig},
+    config::{ResolverOpts, TlsClientConfig},
     name_server::GenericConnector,
     TryParseIp,
 };
@@ -434,7 +434,7 @@ impl NameServer {
         resolver: Option<Arc<BootstrapResolver>>,
         default_client_subnet: Option<ClientSubnet>,
     ) -> anyhow::Result<Self> {
-        use crate::libdns::resolver::config::Protocol::*;
+        use Protocol::*;
 
         let url = &config.server;
 
@@ -489,54 +489,60 @@ impl NameServer {
             Udp => NameServerConfig {
                 socket_addr,
                 protocol: Protocol::Udp,
+                trust_negative_responses: true,
                 tls_dns_name: None,
                 tls_config: None,
-                trust_negative_responses: true,
                 bind_addr: None,
+                http_endpoint: None,
             },
             Tcp => NameServerConfig {
                 socket_addr,
                 protocol: Protocol::Tcp,
+                trust_negative_responses: true,
                 tls_dns_name: None,
                 tls_config: None,
-                trust_negative_responses: true,
                 bind_addr: None,
+                http_endpoint: None,
             },
             #[cfg(feature = "dns-over-https")]
             Https => NameServerConfig {
                 socket_addr,
                 protocol: Protocol::Https,
                 tls_dns_name,
+                tls_config,
                 trust_negative_responses: true,
                 bind_addr: None,
-                tls_config,
+                http_endpoint: Some(url.path().to_string()),
             },
             #[cfg(feature = "dns-over-quic")]
             Quic => NameServerConfig {
                 socket_addr,
                 protocol: Protocol::Quic,
                 tls_dns_name,
+                tls_config,
                 trust_negative_responses: true,
                 bind_addr: None,
-                tls_config,
+                http_endpoint: None,
             },
             #[cfg(feature = "dns-over-tls")]
             Tls => NameServerConfig {
                 socket_addr,
                 protocol: Protocol::Tls,
                 tls_dns_name,
+                tls_config,
                 trust_negative_responses: true,
                 bind_addr: None,
-                tls_config,
+                http_endpoint: None,
             },
             #[cfg(feature = "dns-over-h3")]
             H3 => NameServerConfig {
                 socket_addr,
                 protocol: Protocol::H3,
                 tls_dns_name,
+                tls_config,
                 trust_negative_responses: true,
                 bind_addr: None,
-                tls_config,
+                http_endpoint: None,
             },
             _ => todo!(),
         };
@@ -696,7 +702,7 @@ impl GenericResolver for NameServer {
     }
 }
 
-#[derive(Clone, Hash)]
+#[derive(Clone)]
 pub struct NameServerOpts {
     /// filter result with blacklist ip
     pub blacklist_ip: bool,
@@ -956,18 +962,20 @@ mod connection_provider {
     use super::*;
     use crate::proxy;
     use crate::proxy::{TcpStream, UdpSocket};
+    use crate::third_ext::FutureTimeoutExt;
     use async_trait::async_trait;
 
     use std::future::Future;
     use std::task::ready;
     use std::task::Poll;
+    use std::time::Duration;
     use std::{io, net::SocketAddr, pin::Pin};
 
-    use crate::libdns::proto;
-    use crate::libdns::proto::{iocompat::AsyncIoTokioAsStd, TokioTime};
-    use crate::libdns::resolver::{
-        name_server::{QuicSocketBinder, RuntimeProvider},
-        TokioHandle,
+    use crate::libdns::proto::{
+        self,
+        runtime::{
+            iocompat::AsyncIoTokioAsStd, QuicSocketBinder, RuntimeProvider, TokioHandle, TokioTime,
+        },
     };
 
     pub type RawNameServer =
@@ -1002,10 +1010,11 @@ mod connection_provider {
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     fn setup_socket<F: std::os::fd::AsFd, S: std::ops::Deref<Target = F> + Sized>(
         socket: S,
+        bind_addr: Option<SocketAddr>,
         mark: Option<u32>,
         device: Option<String>,
     ) -> S {
-        if mark.is_some() || device.is_some() {
+        if mark.is_some() || device.is_some() || bind_addr.is_some() {
             use socket2::SockRef;
             let sock_ref = SockRef::from(socket.deref());
             if let Some(mark) = mark {
@@ -1021,13 +1030,24 @@ mod connection_provider {
                         warn!("bind device failed: {:?}", err);
                     });
             }
+
+            if let Some(bind_addr) = bind_addr {
+                sock_ref.bind(&bind_addr.into()).unwrap_or_else(|err| {
+                    warn!("bind addr failed: {:?}", err);
+                });
+            }
         }
         socket
     }
 
     #[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
     #[inline]
-    fn setup_socket<S>(socket: S, _mark: Option<u32>, _device: Option<String>) -> S {
+    fn setup_socket<S>(
+        socket: S,
+        _bind_addr: Option<SocketAddr>,
+        _mark: Option<u32>,
+        _device: Option<String>,
+    ) -> S {
         socket
     }
 
@@ -1044,20 +1064,34 @@ mod connection_provider {
         fn connect_tcp(
             &self,
             server_addr: SocketAddr,
+            bind_addr: Option<SocketAddr>,
+            timeout: Option<Duration>,
         ) -> Pin<Box<dyn Send + Future<Output = io::Result<Self::Tcp>>>> {
             let proxy_config = self.proxy.clone();
 
             let so_mark = self.so_mark;
             let device = self.device.clone();
             let setup_socket = move |tcp| {
-                setup_socket(&tcp, so_mark, device);
+                setup_socket(&tcp, bind_addr, so_mark, device);
                 tcp
             };
+            let wait_for = timeout.unwrap_or_else(|| Duration::from_secs(5));
+
             Box::pin(async move {
-                proxy::connect_tcp(server_addr, proxy_config.as_ref())
-                    .await
-                    .map(setup_socket)
-                    .map(AsyncIoTokioAsStd)
+                async move {
+                    proxy::connect_tcp(server_addr, proxy_config.as_ref())
+                        .await
+                        .map(setup_socket)
+                        .map(AsyncIoTokioAsStd)
+                }
+                .timeout(wait_for)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("connection to {server_addr:?} timed out after {wait_for:?}"),
+                    ))
+                })
             })
         }
 
@@ -1070,7 +1104,7 @@ mod connection_provider {
 
             let so_mark = self.so_mark;
             let device = self.device.clone();
-            let setup_socket = move |udp| setup_socket(udp, so_mark, device);
+            let setup_socket = move |udp| setup_socket(udp, None, so_mark, device);
 
             Box::pin(async move {
                 proxy::connect_udp(server_addr, local_addr, proxy_config.as_ref())
@@ -1103,7 +1137,7 @@ mod connection_provider {
 
     #[async_trait]
     impl proto::udp::DnsUdpSocket for UdpSocket {
-        type Time = proto::TokioTime;
+        type Time = TokioTime;
 
         fn poll_recv_from(
             &self,

@@ -927,7 +927,7 @@ fn resolve_filepath<P: AsRef<Path>>(filepath: P, base_file: Option<&PathBuf>) ->
 
 #[cfg(test)]
 mod tests {
-    use crate::libdns::resolver::config::Protocol;
+    use crate::libdns::Protocol;
     use byte_unit::Byte;
 
     use crate::config::{HttpsListenerConfig, ListenerAddress, ServerOpts, SslConfig};

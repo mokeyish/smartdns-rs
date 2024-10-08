@@ -591,6 +591,7 @@ async fn per_nameserver_lookup_ip(
             if answers.is_empty() {
                 return Err(ProtoErrorKind::NoRecordsFound {
                     query: Box::new(query),
+                    ns: None,
                     soa: None,
                     negative_ttl: None,
                     response_code: ResponseCode::NoError,

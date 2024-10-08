@@ -39,4 +39,4 @@ pub mod server {
     pub use hickory_server::*;
 }
 
-pub use crate::server::Protocol;
+pub use proto::xfer::Protocol;
