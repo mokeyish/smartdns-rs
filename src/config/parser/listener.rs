@@ -2,7 +2,7 @@ use super::*;
 use crate::dns::Protocol;
 use crate::log::warn;
 use std::convert::{Into, TryInto};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv4Addr;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -16,22 +16,9 @@ impl NomParser for ListenerAddress {
 fn parse_listen_address(input: &str) -> IResult<&str, ListenerAddress> {
     let ip = alt((
         value(ListenerAddress::Localhost, tag_no_case("localhost")),
+        map(nom_recipes::ipv4, ListenerAddress::V4),
         map(
-            map_res(
-                take_while_m_n(4 + 3, 3 * 4 + 3, |c: char| c.is_ascii_digit() || c == '.'),
-                Ipv4Addr::from_str,
-            ),
-            ListenerAddress::V4,
-        ),
-        map(
-            map_res(
-                delimited(
-                    char('['),
-                    take_while_m_n(2, 4 * 8 + 7, |c: char| c.is_ascii_hexdigit() || c == ':'),
-                    char(']'),
-                ),
-                Ipv6Addr::from_str,
-            ),
+            delimited(char('['), nom_recipes::ipv6, char(']')),
             ListenerAddress::V6,
         ),
     ));
