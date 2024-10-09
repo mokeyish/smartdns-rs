@@ -87,6 +87,7 @@ hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
 # axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 # boomphf ={ path = "./target/patch/boomphf-0.6.0"}
+rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1.9.0.smartdns.1" }
 
 [dependencies]
 cfg-if = "1"
