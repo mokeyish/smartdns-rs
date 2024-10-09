@@ -39,6 +39,13 @@ jobs:
         env:
           USE_CROSS: ${{ matrix.os == 'ubuntu-latest' }}
 
+      - name: Setup upterm session for debugging
+        uses: lhotari/action-upterm@v1
+        if: ${{ failure() }}
+        with:
+          limit-access-to-actor: true
+          wait-timeout-minutes: 5
+
   cleanliness:
     name: cleanliness ${{ matrix.target }}
     strategy:

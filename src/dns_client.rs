@@ -1511,6 +1511,34 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "dns-over-h3")]
+    async fn test_nameserver_h3_with_ipv6_address_resolve() {
+        // Skip the test if the IPv6 address is not reachable.
+        if crate::infra::ping::ping(
+            "https://2001:4860:4860::8888".parse().unwrap(),
+            Default::default(),
+        )
+        .await
+        .is_err()
+        {
+            return;
+        }
+
+        let urls = [DnsUrl::from_str("h3://[2001:4860:4860::8888]").unwrap()];
+
+        let results = urls
+            .into_iter()
+            .map(|url| async move {
+                let client = DnsClient::builder().add_server(url).build().await;
+                query_google(&client).await && query_alidns(&client).await
+            })
+            .join_all()
+            .await;
+
+        assert!(results.into_iter().all(|r| r));
+    }
+
+    #[tokio::test]
     async fn test_nameserver_cloudflare_resolve() {
         let dns_urls = CLOUDFLARE_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
 
