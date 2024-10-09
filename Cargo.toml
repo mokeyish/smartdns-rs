@@ -188,10 +188,10 @@ local-ip-address = "0.6.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 users = { version = "0.11", default-features = false }
 caps = "0.5.5"
-self_update = { version = "0.40.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.41.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
-self_update = { version = "0.40.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.41.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 self_update = { version = "0.40.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
