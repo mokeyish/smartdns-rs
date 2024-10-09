@@ -154,7 +154,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: smartdns-${{ matrix.target }}-${{ inputs.version }}
+          name: smartdns-${{ matrix.target }}-${{ inputs.version || github.ref_name }}
           retention-days: 30
           path: ${{ env.archive_file }}  
       
