@@ -102,11 +102,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                 }
             }
             RecordType::SRV => {
-                if let Some(srv) = ctx
-                    .domain_rule
-                    .as_ref()
-                    .and_then(|r| r.get_ref(|r| r.srv.as_ref()))
-                {
+                if let Some(srv) = ctx.domain_rule.get_ref(|r| r.srv.as_ref()) {
                     return Ok(DnsResponse::from_rdata(
                         req.query().original().to_owned(),
                         RData::SRV(srv.clone()),
@@ -114,11 +110,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                 }
             }
             RecordType::HTTPS => {
-                if let Some(https_rule) = ctx
-                    .domain_rule
-                    .as_ref()
-                    .and_then(|r| r.get_ref(|r| r.https.as_ref()))
-                {
+                if let Some(https_rule) = ctx.domain_rule.get_ref(|r| r.https.as_ref()) {
                     match https_rule {
                         HttpsRecordRule::Ignore => (),
                         HttpsRecordRule::SOA => {

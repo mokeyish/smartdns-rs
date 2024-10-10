@@ -50,6 +50,18 @@ impl NomParser for DomainRule {
             map(options::parse_no_value(tag_no_case("no-cache")), |v| {
                 rule.no_cache = Some(v);
             }),
+            map(
+                options::parse_value(tag_no_case("rr-ttl-min"), NomParser::parse),
+                |v| {
+                    rule.rr_ttl_min = Some(v);
+                },
+            ),
+            map(
+                options::parse_value(tag_no_case("rr-ttl-max"), NomParser::parse),
+                |v| {
+                    rule.rr_ttl_max = Some(v);
+                },
+            ),
             map(options::unkown_options, |(n, v)| {
                 log::warn!("domain rule: unkown options {}={:?}", n, v)
             }),
@@ -142,6 +154,16 @@ mod tests {
                 DomainRule {
                     no_cache: Some(true),
                     dualstack_ip_selection: Some(true),
+                    ..Default::default()
+                }
+            ))
+        );
+        assert_eq!(
+            DomainRule::parse("-rr-ttl-min 60"),
+            Ok((
+                "",
+                DomainRule {
+                    rr_ttl_min: Some(60),
                     ..Default::default()
                 }
             ))

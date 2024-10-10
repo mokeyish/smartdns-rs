@@ -11,6 +11,8 @@ use crate::dns_rule::DomainRuleTreeNode;
 use crate::config::ServerOpts;
 use crate::dns_conf::RuntimeConfig;
 
+pub use crate::dns_rule::DomainRuleGetter;
+
 pub use crate::libdns::proto::{
     error::ProtoErrorKind,
     op,
@@ -40,10 +42,7 @@ impl DnsContext {
     pub fn new(name: &Name, cfg: Arc<RuntimeConfig>, server_opts: ServerOpts) -> Self {
         let domain_rule = cfg.find_domain_rule(name);
 
-        let no_cache = domain_rule
-            .as_ref()
-            .and_then(|r| r.get(|n| n.no_cache))
-            .unwrap_or_default();
+        let no_cache = domain_rule.get(|n| n.no_cache).unwrap_or_default();
 
         DnsContext {
             cfg,

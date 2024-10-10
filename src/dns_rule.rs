@@ -133,13 +133,41 @@ impl DomainRuleTreeNode {
     pub fn zone(&self) -> Option<&Arc<DomainRuleTreeNode>> {
         self.zone.as_ref()
     }
+}
 
-    pub fn get<T>(&self, f: impl Fn(&Self) -> Option<T>) -> Option<T> {
+pub trait DomainRuleGetter {
+    fn get<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<T>) -> Option<T>;
+
+    fn get_ref<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<&T>) -> Option<&T>;
+}
+
+impl DomainRuleGetter for DomainRuleTreeNode {
+    fn get<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<T>) -> Option<T> {
         f(self).or_else(|| self.zone().and_then(|z| f(z)))
     }
 
-    pub fn get_ref<T>(&self, f: impl Fn(&Self) -> Option<&T>) -> Option<&T> {
+    fn get_ref<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<&T>) -> Option<&T> {
         f(self).or_else(|| self.zone().and_then(|z| f(z)))
+    }
+}
+
+impl<N: AsRef<DomainRuleTreeNode>> DomainRuleGetter for N {
+    fn get<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<T>) -> Option<T> {
+        self.as_ref().get(f)
+    }
+
+    fn get_ref<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<&T>) -> Option<&T> {
+        self.as_ref().get_ref(f)
+    }
+}
+
+impl DomainRuleGetter for Option<Arc<DomainRuleTreeNode>> {
+    fn get<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<T>) -> Option<T> {
+        self.as_deref().and_then(f)
+    }
+
+    fn get_ref<T>(&self, f: impl Fn(&DomainRuleTreeNode) -> Option<&T>) -> Option<&T> {
+        self.as_deref().and_then(f)
     }
 }
 
