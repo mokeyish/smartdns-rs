@@ -51,17 +51,16 @@ impl DnsCacheMiddleware {
                 if cache_file.exists() {
                     cache.lock().await.load(cache_file.as_path());
                 }
-                let mut interval =
-                    tokio::time::interval(Duration::from_secs(cache_checkpoint_time));
+                let interval = Duration::from_secs(cache_checkpoint_time);
                 loop {
                     tokio::select! {
-                        _ = interval.tick() => {
+                        _ = tokio::time::sleep(interval) => {
                             cache.lock().await.persist(cache_file.as_path());
-                            log::debug!("save cache to {}", cache_file.display());
+                            log::debug!("save DNS cache to file {}", cache_file.display());
                         }
                         _ = crate::signal::terminate() => {
                             cache.lock().await.persist(cache_file.as_path());
-                            log::debug!("save cache to {}", cache_file.display());
+                            log::debug!("save DNS cache to file {}", cache_file.display());
                             break;
                         }
                     };
