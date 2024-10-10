@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use crate::config::*;
+use crate::dns::DomainRuleGetter;
 use crate::log;
 use crate::{
     dns_rule::{DomainRuleMap, DomainRuleTreeNode},
@@ -926,7 +927,7 @@ fn resolve_filepath<P: AsRef<Path>>(filepath: P, base_file: Option<&PathBuf>) ->
 
 #[cfg(test)]
 mod tests {
-    use crate::libdns::Protocol;
+    use crate::{dns::DomainRuleGetter, libdns::Protocol};
     use byte_unit::Byte;
 
     use crate::config::{HttpsListenerConfig, ListenerAddress, ServerOpts, SslConfig};
@@ -1261,13 +1262,13 @@ mod tests {
 
         assert_eq!(
             cfg.find_domain_rule(&"cloudflare.com".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::SOA)
         );
 
         assert_eq!(
             cfg.find_domain_rule(&"google.com".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::IGN)
         );
     }
@@ -1279,13 +1280,13 @@ mod tests {
             .build();
         assert_eq!(
             cfg.find_domain_rule(&"example.com".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::SOA)
         );
 
         assert_eq!(
             cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             None
         );
     }
@@ -1295,13 +1296,13 @@ mod tests {
         let cfg = RuntimeConfig::builder().with("address /*/#").build();
         assert_eq!(
             cfg.find_domain_rule(&"localhost".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::SOA)
         );
 
         assert_eq!(
             cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             None
         );
     }
@@ -1311,13 +1312,13 @@ mod tests {
         let cfg = RuntimeConfig::builder().with("address /+/#").build();
         assert_eq!(
             cfg.find_domain_rule(&"localhost".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::SOA)
         );
 
         assert_eq!(
             cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::SOA)
         );
     }
@@ -1327,13 +1328,13 @@ mod tests {
         let cfg = RuntimeConfig::builder().with("address /./#").build();
         assert_eq!(
             cfg.find_domain_rule(&"localhost".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::SOA)
         );
 
         assert_eq!(
             cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
-                .and_then(|r| r.get(|n| n.address)),
+                .get(|n| n.address),
             Some(DomainAddress::SOA)
         );
     }

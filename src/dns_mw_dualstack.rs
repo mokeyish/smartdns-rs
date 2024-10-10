@@ -64,8 +64,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError>
 
         let speed_check_mode = ctx
             .domain_rule
-            .as_ref()
-            .and_then(|r| r.speed_check_mode.as_ref())
+            .get_ref(|r| r.speed_check_mode.as_ref())
             .cloned()
             .unwrap_or_default();
 

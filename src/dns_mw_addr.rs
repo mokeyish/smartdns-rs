@@ -73,8 +73,19 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
                     }
                 }
 
-                let rr_ttl_min = ctx.cfg().rr_ttl_min().map(|i| i as u32);
-                let rr_ttl_max = ctx.cfg().rr_ttl_max().map(|i| i as u32);
+                let rr_ttl_min = ctx
+                    .domain_rule
+                    .get_ref(|r| r.rr_ttl_min.as_ref())
+                    .cloned()
+                    .or_else(|| ctx.cfg().rr_ttl_min())
+                    .map(|i| i as u32);
+
+                let rr_ttl_max = ctx
+                    .domain_rule
+                    .get_ref(|r| r.rr_ttl_max.as_ref())
+                    .cloned()
+                    .or_else(|| ctx.cfg().rr_ttl_max())
+                    .map(|i| i as u32);
                 let rr_ttl_reply_max = ctx.cfg().rr_ttl_reply_max().map(|i| i as u32);
 
                 if rr_ttl_min.is_some() || rr_ttl_max.is_some() || rr_ttl_reply_max.is_some() {
