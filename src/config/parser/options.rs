@@ -34,7 +34,7 @@ pub fn parse_value<
     )
 }
 
-pub fn parse_no_value<'a, O, E: nom::error::ParseError<&'a str>, N: nom::Parser<&'a str, O, E>>(
+pub fn parse_flag<'a, O, E: nom::error::ParseError<&'a str>, N: nom::Parser<&'a str, O, E>>(
     name: N,
 ) -> impl FnMut(&'a str) -> IResult<&'a str, bool, E> {
     value(true, preceded(take_while_m_n(1, 2, |c| c == '-'), name))
