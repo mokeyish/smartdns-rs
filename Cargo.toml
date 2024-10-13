@@ -169,7 +169,7 @@ which = { version = "6.0.1", optional = true }
 glob = "0.3.1"
 
 # process
-sysinfo = "0.29"
+sysinfo = "0.30"
 
 # proxy
 async-socks5 = { version = "0.6.0", git = "https://github.com/mokeyish/async-socks5.git", rev = "f78eec5" }
