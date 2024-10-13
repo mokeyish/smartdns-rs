@@ -1,5 +1,6 @@
 use super::*;
 use crate::log;
+use options::{self, parse_flag, parse_value, unkown_options};
 
 impl NomParser for DomainRule {
     fn parse(input: &str) -> IResult<&str, Self> {
@@ -7,7 +8,7 @@ impl NomParser for DomainRule {
 
         let one = alt((
             map(
-                options::parse_value(
+                parse_value(
                     alt((tag("speed-check-mode"), tag("c"))),
                     SpeedCheckModeList::parse,
                 ),
@@ -18,52 +19,61 @@ impl NomParser for DomainRule {
                 },
             ),
             map(
-                options::parse_value(alt((tag_no_case("address"), tag("a"))), NomParser::parse),
+                parse_value(alt((tag_no_case("address"), tag("a"))), NomParser::parse),
                 |v| {
                     rule.address = Some(v);
                 },
             ),
             map(
-                options::parse_value(alt((tag_no_case("nameserver"), tag("n"))), alphanumeric1),
+                parse_value(alt((tag_no_case("nameserver"), tag("n"))), alphanumeric1),
                 |v| {
                     rule.nameserver = Some(v.to_string());
                 },
             ),
             map(
-                options::parse_no_value(alt((tag_no_case("dualstack-ip-selection"), tag("d")))),
+                parse_flag(alt((tag_no_case("dualstack-ip-selection"), tag("d")))),
                 |v| {
                     rule.dualstack_ip_selection = Some(v);
                 },
             ),
-            map(
-                options::parse_value(tag_no_case("cname"), NomParser::parse),
-                |v| {
-                    rule.cname = Some(v);
-                },
-            ),
-            map(
-                options::parse_value(tag_no_case("subnet"), NomParser::parse),
-                |v| {
-                    rule.subnet = Some(From::<IpNet>::from(v));
-                },
-            ),
-            map(options::parse_no_value(tag_no_case("no-cache")), |v| {
+            map(parse_value(tag_no_case("cname"), NomParser::parse), |v| {
+                rule.cname = Some(v);
+            }),
+            map(parse_value(tag_no_case("subnet"), NomParser::parse), |v| {
+                rule.subnet = Some(From::<IpNet>::from(v));
+            }),
+            map(parse_flag(tag_no_case("no-cache")), |v| {
                 rule.no_cache = Some(v);
             }),
+            map(parse_flag(tag_no_case("no-serve-expired")), |v| {
+                rule.no_serve_expired = Some(v);
+            }),
             map(
-                options::parse_value(tag_no_case("rr-ttl-min"), NomParser::parse),
+                parse_value(
+                    alt((tag_no_case("response-mode"), tag("r"))),
+                    NomParser::parse,
+                ),
+                |v| {
+                    rule.response_mode = Some(v);
+                },
+            ),
+            map(
+                parse_value(tag_no_case("rr-ttl-min"), NomParser::parse),
                 |v| {
                     rule.rr_ttl_min = Some(v);
                 },
             ),
             map(
-                options::parse_value(tag_no_case("rr-ttl-max"), NomParser::parse),
+                parse_value(tag_no_case("rr-ttl-max"), NomParser::parse),
                 |v| {
                     rule.rr_ttl_max = Some(v);
                 },
             ),
-            map(options::unkown_options, |(n, v)| {
-                log::warn!("domain rule: unkown options {}={:?}", n, v)
+            map(parse_value(tag_no_case("rr-ttl"), NomParser::parse), |v| {
+                rule.rr_ttl = Some(v);
+            }),
+            map(unkown_options, |(n, v)| {
+                log::warn!("domain rule: unkown options {}={:?}", n, v);
             }),
         ));
 
