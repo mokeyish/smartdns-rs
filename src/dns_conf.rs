@@ -107,6 +107,8 @@ impl RuntimeConfig {
     pub fn summary(&self) {
         info!(r#"whoami 👉 {}"#, self.server_name());
 
+        info!(r#"num workers: {}"#, self.num_workers());
+
         for server in self.nameservers.iter() {
             if !server.exclude_default_group && server.group.is_empty() {
                 continue;
@@ -182,8 +184,10 @@ impl RuntimeConfig {
 
     /// The number of worker threads
     #[inline]
-    pub fn num_workers(&self) -> Option<usize> {
+    pub fn num_workers(&self) -> usize {
+        use std::num::NonZeroUsize;
         self.num_workers
+            .unwrap_or(std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
     }
 
     pub fn listeners(&self) -> &[ListenerConfig] {

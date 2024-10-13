@@ -7,7 +7,7 @@ use std::{
 };
 use tokio::{
     runtime::{Handle, Runtime},
-    sync::RwLock,
+    sync::{RwLock, Semaphore},
     task::JoinSet,
 };
 
@@ -15,12 +15,11 @@ use crate::{
     config::ServerOpts,
     dns::{DnsRequest, DnsResponse, SerialMessage},
     dns_conf::RuntimeConfig,
-    dns_error::LookupError,
     dns_mw::{DnsMiddlewareBuilder, DnsMiddlewareHandler},
     dns_mw_cache::DnsCache,
     log,
     server::{DnsHandle, IncomingDnsRequest, ServerHandle},
-    third_ext::{FutureJoinAllExt as _, FutureTimeoutExt},
+    third_ext::FutureJoinAllExt as _,
 };
 
 pub struct App {
@@ -75,18 +74,12 @@ impl App {
 
         cfg.summary();
 
-        let runtime = {
-            use tokio::runtime;
-            let mut builder = runtime::Builder::new_multi_thread();
-            builder.enable_all();
-            if let Some(num_workers) = cfg.num_workers() {
-                builder.worker_threads(num_workers);
-            }
-            builder
-                .thread_name("smartdns-runtime")
-                .build()
-                .expect("failed to initialize Tokio Runtime")
-        };
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(cfg.num_workers())
+            .enable_all()
+            .thread_name("smartdns-runtime")
+            .build()
+            .expect("failed to initialize Tokio Runtime");
 
         let handler = DnsMiddlewareBuilder::new().build(cfg.clone());
 
@@ -230,13 +223,19 @@ pub fn bootstrap(conf: Option<PathBuf>) {
 
             const MAX_IDLE: Duration = Duration::from_secs(30 * 60); // 30 min
 
+            let background_concurrency = Arc::new(Semaphore::new(1));
+
             while let Some((message, server_opts, sender)) = incoming_request.recv().await {
                 let handler = app.mw_handler.read().await.clone();
 
                 if server_opts.is_background {
                     if Instant::now() - last_activity < MAX_IDLE {
+                        let background_concurrency = background_concurrency.clone();
                         inner_join_set.spawn(async move {
-                            let _ = sender.send(process(handler, message, server_opts).await);
+                            if let Ok(permit) = background_concurrency.acquire_owned().await {
+                                let _ = sender.send(process(handler, message, server_opts).await);
+                                drop(permit);
+                            }
                         });
                     }
                 } else {
@@ -388,27 +387,7 @@ async fn process(
                             response_header.set_authoritative(false);
 
                             let response = {
-                                let res =
-                                    handler
-                                        .search(&request, &server_opts)
-                                        .timeout(Duration::from_secs(
-                                            if server_opts.is_background { 60 } else { 5 },
-                                        ))
-                                        .await
-                                        .unwrap_or_else(|_| {
-                                            let query = request.query().original().to_owned();
-                                            log::warn!(
-                                                "Query {} {} {} timeout.",
-                                                query.name(),
-                                                query.query_type(),
-                                                if server_opts.is_background {
-                                                    "in background"
-                                                } else {
-                                                    ""
-                                                }
-                                            );
-                                            Err(LookupError::no_records_found(query, 10))
-                                        });
+                                let res = handler.search(&request, &server_opts).await;
                                 match res {
                                     Ok(lookup) => lookup,
                                     Err(e) => {

@@ -7,46 +7,43 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    dns::DnsResponse,
-    libdns::proto::rr::rdata::opt::{ClientSubnet, EdnsOption},
-    log,
-};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, OwnedSemaphorePermit, RwLock, Semaphore};
+use url::Host;
 
 use crate::{
+    dns::DnsResponse,
+    dns_conf::NameServerInfo,
+    dns_error::LookupError,
     dns_url::DnsUrlParamExt,
-    libdns::proto::{
-        error::ProtoResult,
+    log::{self, debug, info, warn},
+    proxy::ProxyConfig,
+    rustls::TlsClientConfigBundle,
+};
+
+use crate::libdns::{
+    proto::{
+        error::{ProtoError, ProtoErrorKind, ProtoResult},
         op::{Edns, Message, MessageType, OpCode, Query},
         rr::{
             domain::{IntoName, Name},
+            rdata::opt::{ClientSubnet, EdnsOption},
             Record, RecordType,
         },
         xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
         DnsHandle,
     },
-    proxy::ProxyConfig,
-    rustls::TlsClientConfigBundle,
-};
-
-use crate::libdns::proto::xfer::Protocol;
-use crate::libdns::resolver::{
-    config::{ResolverOpts, TlsClientConfig},
-    name_server::GenericConnector,
-    TryParseIp,
-};
-
-use crate::{
-    dns_conf::NameServerInfo,
-    dns_error::LookupError,
-    log::{debug, info, warn},
+    resolver::{
+        config::{ResolverOpts, ServerOrderingStrategy, TlsClientConfig},
+        name_server::GenericConnector,
+        TryParseIp,
+    },
 };
 
 use bootstrap::BootstrapResolver;
-use connection_provider::TokioRuntimeProvider;
 
-use connection_provider::{ConnectionProvider, RawNameServer, RawNameServerConfig};
+use connection_provider::{
+    Connection, ConnectionProvider, RawNameServerConfig, TokioRuntimeProvider,
+};
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
@@ -59,6 +56,7 @@ pub struct DnsClientBuilder {
     ca_path: Option<PathBuf>,
     proxies: Arc<HashMap<String, ProxyConfig>>,
     client_subnet: Option<ClientSubnet>,
+    max_cocurrency: Option<usize>,
 }
 
 impl DnsClientBuilder {
@@ -92,6 +90,11 @@ impl DnsClientBuilder {
         self
     }
 
+    pub fn with_max_cocurrency(mut self, cocurrent: usize) -> Self {
+        self.max_cocurrency = Some(cocurrent);
+        self
+    }
+
     pub async fn build(self) -> DnsClient {
         let DnsClientBuilder {
             server_infos,
@@ -99,6 +102,7 @@ impl DnsClientBuilder {
             ca_path,
             proxies,
             client_subnet,
+            max_cocurrency,
         } = self;
 
         let tls_client_config = TlsClientConfigBundle::new(ca_path, ca_file);
@@ -162,6 +166,7 @@ impl DnsClientBuilder {
                                     Some(tls_client_config.clone()),
                                     None,
                                     client_subnet,
+                                    max_cocurrency,
                                 ) {
                                     Ok(s) => {
                                         let s = Arc::new(s);
@@ -244,6 +249,7 @@ impl DnsClientBuilder {
                             Some(tls_client_config.clone()),
                             Some(bootstrap.clone()),
                             client_subnet,
+                            max_cocurrency,
                         ) {
                             Ok(s) => {
                                 let s = Arc::new(s);
@@ -292,6 +298,10 @@ impl DnsClientBuilder {
                 servers: default_group_servers.into_values().collect(),
             })
         };
+
+        for s in server_groups.values() {
+            s.warmup().await;
+        }
 
         DnsClient {
             default,
@@ -347,6 +357,11 @@ pub struct NameServerGroup {
 }
 
 impl NameServerGroup {
+    pub async fn warmup(&self) {
+        for server in self.servers.iter() {
+            _ = server.client().await;
+        }
+    }
     #[inline]
     pub fn iter(&self) -> Iter<Arc<NameServer>> {
         self.servers.iter()
@@ -401,29 +416,19 @@ impl GenericResolver for NameServerGroup {
     }
 }
 
-pub enum NameServer {
-    IpAddress((Arc<RawNameServer>, Arc<NameServerOpts>)),
-    DomainName {
-        domain: String,
-        config: RawNameServerConfig,
-        opts: Arc<NameServerOpts>,
-        connection_provider: ConnectionProvider,
-        resolver: Arc<BootstrapResolver>,
-        inner: RwLock<(Vec<Arc<RawNameServer>>, HashSet<IpAddr>)>,
-    },
-}
+pub struct NameServer {
+    max_cocurrency: Arc<Semaphore>,
+    connections: Arc<Mutex<Vec<Connection>>>,
 
-impl From<RawNameServerConfig> for NameServer {
-    fn from(config: RawNameServerConfig) -> Self {
-        Self::IpAddress((
-            Arc::new(RawNameServer::new(
-                config,
-                Default::default(),
-                Default::default(),
-            )),
-            Default::default(),
-        ))
-    }
+    server: Host,
+
+    ip_addrs: RwLock<Arc<[IpAddr]>>,
+
+    config: RawNameServerConfig,
+    options: Arc<NameServerOpts>,
+    connection_provider: ConnectionProvider,
+
+    resolver: Option<Arc<BootstrapResolver>>,
 }
 
 impl NameServer {
@@ -433,23 +438,21 @@ impl NameServer {
         tls_client_config: Option<TlsClientConfigBundle>,
         resolver: Option<Arc<BootstrapResolver>>,
         default_client_subnet: Option<ClientSubnet>,
+        cocurrent: Option<usize>,
     ) -> anyhow::Result<Self> {
-        use Protocol::*;
-
         let url = &config.server;
 
-        let ip_addr = url.ip();
-        let port = url.port();
+        let socket_addr = {
+            let ip_addr = url.ip();
+            let port = url.port();
+            SocketAddr::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port)
+        };
 
-        let socket_addr = SocketAddr::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port);
-
-        if ip_addr.is_none() && resolver.is_none() {
+        if socket_addr.ip().is_unspecified() && resolver.is_none() {
             anyhow::bail!("Parameter resolver is required for non-ip upstream");
         }
 
-        let tls_dns_name = Some(url.host().to_string());
-
-        let tls_config = if url.proto().is_encrypted() {
+        let (tls_dns_name, tls_config) = if url.proto().is_encrypted() {
             let Some(tls_client_config) = tls_client_config else {
                 anyhow::bail!("Parameter tls_client_config is required for Encrypted upstream");
             };
@@ -462,12 +465,12 @@ impl NameServer {
                 tls_client_config.normal
             };
 
-            Some(TlsClientConfig(config))
+            (Some(url.host().to_string()), Some(TlsClientConfig(config)))
         } else {
-            None
+            (None, None)
         };
 
-        let opts = Arc::new(NameServerOpts::new(
+        let mut options = NameServerOpts::new(
             config.blacklist_ip,
             config.whitelist_ip,
             config.check_edns,
@@ -476,176 +479,143 @@ impl NameServer {
                 .as_ref()
                 .map(|r| r.options().clone())
                 .unwrap_or_default(),
-        ));
+        );
+        options.resolver_opts.server_ordering_strategy = ServerOrderingStrategy::QueryStatistics;
 
         let so_mark = config.so_mark;
         let device = config.interface;
 
         let provider = GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device));
 
-        use crate::libdns::resolver::config::NameServerConfig;
-
         let protocol = *url.proto();
+        let http_endpoint = url.path().map(|s| s.to_string());
 
-        let config = match protocol {
-            Udp => NameServerConfig {
-                socket_addr,
-                protocol,
-                trust_negative_responses: true,
-                tls_dns_name: None,
-                tls_config: None,
-                bind_addr: None,
-                http_endpoint: None,
-            },
-            Tcp => NameServerConfig {
-                socket_addr,
-                protocol,
-                trust_negative_responses: true,
-                tls_dns_name: None,
-                tls_config: None,
-                bind_addr: None,
-                http_endpoint: None,
-            },
-            #[cfg(feature = "dns-over-https")]
-            Https => NameServerConfig {
-                socket_addr,
-                protocol,
-                tls_dns_name,
-                tls_config,
-                trust_negative_responses: true,
-                bind_addr: None,
-                http_endpoint: Some(url.path().to_string()),
-            },
-            #[cfg(feature = "dns-over-quic")]
-            Quic => NameServerConfig {
-                socket_addr,
-                protocol,
-                tls_dns_name,
-                tls_config,
-                trust_negative_responses: true,
-                bind_addr: None,
-                http_endpoint: None,
-            },
-            #[cfg(feature = "dns-over-tls")]
-            Tls => NameServerConfig {
-                socket_addr,
-                protocol,
-                tls_dns_name,
-                tls_config,
-                trust_negative_responses: true,
-                bind_addr: None,
-                http_endpoint: None,
-            },
-            #[cfg(feature = "dns-over-h3")]
-            H3 => NameServerConfig {
-                socket_addr,
-                protocol,
-                tls_dns_name,
-                tls_config,
-                trust_negative_responses: true,
-                bind_addr: None,
-                http_endpoint: Some(url.path().to_string()),
-            },
-            _ => unimplemented!(),
+        let config = RawNameServerConfig {
+            socket_addr,
+            protocol,
+            trust_negative_responses: true,
+            tls_config,
+            tls_dns_name,
+            bind_addr: None,
+            http_endpoint,
         };
 
-        Ok(if ip_addr.is_some() {
-            Self::IpAddress((
-                Arc::new(RawNameServer::new(
-                    config,
-                    opts.as_ref().deref().clone(),
-                    provider,
-                )),
-                opts,
-            ))
-        } else {
-            Self::DomainName {
-                domain: url.host().to_string(),
-                config,
-                opts,
-                connection_provider: provider,
-                inner: Default::default(),
-                resolver: resolver.unwrap(),
-            }
+        Ok(Self {
+            max_cocurrency: Arc::new(Semaphore::const_new(cocurrent.unwrap_or(1))),
+            server: url.host().to_owned(),
+            connections: Default::default(),
+            ip_addrs: Default::default(),
+            config,
+            options: options.into(),
+            connection_provider: provider,
+            resolver,
         })
     }
 
-    async fn handle(&self) -> Option<Arc<connection_provider::RawNameServer>> {
-        match self {
-            NameServer::IpAddress((v, _)) => Some(v.clone()),
-            NameServer::DomainName {
-                domain,
-                config,
-                opts,
-                connection_provider,
-                inner,
-                resolver,
-            } => {
-                {
-                    let read = inner.read().await;
+    async fn ip_addrs(&self) -> Result<Arc<[IpAddr]>, ProtoError> {
+        let mut ip_addrs = self.ip_addrs.read().await.clone();
+        if !ip_addrs.is_empty() {
+            return Ok(ip_addrs);
+        }
+        match &self.server {
+            Host::Domain(domain) => {
+                let resolver = self
+                    .resolver
+                    .as_ref()
+                    .expect("resolver must be set when using domain name");
 
-                    let (servers, _) = read.deref();
-
-                    if let Some(first) = servers.first().cloned() {
-                        if servers.len() > 1 {
-                            let mut servers = servers.to_vec();
-                            servers.sort_unstable();
-                            if matches!(servers.first(), Some(s) if *s == first) {
-                                // Still first, return directly
-                                return Some(first);
-                            }
-                        } else {
-                            // There is only one, return directly.
-                            // todo:// determine if it failed, but it requires `is_connected` public.
-                            // https://github.com/hickory-dns/hickory-dns/blob/78f9b27649d3ee1b9894c22aedcdc9bad2daf331/crates/resolver/src/name_server/name_server.rs#L85
-                            return Some(first);
-                        }
-                    }
-                }
-
-                let ip_addrs = match resolver.lookup_ip(domain).await {
+                ip_addrs = match resolver.lookup_ip(domain).await {
                     Ok(lookup_ip) => lookup_ip.ip_addrs().into_iter().collect::<Vec<_>>(),
                     Err(err) => {
                         warn!("lookup ip: {domain} failed, {err}");
                         vec![]
                     }
-                };
-
-                let mut write = inner.write().await;
-                let (servers, seen) = write.deref_mut();
-
-                for ip_addr in ip_addrs {
-                    if seen.contains(&ip_addr) {
-                        continue;
-                    }
-
-                    let mut config = config.clone();
-                    config.socket_addr.set_ip(ip_addr);
-
-                    let opts = opts.clone();
-                    let connection_provider = connection_provider.clone();
-
-                    let server = Arc::new(RawNameServer::new(
-                        config,
-                        opts.as_ref().deref().clone(),
-                        connection_provider,
-                    ));
-                    seen.insert(ip_addr);
-                    servers.push(server);
                 }
+                .into();
 
-                servers.sort_unstable();
-
-                servers.first().cloned()
+                if ip_addrs.is_empty() {
+                    return Err(ProtoErrorKind::NoConnections.into());
+                } else {
+                    *self.ip_addrs.write().await.deref_mut() = ip_addrs.clone();
+                }
+                Ok(ip_addrs)
+            }
+            Host::Ipv4(ip) => {
+                ip_addrs = vec![IpAddr::V4(*ip)].into();
+                *self.ip_addrs.write().await.deref_mut() = ip_addrs.clone();
+                Ok(ip_addrs)
+            }
+            Host::Ipv6(ip) => {
+                ip_addrs = vec![IpAddr::V6(*ip)].into();
+                *self.ip_addrs.write().await.deref_mut() = ip_addrs.clone();
+                Ok(ip_addrs)
             }
         }
     }
 
+    async fn client(&self) -> Result<ClientHandle, ProtoError> {
+        let cocurrent_permit = self
+            .max_cocurrency
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| ProtoErrorKind::Busy)?;
+
+        let conn = self.connections.lock().await.pop();
+
+        let conn = match conn {
+            Some(conn) => conn,
+            None => {
+                let config = self.config.clone();
+                let options = self.options.as_ref().deref().clone();
+                let provider = self.connection_provider.clone();
+
+                match &self.server {
+                    Host::Domain(_) => {
+                        let configs = self
+                            .ip_addrs()
+                            .await?
+                            .iter()
+                            .map(|ip| {
+                                let mut config = config.clone();
+                                config.socket_addr.set_ip(*ip);
+                                config
+                            })
+                            .collect::<Vec<_>>();
+
+                        Connection::from_config(configs.into(), options, provider)
+                    }
+                    _ => Connection::from_config(vec![config].into(), options, provider),
+                }
+            }
+        };
+
+        Ok(ClientHandle {
+            connections: self.connections.clone(),
+            connection: Some((conn, cocurrent_permit)),
+        })
+    }
+
     #[inline]
     pub fn options(&self) -> &NameServerOpts {
-        match self {
-            NameServer::IpAddress((_, opts)) => opts,
-            NameServer::DomainName { opts, .. } => opts,
+        &self.options
+    }
+}
+
+impl From<RawNameServerConfig> for NameServer {
+    fn from(config: RawNameServerConfig) -> Self {
+        Self {
+            max_cocurrency: Arc::new(Semaphore::const_new(1)),
+            server: match config.socket_addr.ip() {
+                IpAddr::V4(ipv4_addr) => Host::Ipv4(ipv4_addr),
+                IpAddr::V6(ipv6_addr) => Host::Ipv6(ipv6_addr),
+            },
+            config,
+            ip_addrs: Default::default(),
+            connections: Default::default(),
+            options: Default::default(),
+            connection_provider: Default::default(),
+            resolver: Default::default(),
         }
     }
 }
@@ -694,13 +664,33 @@ impl GenericResolver for NameServer {
             request_options,
         );
 
-        let Some(ns) = self.handle().await else {
+        let client = self.client().await?;
+
+        let Some(ns) = client.connection.as_ref().map(|(conn, _)| conn) else {
             return Err(ProtoErrorKind::NoConnections.into());
         };
 
         let res = ns.send(req).first_answer().await?;
 
         Ok(From::<Message>::from(res.into()))
+    }
+}
+
+struct ClientHandle {
+    connections: Arc<Mutex<Vec<Connection>>>,
+    connection: Option<(Connection, OwnedSemaphorePermit)>,
+}
+
+impl Drop for ClientHandle {
+    fn drop(&mut self) {
+        let connections = self.connections.clone();
+        let connection = self.connection.take();
+        tokio::spawn(async move {
+            if let Some((connection, permit)) = connection {
+                connections.lock().await.push(connection);
+                drop(permit);
+            }
+        });
     }
 }
 
@@ -983,6 +973,9 @@ mod connection_provider {
     pub type RawNameServer =
         crate::libdns::resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>;
     pub type RawNameServerConfig = crate::libdns::resolver::config::NameServerConfig;
+    pub type Connection = crate::libdns::resolver::name_server::GenericNameServerPool<
+        connection_provider::TokioRuntimeProvider,
+    >;
     pub type ConnectionProvider = GenericConnector<TokioRuntimeProvider>;
 
     /// The Tokio Runtime for async execution
