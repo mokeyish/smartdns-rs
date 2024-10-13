@@ -47,13 +47,13 @@ impl DnsUrl {
         self.port() == dns_proto_default_port(&self.proto)
     }
 
-    pub fn path(&self) -> &str {
+    pub fn path(&self) -> Option<&str> {
         match self.proto {
             Protocol::Https | Protocol::H3 => match self.path.as_ref() {
-                Some(p) if !p.is_empty() => p,
-                _ => "/dns-query",
+                Some(p) if !p.is_empty() => Some(p),
+                _ => Some("/dns-query"),
             },
-            _ => "",
+            _ => None,
         }
     }
 
@@ -227,8 +227,8 @@ impl std::fmt::Display for DnsUrl {
         }
 
         // path
-        if matches!(self.proto, Protocol::Https | Protocol::H3) {
-            write!(f, "{}", self.path())?;
+        if let Some(path) = self.path() {
+            write!(f, "{}", path)?;
         }
 
         // fragment
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Udp);
         assert_eq!(url.host.to_string(), "8.8.8.8");
         assert_eq!(url.port(), 53);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://8.8.8.8");
         assert!(url.ip().is_some());
     }
@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Udp);
         assert_eq!(url.host.to_string(), "8.8.8.8");
         assert_eq!(url.port(), 53);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://8.8.8.8");
         assert!(url.ip().is_some());
     }
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Udp);
         assert_eq!(url.host.to_string(), "1.1.1.1");
         assert_eq!(url.port(), 8053);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://1.1.1.1:8053");
         assert!(url.ip().is_some());
     }
@@ -407,7 +407,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Tcp);
         assert_eq!(url.host.to_string(), "8.8.8.8");
         assert_eq!(url.port(), 53);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tcp://8.8.8.8");
     }
 
@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Tcp);
         assert_eq!(url.host.to_string(), "8.8.8.8");
         assert_eq!(url.port(), 8053);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tcp://8.8.8.8:8053");
     }
 
@@ -428,7 +428,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Tls);
         assert_eq!(url.host.to_string(), "8.8.8.8");
         assert_eq!(url.port(), 853);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tls://8.8.8.8");
     }
 
@@ -439,7 +439,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Tls);
         assert_eq!(url.host.to_string(), "8.8.8.8");
         assert_eq!(url.port(), 953);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tls://8.8.8.8:953");
     }
 
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Tls);
         assert_eq!(url.host.to_string(), "dns.google");
         assert_eq!(url.port(), 953);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tls://dns.google:953");
         assert_eq!(url.ip(), "8.8.8.8".parse().ok())
     }
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.google");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
         assert!(url.ip().is_none());
     }
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.google");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/dns-query1");
+        assert_eq!(url.path(), Some("/dns-query1"));
         assert_eq!(url.to_string(), "https://dns.google/dns-query1");
         assert!(url.ip().is_none());
     }
@@ -488,7 +488,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.google");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
         assert!(url.ip().is_none());
     }
@@ -501,7 +501,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Quic);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 853);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "quic://dns.adguard-dns.com");
         assert!(url.ip().is_none());
     }
@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::H3);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "h3://dns.adguard-dns.com/dns-query");
         assert!(url.ip().is_none());
     }
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::H3);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert!(url.ip().is_none());
     }
@@ -540,7 +540,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::H3);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert!(url.ip().is_none());
     }
@@ -553,7 +553,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::H3);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/dns-query");
+        assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert!(url.ip().is_none());
     }
@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::H3);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        assert_eq!(url.path(), "/2dns-query");
+        assert_eq!(url.path(), Some("/2dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/2dns-query#h3");
         assert!(url.ip().is_none());
     }
@@ -585,7 +585,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Udp);
         assert_eq!(url.host.to_string(), "127.0.0.1");
         assert_eq!(url.port(), 1053);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://127.0.0.1:1053");
         assert!(url.ip().is_some());
     }
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(url.proto, Protocol::Udp);
         assert_eq!(url.host.to_string(), "[240e:1f:1::1]");
         assert_eq!(url.port(), 53);
-        assert_eq!(url.path(), "");
+        assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://[240e:1f:1::1]");
         assert!(url.ip().is_some());
     }
