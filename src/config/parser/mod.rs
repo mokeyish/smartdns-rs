@@ -107,6 +107,7 @@ pub enum OneConfig {
     EdnsClientSubnet(IpNet),
     ExpandPtrFromAddress(bool),
     ForceAAAASOA(bool),
+    ForceHTTPSSOA(bool),
     ForceQtypeSoa(RecordType),
     ForwardRule(ForwardRule),
     HostsFile(glob::Pattern),
@@ -201,6 +202,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
             OneConfig::ExpandPtrFromAddress,
         ),
         map(parse_item("force-AAAA-SOA"), OneConfig::ForceAAAASOA),
+        map(parse_item("force-HTTPS-SOA"), OneConfig::ForceHTTPSSOA),
         map(parse_item("force-qtype-soa"), OneConfig::ForceQtypeSoa),
         map(parse_item("response"), OneConfig::ResponseMode),
         map(parse_item("prefetch-domain"), OneConfig::PrefetchDomain),
@@ -214,11 +216,11 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("log-file-mode"), OneConfig::LogFileMode),
         map(parse_item("log-file"), OneConfig::LogFile),
         map(parse_item("log-filter"), OneConfig::LogFilter),
-        map(parse_item("log-level"), OneConfig::LogLevel),
-        map(parse_item("log-num"), OneConfig::LogNum),
     ));
 
     let group3 = alt((
+        map(parse_item("log-level"), OneConfig::LogLevel),
+        map(parse_item("log-num"), OneConfig::LogNum),
         map(parse_item("log-size"), OneConfig::LogSize),
         map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
         map(parse_item("mdns-lookup"), OneConfig::MdnsLookup),
