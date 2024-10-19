@@ -7,3 +7,8 @@ pub use ipv4::ipv4;
 mod ipv6;
 #[cfg(feature = "nom-recipes-ipv6")]
 pub use ipv6::ipv6;
+
+#[cfg(feature = "nom-recipes-ip")]
+mod ip;
+#[cfg(feature = "nom-recipes-ip")]
+pub use ip::ip;

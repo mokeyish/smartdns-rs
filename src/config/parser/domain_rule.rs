@@ -130,7 +130,7 @@ mod tests {
             Ok((
                 "",
                 DomainRule {
-                    address: Some(DomainAddress::IGN),
+                    address: Some(AddressRuleValue::IGN),
                     ..Default::default()
                 }
             ))
@@ -141,7 +141,7 @@ mod tests {
             Ok((
                 "",
                 DomainRule {
-                    address: Some(DomainAddress::SOAv6),
+                    address: Some(AddressRuleValue::SOAv6),
                     ..Default::default()
                 }
             ))
@@ -174,6 +174,34 @@ mod tests {
                 "",
                 DomainRule {
                     rr_ttl_min: Some(60),
+                    ..Default::default()
+                }
+            ))
+        );
+
+        assert_eq!(
+            DomainRule::parse("-a 127.0.0.1"),
+            Ok((
+                "",
+                DomainRule {
+                    address: Some(AddressRuleValue::Addr {
+                        v4: Some(["127.0.0.1".parse().unwrap()].into()),
+                        v6: None
+                    }),
+                    ..Default::default()
+                }
+            ))
+        );
+
+        assert_eq!(
+            DomainRule::parse("-a 127.0.0.1,::1"),
+            Ok((
+                "",
+                DomainRule {
+                    address: Some(AddressRuleValue::Addr {
+                        v4: Some(["127.0.0.1".parse().unwrap()].into()),
+                        v6: Some(["::1".parse().unwrap()].into())
+                    }),
                     ..Default::default()
                 }
             ))

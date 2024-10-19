@@ -50,7 +50,7 @@ impl DomainRuleMap {
         // append address rule
         for rule in address_rules.iter() {
             for name in expand_domain(&rule.domain) {
-                (name_rule_map.entry(name).or_default()).address = Some(rule.address);
+                (name_rule_map.entry(name).or_default()).address = Some(rule.address.clone());
             }
         }
 
@@ -208,7 +208,7 @@ impl From<&Name> for crate::collections::TrieKey<Name> {
 #[cfg(test)]
 mod tests {
 
-    use crate::config::{AddressRule, DomainAddress};
+    use crate::config::{AddressRule, AddressRuleValue};
     use std::{net::Ipv4Addr, ptr};
 
     use super::*;
@@ -220,15 +220,24 @@ mod tests {
             &vec![
                 AddressRule {
                     domain: "a.b.c.www.example.com".parse().unwrap(),
-                    address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
+                    address: AddressRuleValue::Addr {
+                        v4: Some([Ipv4Addr::LOCALHOST].into()),
+                        v6: None,
+                    },
                 },
                 AddressRule {
                     domain: "www.example.com".parse().unwrap(),
-                    address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
+                    address: AddressRuleValue::Addr {
+                        v4: Some([Ipv4Addr::LOCALHOST].into()),
+                        v6: None,
+                    },
                 },
                 AddressRule {
                     domain: "example.com".parse().unwrap(),
-                    address: DomainAddress::IPv4(Ipv4Addr::LOCALHOST),
+                    address: AddressRuleValue::Addr {
+                        v4: Some([Ipv4Addr::LOCALHOST].into()),
+                        v6: None,
+                    },
                 },
             ],
             &Default::default(),
