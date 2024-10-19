@@ -118,7 +118,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
 }
 
 fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<Vec<RData>> {
-    use RecordType::{A, AAAA};
+    use RecordType::{A, AAAA, HTTPS};
 
     let cfg = ctx.cfg();
     let server_opts = ctx.server_opts();
@@ -126,13 +126,21 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<Vec<RDat
 
     let no_rule_soa = server_opts.no_rule_soa();
 
+    // handle force SOA
     if !no_rule_soa {
-        // force AAAA query return SOA
-        if query_type == AAAA && (server_opts.force_aaaa_soa() || cfg.force_aaaa_soa()) {
-            return Some(vec![RData::default_soa()]);
+        match query_type {
+            // force AAAA query return SOA
+            AAAA if server_opts.force_aaaa_soa() || cfg.force_aaaa_soa() => {
+                return Some(vec![RData::default_soa()]);
+            }
+            // force HTTPS query return SOA
+            HTTPS if server_opts.force_https_soa() || cfg.force_https_soa() => {
+                return Some(vec![RData::default_soa()]);
+            }
+            _ => (),
         }
 
-        // force AAAA query return SOA
+        // force specific qtype return SOA
         if cfg.force_qtype_soa().contains(&query_type) {
             return Some(vec![RData::default_soa()]);
         }

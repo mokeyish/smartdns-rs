@@ -147,6 +147,11 @@ pub struct Config {
     /// force-AAAA-SOA [yes|no]
     pub force_aaaa_soa: Option<bool>,
 
+    /// force HTTPS query return SOA
+    ///
+    /// force-HTTPS-SOA [yes|no]
+    pub force_https_soa: Option<bool>,
+
     /// force specific qtype return soa
     ///
     /// force-qtype-SOA [qtypeid |...]

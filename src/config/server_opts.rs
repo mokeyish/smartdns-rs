@@ -38,6 +38,10 @@ pub struct ServerOpts {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub force_aaaa_soa: Option<bool>,
 
+    /// force HTTPS query return SOA.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force_https_soa: Option<bool>,
+
     /// do not serve expired
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_serve_expired: Option<bool>,
@@ -101,6 +105,12 @@ impl ServerOpts {
         self.force_aaaa_soa.unwrap_or_default()
     }
 
+    /// force HTTPS query return SOA.
+    #[inline]
+    pub fn force_https_soa(&self) -> bool {
+        self.force_https_soa.unwrap_or_default()
+    }
+
     /// do not serve expired.
     #[inline]
     pub fn no_serve_expired(&self) -> bool {
@@ -118,6 +128,7 @@ impl ServerOpts {
             no_rule_soa,
             no_dualstack_selection,
             force_aaaa_soa,
+            force_https_soa,
             no_serve_expired,
             is_background: _,
         } = other;
@@ -151,6 +162,10 @@ impl ServerOpts {
 
         if self.force_aaaa_soa.is_none() {
             self.force_aaaa_soa = force_aaaa_soa;
+        }
+
+        if self.force_https_soa.is_none() {
+            self.force_https_soa = force_https_soa;
         }
 
         if self.no_serve_expired.is_none() {

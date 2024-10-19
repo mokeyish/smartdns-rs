@@ -194,6 +194,7 @@ pub fn parse_server_opts<'b>(options: &Options<'b>) -> (Options<'b>, ServerOpts)
             "no-serve-expired" => opts.no_serve_expired = Some(true),
             "no-dualstack-selection" => opts.no_dualstack_selection = Some(true),
             "force-aaaa-soa" => opts.force_aaaa_soa = Some(true),
+            "force-https-soa" => opts.force_https_soa = Some(true),
             _ => rest_options.push((*k, *v)),
         }
     }
@@ -408,6 +409,26 @@ mod tests {
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
+                        ..Default::default()
+                    }
+                }
+            )
+        );
+
+        assert_eq!(
+            TcpListenerConfig::parse(
+                "bind-tcp [::1]:5353@eth0 -qq --no-rule-addr -w123 -force-https-soa"
+            )
+            .unwrap(),
+            (
+                "",
+                TcpListenerConfig {
+                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                    port: 5353,
+                    device: Some("eth0".to_string()),
+                    opts: ServerOpts {
+                        no_rule_addr: Some(true),
+                        force_https_soa: Some(true),
                         ..Default::default()
                     }
                 }

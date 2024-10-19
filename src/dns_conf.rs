@@ -345,6 +345,12 @@ impl RuntimeConfig {
         self.force_aaaa_soa.unwrap_or_default()
     }
 
+    /// force HTTPS query return SOA
+    #[inline]
+    pub fn force_https_soa(&self) -> bool {
+        self.force_https_soa.unwrap_or_default()
+    }
+
     /// force specific qtype return soa
     #[inline]
     pub fn force_qtype_soa(&self) -> &HashSet<RecordType> {
@@ -803,6 +809,7 @@ impl RuntimeConfigBuilder {
                 ServeExpired(v) => self.cache.serve_expired = Some(v),
                 PrefetchDomain(v) => self.cache.prefetch_domain = Some(v),
                 ForceAAAASOA(v) => self.force_aaaa_soa = Some(v),
+                ForceHTTPSSOA(v) => self.force_https_soa = Some(v),
                 DualstackIpAllowForceAAAA(v) => self.dualstack_ip_allow_force_aaaa = Some(v),
                 DualstackIpSelection(v) => self.dualstack_ip_selection = Some(v),
                 ServerName(v) => self.server_name = Some(v),
