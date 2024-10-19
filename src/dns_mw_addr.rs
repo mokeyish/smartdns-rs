@@ -26,7 +26,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
     ) -> Result<DnsResponse, DnsError> {
         let query_type = req.query().query_type();
 
-        if let Some(rdata) = handle_rule_addr(query_type, ctx) {
+        if let Some(rdatas) = handle_rule_addr(query_type, ctx) {
             let local_ttl = ctx.cfg().local_ttl();
 
             let query = req.query().original().clone();
@@ -35,7 +35,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
 
             let lookup = DnsResponse::new_with_deadline(
                 query,
-                vec![Record::from_rdata(name, local_ttl as u32, rdata)],
+                rdatas
+                    .into_iter()
+                    .map(|d| Record::from_rdata(name.clone(), local_ttl as u32, d)),
                 valid_until,
             );
 
@@ -115,7 +117,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
     }
 }
 
-fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<RData> {
+fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<Vec<RData>> {
     use RecordType::{A, AAAA};
 
     let cfg = ctx.cfg();
@@ -127,12 +129,12 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<RData> {
     if !no_rule_soa {
         // force AAAA query return SOA
         if query_type == AAAA && (server_opts.force_aaaa_soa() || cfg.force_aaaa_soa()) {
-            return Some(RData::default_soa());
+            return Some(vec![RData::default_soa()]);
         }
 
         // force AAAA query return SOA
         if cfg.force_qtype_soa().contains(&query_type) {
-            return Some(RData::default_soa());
+            return Some(vec![RData::default_soa()]);
         }
     }
 
@@ -144,18 +146,45 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<RData> {
     let mut node = rule;
 
     while let Some(rule) = node {
-        use crate::dns_conf::DomainAddress::*;
+        use crate::dns_conf::AddressRuleValue::*;
 
-        if let Some(address) = rule.address {
+        if let Some(address) = rule.address.as_ref() {
             match address {
-                IPv4(ipv4) if query_type == A => return Some(RData::A(ipv4.into())),
-                IPv6(ipv6) if query_type == AAAA => return Some(RData::AAAA(ipv6.into())),
-                IPv4(_) | IPv6(_) if !no_rule_soa && (query_type == AAAA || query_type == A) => {
-                    return Some(RData::default_soa())
+                Addr { v4, v6 } => {
+                    match query_type {
+                        A => {
+                            if let Some(v4) = v4 {
+                                return Some(v4.iter().map(|ip| RData::A((*ip).into())).collect());
+                            }
+                        }
+                        AAAA => {
+                            if let Some(v6) = v6 {
+                                return Some(
+                                    v6.iter().map(|ip| RData::AAAA((*ip).into())).collect(),
+                                );
+                            }
+
+                            if let Some(v4) = v4 {
+                                return Some(
+                                    v4.iter()
+                                        .map(|ip| RData::AAAA(ip.to_ipv6_mapped().into()))
+                                        .collect(),
+                                );
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                    if !no_rule_soa {
+                        return Some(vec![RData::default_soa()]);
+                    }
                 }
-                SOA if !no_rule_soa => return Some(RData::default_soa()),
-                SOAv4 if !no_rule_soa && query_type == A => return Some(RData::default_soa()),
-                SOAv6 if !no_rule_soa && query_type == AAAA => return Some(RData::default_soa()),
+                SOA if !no_rule_soa => return Some(vec![RData::default_soa()]),
+                SOAv4 if !no_rule_soa && query_type == A => {
+                    return Some(vec![RData::default_soa()])
+                }
+                SOAv6 if !no_rule_soa && query_type == AAAA => {
+                    return Some(vec![RData::default_soa()])
+                }
                 IGN => return None, // ignore rule
                 IGNv4 if query_type == A => return None,
                 IGNv6 if query_type == AAAA => return None,
@@ -174,7 +203,7 @@ mod tests {
     use super::*;
 
     use crate::{
-        dns_conf::{DomainAddress, RuntimeConfig},
+        dns_conf::{AddressRuleValue, RuntimeConfig},
         dns_mw::*,
         libdns::proto::rr::rdata,
     };
@@ -189,7 +218,7 @@ mod tests {
             cfg.find_domain_rule(&"google.com".parse().unwrap())
                 .unwrap()
                 .address,
-            Some(DomainAddress::SOAv6)
+            Some(AddressRuleValue::SOAv6)
         );
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
@@ -225,7 +254,10 @@ mod tests {
             cfg.find_domain_rule(&"google.com".parse().unwrap())
                 .unwrap()
                 .address,
-            Some(DomainAddress::IPv4("1.2.3.4".parse().unwrap()))
+            Some(AddressRuleValue::Addr {
+                v4: Some(["1.2.3.4".parse().unwrap()].into()),
+                v6: None
+            })
         );
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
@@ -240,12 +272,12 @@ mod tests {
             RData::A("1.2.3.4".parse().unwrap())
         );
 
-        assert!(matches!(
+        assert_eq!(
             mock.lookup_rdata("google.com", RecordType::AAAA)
                 .await
                 .unwrap()[0],
-            RData::SOA(_)
-        ));
+            RData::AAAA("::ffff:1.2.3.4".parse().unwrap())
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -9,7 +9,6 @@ mod bytes;
 mod cname;
 mod config_for_domain;
 mod domain;
-mod domain_policy;
 mod domain_rule;
 mod domain_set;
 mod file_mode;
@@ -361,7 +360,7 @@ mod tests {
                 OneConfig::DomainRule(ConfigForDomain {
                     domain: Domain::Set("domain-block-list".to_string()),
                     config: DomainRule {
-                        address: Some(DomainAddress::SOA),
+                        address: Some(AddressRuleValue::SOA),
                         ..Default::default()
                     }
                 })

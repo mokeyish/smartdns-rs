@@ -8,7 +8,7 @@ pub struct DomainRule {
     /// The name of NameServer Group.
     pub nameserver: Option<String>,
 
-    pub address: Option<DomainAddress>,
+    pub address: Option<AddressRuleValue>,
 
     pub cname: Option<CNameRule>,
 

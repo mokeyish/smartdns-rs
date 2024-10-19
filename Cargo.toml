@@ -29,9 +29,13 @@ default = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dn
 
 homebrew = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all" ]
 
-nom-recipes-all =["nom-recipes-ipv4", "nom-recipes-ipv6"]
+nom-recipes-all =["nom-recipes-ip"]
+
+nom-recipes-ip = ["nom-recipes-ipv4", "nom-recipes-ipv6"]
 nom-recipes-ipv4 = []
-nom-recipes-ipv6 = []
+nom-recipes-ipv6 = [
+  "nom-recipes-ipv4" # support IPv4-mapped IPv6 addresses
+] 
 
 failed_tests = []
 disable_icmp_ping = []
