@@ -1099,29 +1099,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hickory-recursor"
-version = "0.25.0-alpha.2"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.5#7887002d1198ed9faaaae531e0f9815c10589f7a"
-dependencies = [
- "async-recursion",
- "async-trait",
- "bytes",
- "cfg-if",
- "enum-as-inner",
- "futures-util",
- "hickory-proto",
- "hickory-resolver",
- "ipnet",
- "lru-cache",
- "parking_lot",
- "prefix-trie",
- "serde",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "hickory-resolver"
 version = "0.25.0-alpha.2"
 source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.5#7887002d1198ed9faaaae531e0f9815c10589f7a"
@@ -1142,34 +1119,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-rustls 0.26.0",
- "tracing",
-]
-
-[[package]]
-name = "hickory-server"
-version = "0.25.0-alpha.2"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.25.0-smartdns.5#7887002d1198ed9faaaae531e0f9815c10589f7a"
-dependencies = [
- "async-trait",
- "bytes",
- "cfg-if",
- "data-encoding",
- "enum-as-inner",
- "futures-util",
- "h2",
- "hickory-proto",
- "hickory-recursor",
- "hickory-resolver",
- "http",
- "ipnet",
- "prefix-trie",
- "rustls 0.23.14",
- "serde",
- "thiserror",
- "time",
- "tokio",
- "tokio-rustls 0.26.0",
- "tokio-util",
  "tracing",
 ]
 
@@ -1378,9 +1327,6 @@ name = "ipnet"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddc24109865250148c2e0f3d25d4f0f479571723792d3802153c60922a4fb708"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -1800,16 +1746,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77957b295656769bb8ad2b6a6b09d897d94f05c41b069aede1fcdaa675eaea04"
 dependencies = [
  "zerocopy",
-]
-
-[[package]]
-name = "prefix-trie"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ddda32ff27f1813529c1806c8b2915cff1b04eaf8dc5edf8378c3b4affa06b1"
-dependencies = [
- "ipnet",
- "num-traits",
 ]
 
 [[package]]
@@ -2581,7 +2517,6 @@ dependencies = [
  "glob",
  "hickory-proto",
  "hickory-resolver",
- "hickory-server",
  "hostname",
  "ipnet",
  "local-ip-address",

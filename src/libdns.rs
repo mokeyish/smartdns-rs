@@ -34,9 +34,4 @@ pub mod resolver {
     }
 }
 
-#[cfg(feature = "legacy_dns_server")]
-pub mod server {
-    pub use hickory_server::*;
-}
-
 pub use proto::xfer::Protocol;

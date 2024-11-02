@@ -5,7 +5,7 @@
 [![homebrew version](https://img.shields.io/homebrew/v/smartdns)](https://formulae.brew.sh/formula/smartdns)
 ![OS](https://img.shields.io/badge/os-Windows%20%7C%20MacOS%20%7C%20Linux-blue)
 
-[Docs](https://pymumu.github.io/smartdns/) • [Discord](https://discord.gg/SDhQSA72)
+[Docs](https://pymumu.github.io/smartdns/) •
 
 [English](https://github.com/mokeyish/smartdns-rs/blob/main/README.md) | 中文
 
@@ -67,7 +67,7 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/s
 
 - MacOS
 
-  如果你有安装 [brew ](https://brew.sh/) ，可以直接用下面的命令进行安装。
+  如果你有安装 [brew](https://brew.sh/) ，可以直接用下面的命令进行安装。
 
   ```shell
   brew update
@@ -105,7 +105,7 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/s
      ```shell
      ./smartdns service help
      ```
-     
+
      *注意：安装成系统服务，需要 administrator / root 权限。*
 
      *服务管理是各系统兼容的，window 下调用 [sc](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc754599(v=ws.11))；MacOS 下调用 `launchctl` 或者 `brew`；Linux 下调用 `Systemd`  或 `OpenRc`。*
