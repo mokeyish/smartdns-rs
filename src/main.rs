@@ -264,11 +264,10 @@ mod run_user {
     use std::{collections::HashSet, io};
 
     use caps::{CapSet, Capability};
+    use uzers as users;
+    pub use uzers::switch::SwitchUserGuard;
 
-    pub fn with(
-        username: &str,
-        groupname: Option<&str>,
-    ) -> io::Result<users::switch::SwitchUserGuard> {
+    pub fn with(username: &str, groupname: Option<&str>) -> io::Result<SwitchUserGuard> {
         let mut caps = HashSet::new();
         caps.insert(Capability::CAP_NET_ADMIN);
         caps.insert(Capability::CAP_NET_BIND_SERVICE);
@@ -281,7 +280,7 @@ mod run_user {
         username: &str,
         groupname: Option<&str>,
         caps: Option<&HashSet<Capability>>,
-    ) -> io::Result<users::switch::SwitchUserGuard> {
+    ) -> io::Result<SwitchUserGuard> {
         use users::{get_group_by_name, get_user_by_name, switch::switch_user_group};
 
         let user = get_user_by_name(username);

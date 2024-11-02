@@ -329,7 +329,7 @@ async fn serve(
 struct AppGuard {
     log_guard: Option<tracing::dispatcher::DefaultGuard>,
     #[cfg(target_os = "linux")]
-    user_guard: Option<users::switch::SwitchUserGuard>,
+    user_guard: Option<crate::run_user::SwitchUserGuard>,
 }
 
 async fn process(
