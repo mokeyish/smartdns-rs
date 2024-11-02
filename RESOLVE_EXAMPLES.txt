@@ -1,0 +1,14 @@
+Examples:
+
+    1. Querying a specific domain name
+
+        smartdns resolve example.com
+
+    2. Querying a specific DNS record type
+
+        smartdns resolve example.com AAAA
+
+    3. Querying a specific DNS server
+
+        smartdns resolve --https @1.1.1.1 example.com
+
