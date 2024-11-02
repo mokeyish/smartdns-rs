@@ -68,7 +68,7 @@ service = [
 
 nft = ["dep:which", "dep:either"]
 
-dnssec = ["hickory-proto/dnssec"]
+dnssec = ["hickory-proto/dnssec", "hickory-proto/dnssec-ring", "rustls/ring"]
 
 experimental = ["experimental-trie", "experimental-phf"]
 
@@ -105,8 +105,8 @@ either = { version = "1.12.0", optional = true }
 
 
 # api
-axum = { version = "0.7.5" }
-axum-server = { version = "0.6.0", features = ["tls-rustls"] }
+axum = { version = "0.7.7" }
+axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
 
 # serde
 serde = { version = "1.0", features = ["derive"]}
@@ -118,7 +118,7 @@ futures = { version = "0.3.5", default-features = false, features = ["std"] }
 futures-intrusive = "0.5"
 futures-util = { version = "0.3.5", default-features = false, features = ["std"] }
 async-trait = "0.1.80"
-tokio = { version = "1.28", features = [
+tokio = { version = "1.41", features = [
   "time",
   "rt",
   "signal",
@@ -126,7 +126,7 @@ tokio = { version = "1.28", features = [
   "parking_lot",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
-tokio-util = "0.7.10"
+tokio-util = "0.7.12"
 socket2 = { version = "0.5", features = ["all"] }
 reqwest = { version = "0.12", default-features = false, features = [
   "blocking",
@@ -143,7 +143,7 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["serde", "dnssec-ring"]}
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["serde"]}
 hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = [
   "serde",
   "system-config",
@@ -162,7 +162,7 @@ lru = { version = "0.12", default-features = false }
 chrono = { version = "0.4.38", features = ["serde"]}
 surge-ping = "0.8.1"
 rand = "0.8.5"
-smallvec = "1.10.0"
+smallvec = "1.13.2"
 csv = "1.1"
 hostname = "0.3"
 byte-unit = { version = "5.0.3", features = ["serde"]}
@@ -171,7 +171,7 @@ which = { version = "6.0.1", optional = true }
 glob = "0.3.1"
 
 # process
-sysinfo = "0.29"
+sysinfo = { version = "0.32", default-features = false, features = ["system"]}
 
 # proxy
 async-socks5 = { version = "0.6.0", git = "https://github.com/mokeyish/async-socks5.git", rev = "f78eec5" }
@@ -189,25 +189,25 @@ local-ip-address = "0.6.1"
 console = { version = "0.15.8", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-users = { version = "0.11", default-features = false }
+uzers = { version = "0.12", default-features = false }
 caps = "0.5.5"
-self_update = { version = "0.40.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.41.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
-self_update = { version = "0.40.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.41.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-self_update = { version = "0.40.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
+self_update = { version = "0.41.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
 
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.57", features = [
+windows = { version = "0.58", features = [
   "Win32_System_Console",
   "Win32_Foundation",
   "Win32_Networking", "Win32_Networking_WinSock", "Win32_System_IO", # set UDP_CONNRESET off
 ] }
 windows-service = "0.7.0"
-self_update = { version = "0.40.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
+self_update = { version = "0.41.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
 self-replace = { version = "1.3.7", optional = true }
 same-file = { version = "1", optional = true }
 

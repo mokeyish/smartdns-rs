@@ -4,7 +4,7 @@ use std::{
     process,
 };
 
-use sysinfo::{Pid, PidExt};
+use sysinfo::Pid;
 use thiserror::Error;
 
 pub struct ProcessGuard {
@@ -44,7 +44,7 @@ pub fn create<P: AsRef<Path>>(path: P) -> Result<ProcessGuard, ProcessGuardError
 }
 
 fn is_process_running(id: u32) -> bool {
-    use sysinfo::{ProcessRefreshKind, RefreshKind, System, SystemExt};
+    use sysinfo::{ProcessRefreshKind, RefreshKind, System};
     let sys = System::new_with_specifics(
         RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
     );
