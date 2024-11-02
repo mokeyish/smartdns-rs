@@ -1,7 +1,5 @@
 #[cfg(feature = "dns-over-https")]
 mod https;
-#[cfg(feature = "legacy_dns_server")]
-mod legacy;
 mod net;
 #[cfg(feature = "dns-over-quic")]
 mod quic;
@@ -30,10 +28,6 @@ use crate::{
     dns::{DnsRequest, SerialMessage},
 };
 
-#[cfg(feature = "legacy_dns_server")]
-pub use legacy::serve;
-
-#[cfg(not(feature = "legacy_dns_server"))]
 pub async fn serve(
     app: &Arc<App>,
     listener_config: &ListenerConfig,

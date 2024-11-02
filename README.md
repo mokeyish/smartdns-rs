@@ -5,7 +5,7 @@
 [![homebrew version](https://img.shields.io/homebrew/v/smartdns)](https://formulae.brew.sh/formula/smartdns)
 ![OS](https://img.shields.io/badge/os-Windows%20%7C%20MacOS%20%7C%20Linux-blue)
 
-[Docs](https://pymumu.github.io/smartdns/en/) • [Discord](https://discord.gg/SDhQSA72)
+[Docs](https://pymumu.github.io/smartdns/en/) •
 
 English | [中文](https://github.com/mokeyish/smartdns-rs/blob/main/README_zh-CN.md)
 

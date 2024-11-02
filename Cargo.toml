@@ -48,7 +48,6 @@ dns-over-https = ["dns-over-https-rustls"]
 dns-over-quic = [
   "hickory-proto/dns-over-quic",
   "hickory-resolver/dns-over-quic",
-  "hickory-server/dns-over-quic"
 ]
 dns-over-h3 = [
   "hickory-proto/dns-over-h3",
@@ -58,7 +57,6 @@ dns-over-h3 = [
 dns-over-https-rustls = [
   "hickory-proto/dns-over-https-rustls",
   "hickory-resolver/dns-over-https-rustls",
-  "hickory-server/dns-over-https-rustls",
 ]
 
 mdns = []
@@ -71,8 +69,6 @@ service = [
 nft = ["dep:which", "dep:either"]
 
 dnssec = ["hickory-proto/dnssec"]
-
-legacy_dns_server = ["dep:hickory-server"]
 
 experimental = ["experimental-trie", "experimental-phf"]
 
@@ -147,12 +143,12 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["serde"]}
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["serde", "dnssec-ring"]}
 hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = [
   "serde",
   "system-config",
 ] }
-hickory-server = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["resolver"], optional = true }
+# hickory-server = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["resolver"], optional = true }
 quinn = { version = "0.11.2", default-features = false }
 
 # ssl
