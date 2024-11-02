@@ -25,9 +25,9 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
 
 [features]
 
-default = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "self-update" ]
+default = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "self-update" ]
 
-homebrew = ["dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all" ]
+homebrew = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all" ]
 
 nom-recipes-all =["nom-recipes-ip"]
 
@@ -40,6 +40,8 @@ nom-recipes-ipv6 = [
 failed_tests = []
 disable_icmp_ping = []
 self-update = ["dep:self_update"]
+
+resolve-cli = ["dep:console"]
 
 dns-over-tls = []
 dns-over-https = ["dns-over-https-rustls"]
@@ -96,7 +98,7 @@ rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1
 [dependencies]
 cfg-if = "1"
 clap = { version = "4.5", features = ["derive"] }
-clap-verbosity-flag = "2.2.0"
+clap-verbosity-flag = "2.2.2"
 thiserror = "1.0"
 anyhow = "1.0"
 once_cell = "1.16.0"
@@ -188,6 +190,7 @@ url = "2.5.2"
 # rnp = "0.1"
 boomphf = { version = "0.6.0", optional = true }
 local-ip-address = "0.6.1"
+console = { version = "0.15.8", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 users = { version = "0.11", default-features = false }

@@ -84,6 +84,10 @@ impl DnsUrl {
         self.ip = Some(ip)
     }
 
+    pub fn set_proto(&mut self, proto: Protocol) {
+        self.proto = proto;
+    }
+
     pub fn set_host(&mut self, name: &str) {
         match self.host() {
             Host::Ipv4(ip) => self.set_ip((*ip).into()),

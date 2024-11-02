@@ -36,6 +36,8 @@ mod libdns;
 mod log;
 mod preset_ns;
 mod proxy;
+#[cfg(feature = "resolve-cli")]
+mod resolver;
 mod rustls;
 mod server;
 #[cfg(feature = "service")]
@@ -171,6 +173,15 @@ impl Cli {
             #[cfg(feature = "self-update")]
             Commands::Update { yes, version } => {
                 updater::update(yes, version.as_deref()).unwrap();
+            }
+            #[cfg(feature = "resolve-cli")]
+            Commands::Resolve(command) => {
+                drop(_guard);
+                command.execute();
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                unimplemented!()
             }
         }
     }

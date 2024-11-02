@@ -1,11 +1,12 @@
-use std::ffi::OsString;
-use std::str::FromStr;
-
 use clap::Parser;
 use clap::Subcommand;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
+use std::ffi::OsString;
+use std::str::FromStr;
 
 use crate::log::{self, warn};
+#[cfg(feature = "resolve-cli")]
+use crate::resolver::ResolveCommand;
 
 type LogLevelDefault = InfoLevel;
 
@@ -25,14 +26,19 @@ impl Cli {
     pub fn parse() -> Self {
         match Self::try_parse() {
             Ok(cli) => cli,
-            Err(e) => match CompatibleCli::try_parse() {
-                Ok(cli) => cli.into(),
-                Err(_) => {
-                    // Since this is more of a development-time error, we aren't doing as fancy of a quit
-                    // as `get_matches`
-                    e.exit()
+            Err(e) => {
+                #[cfg(feature = "resolve-cli")]
+                if let Ok(resolve_command) = ResolveCommand::try_parse() {
+                    return resolve_command.into();
                 }
-            },
+
+                if let Ok(cli) = CompatibleCli::try_parse() {
+                    return cli.into();
+                }
+                // Since this is more of a development-time error, we aren't doing as fancy of a quit
+                // as `get_matches`
+                e.exit()
+            }
         }
     }
 
@@ -89,6 +95,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: ServiceCommands,
     },
+
+    /// Perform DNS resolution. Can be used in place of the standard OS resolution facilities.
+    #[cfg(feature = "resolve-cli")]
+    Resolve(ResolveCommand),
 
     /// Test configuration and exit
     Test {
@@ -169,6 +179,16 @@ impl From<CompatibleCli> for Cli {
         Self {
             command: Commands::Run { conf, pid },
             verbose: verbose0,
+        }
+    }
+}
+
+#[cfg(feature = "resolve-cli")]
+impl From<ResolveCommand> for Cli {
+    fn from(value: ResolveCommand) -> Self {
+        Self {
+            command: Commands::Resolve(value),
+            verbose: Default::default(),
         }
     }
 }

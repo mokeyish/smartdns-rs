@@ -2571,6 +2571,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap-verbosity-flag",
+ "console",
  "csv",
  "either",
  "enum_dispatch",
