@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::{ops::Deref, str::FromStr, time::Duration};
 
 use clap::Parser;
@@ -7,10 +8,7 @@ use console::{style, StyledObject};
 
 use crate::libdns::proto::{
     op::Message,
-    rr::{
-        DNSClass as QueryClass, Name as Domain, Record, RecordData, RecordType as QueryType,
-        RecordType,
-    },
+    rr::{DNSClass as QueryClass, Name as Domain, Record, RecordData, RecordType},
     xfer::Protocol as DnsOverProtocol,
 };
 
@@ -30,7 +28,7 @@ impl ResolveCommand {
             }
         }
         let domain = self.domain().clone();
-        let query_type = self.q_type();
+        let query_types = self.q_type();
 
         let palette = Colours::pretty();
 
@@ -50,17 +48,19 @@ impl ResolveCommand {
                     DnsClient::builder().build().await
                 };
 
-                let options = LookupOptions {
-                    record_type: query_type,
-                    ..Default::default()
-                };
+                for query_type in query_types {
+                    let options = LookupOptions {
+                        record_type: *query_type,
+                        ..Default::default()
+                    };
 
-                match dns_client.lookup(domain, options).await {
-                    Ok(res) => {
-                        print(&res, &palette);
-                    }
-                    Err(err) => {
-                        println!("{}", err);
+                    match dns_client.lookup(domain.clone(), options).await {
+                        Ok(res) => {
+                            print(&res, &palette);
+                        }
+                        Err(err) => {
+                            println!("{}", err);
+                        }
                     }
                 }
             });
@@ -100,7 +100,7 @@ pub struct ResolveCommand {
 
     /// is one of (a,any,mx,ns,soa,hinfo,axfr,txt,...)
     #[arg(value_name = "q-type", default_value = "a", value_parser = Self::parse_query_type)]
-    q_type: QueryType,
+    q_type: QueryTypes,
 
     /// is one of (in,hs,ch,...)
     #[arg(value_name = "q-class", default_value = "in", value_parser = Self::parse_query_class)]
@@ -112,13 +112,26 @@ pub struct ResolveCommand {
 }
 
 impl ResolveCommand {
+    pub fn parse() -> Self {
+        match Parser::try_parse() {
+            Ok(cli) => cli,
+            Err(e) => {
+                if let Ok(resolve_command) = ResolveCommand::try_parse() {
+                    return resolve_command;
+                }
+                e.exit()
+            }
+        }
+    }
+
     pub fn try_parse() -> Result<Self, String> {
         use DnsOverProtocol::*;
         let mut proto = None;
-        let mut q_type = None;
+        let mut q_types = vec![];
         let mut q_class = None;
         let mut domain = None;
         let mut global_server = None;
+        let mut prev_parsing_qtype = false;
 
         for arg in std::env::args().skip(1) {
             if arg == "resolve" {
@@ -159,11 +172,18 @@ impl ResolveCommand {
                 continue;
             }
 
-            if q_type.is_none() {
-                if let Ok(t) = Self::parse_query_type(arg.as_str()) {
-                    q_type = Some(t);
+            if q_types.is_empty() {
+                if let Ok(t) = Self::parse_query_type(&arg) {
+                    q_types = t.0;
+                    prev_parsing_qtype = true;
                     continue;
                 }
+            } else if prev_parsing_qtype {
+                if let Ok(t) = Self::parse_query_type(&arg) {
+                    q_types.extend(t.0);
+                    continue;
+                }
+                prev_parsing_qtype = false;
             }
 
             if q_class.is_none() {
@@ -179,6 +199,7 @@ impl ResolveCommand {
                     continue;
                 }
             }
+
             return Err(format!("Invalid argument {arg}"));
         }
 
@@ -186,7 +207,9 @@ impl ResolveCommand {
             return Err("domain is required".to_string());
         };
 
-        let q_type = q_type.unwrap_or(QueryType::A);
+        if q_types.is_empty() {
+            q_types.push(RecordType::A);
+        }
         let q_class = q_class.unwrap_or(QueryClass::IN);
 
         Ok(Self {
@@ -198,9 +221,25 @@ impl ResolveCommand {
             h3: matches!(proto, Some(H3)),
             global_server,
             domain,
-            q_type,
+            q_type: QueryTypes(q_types),
             q_class,
         })
+    }
+
+    pub fn is_resolve_cli() -> bool {
+        std::env::args()
+            .next()
+            .as_deref()
+            .map(Path::new)
+            .and_then(|s| s.file_stem())
+            .and_then(|s| s.to_str())
+            .map(|s| match s {
+                "dig" => true,
+                "nslookup" => true,
+                "resolve" => true,
+                _ => false,
+            })
+            .unwrap_or_default()
     }
 
     pub fn proto(&self) -> Option<DnsOverProtocol> {
@@ -230,8 +269,8 @@ impl ResolveCommand {
         &self.domain
     }
 
-    pub fn q_type(&self) -> QueryType {
-        self.q_type
+    pub fn q_type(&self) -> &[RecordType] {
+        &self.q_type.0
     }
 
     pub fn q_class(&self) -> QueryClass {
@@ -245,13 +284,37 @@ impl ResolveCommand {
             Err(format!("Invalid global server: {}", s))
         }
     }
-    fn parse_query_type(s: &str) -> Result<QueryType, String> {
-        QueryType::from_str(s.to_uppercase().as_str()).map_err(|e| e.to_string())
+    fn parse_query_type(s: &str) -> Result<QueryTypes, String> {
+        if s.contains("+") {
+            let mut types = Vec::new();
+            let mut last_err = None;
+            for t in s.split('+') {
+                match RecordType::from_str(t.to_uppercase().as_str()) {
+                    Ok(t) => types.push(t),
+                    Err(err) => last_err = Some(err),
+                }
+            }
+
+            if types.is_empty() {
+                return Err(last_err
+                    .map(|e| e.to_string())
+                    .unwrap_or("Invalid query type".to_string()));
+            }
+
+            Ok(QueryTypes(types))
+        } else {
+            RecordType::from_str(s.to_uppercase().as_str())
+                .map(|q| QueryTypes(vec![q]))
+                .map_err(|e| e.to_string())
+        }
     }
     fn parse_query_class(s: &str) -> Result<QueryClass, String> {
         QueryClass::from_str(s.to_uppercase().as_str()).map_err(|e| e.to_string())
     }
 }
+
+#[derive(Debug, Clone)]
+struct QueryTypes(Vec<RecordType>);
 
 fn print(message: &Message, palette: &Colours) {
     for r in message.answers() {

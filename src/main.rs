@@ -179,6 +179,25 @@ impl Cli {
                 drop(_guard);
                 command.execute();
             }
+            #[cfg(all(feature = "resolve-cli", any(unix, windows)))]
+            Commands::Symlink { link } => {
+                let original = std::env::current_exe().expect("failed to get current exe path");
+                if link.exists() {
+                    println!("link already exists");
+                    return;
+                }
+
+                #[cfg(unix)]
+                let res = std::os::unix::fs::symlink(original, link);
+
+                #[cfg(windows)]
+                let res = std::os::windows::fs::symlink_file(original, link);
+
+                match res {
+                    Ok(()) => println!("symlink created"),
+                    Err(err) => println!("failed to create symlink, {}", err),
+                }
+            }
             #[allow(unreachable_patterns)]
             _ => {
                 unimplemented!()

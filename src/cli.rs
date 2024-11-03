@@ -24,6 +24,11 @@ pub struct Cli {
 
 impl Cli {
     pub fn parse() -> Self {
+        #[cfg(feature = "resolve-cli")]
+        if ResolveCommand::is_resolve_cli() {
+            return ResolveCommand::parse().into();
+        }
+
         match Self::try_parse() {
             Ok(cli) => cli,
             Err(e) => {
@@ -96,9 +101,16 @@ pub enum Commands {
         command: ServiceCommands,
     },
 
-    /// Perform DNS resolution. Can be used in place of the standard OS resolution facilities.
+    /// Perform DNS resolution.
     #[cfg(feature = "resolve-cli")]
     Resolve(ResolveCommand),
+
+    /// Create a symbolic link to the Smart-DNS binary (drop-in replacement for `dig`, `nslookup`, `resolve` etc.)
+    #[cfg(feature = "resolve-cli")]
+    Symlink {
+        /// The path to the symlink to create.
+        link: std::path::PathBuf,
+    },
 
     /// Test configuration and exit
     Test {
