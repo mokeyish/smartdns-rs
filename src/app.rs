@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -338,7 +338,7 @@ async fn process(
     server_opts: ServerOpts,
 ) -> SerialMessage {
     use crate::libdns::proto::error::ProtoError;
-    use crate::libdns::proto::op::{Edns, Header, Message, MessageType, OpCode, ResponseCode};
+    use crate::libdns::proto::op::{Header, Message, MessageType, OpCode, ResponseCode};
 
     let addr = message.addr();
     let protocol = message.protocol();
@@ -349,36 +349,6 @@ async fn process(
                 MessageType::Query => {
                     match request.op_code() {
                         OpCode::Query => {
-                            let id = request.id();
-                            let qflags = request.header().flags();
-                            let qop_code = request.op_code();
-                            let message_type = request.message_type();
-                            let is_dnssec =
-                                request.extensions().as_ref().map_or(false, Edns::dnssec_ok);
-
-                            {
-                                let src_addr = request.src();
-                                let protocol = request.protocol();
-                                let query = request.query();
-                                let query_name = query.name();
-                                let query_type = query.query_type();
-                                let query_class = query.query_class();
-                                log::debug!(
-                                    "request:{id} src:{proto}://{addr}#{port} type:{message_type} dnssec:{is_dnssec} {op}:{query}:{qtype}:{class} qflags:{qflags}",
-                                    id = id,
-                                    proto = protocol,
-                                    addr = src_addr.ip(),
-                                    port = src_addr.port(),
-                                    message_type= message_type,
-                                    is_dnssec = is_dnssec,
-                                    op = qop_code,
-                                    query = query_name,
-                                    qtype = query_type,
-                                    class = query_class,
-                                    qflags = qflags,
-                                );
-                            }
-
                             // start process
                             let request_header = request.header();
                             let mut response_header = Header::response_from_request(request_header);
@@ -387,18 +357,42 @@ async fn process(
                             response_header.set_authoritative(false);
 
                             let response = {
+                                let start = Instant::now();
                                 let res = handler.search(&request, &server_opts).await;
+
+                                log::debug!(
+                                    "{}Request: {:?}",
+                                    if server_opts.is_background {
+                                        "Background"
+                                    } else {
+                                        ""
+                                    },
+                                    request
+                                );
                                 match res {
-                                    Ok(lookup) => lookup,
+                                    Ok(lookup) => {
+                                        log::debug!(
+                                            "Response: {}, Duration: {:?}",
+                                            lookup.deref(),
+                                            start.elapsed()
+                                        );
+                                        lookup
+                                    }
                                     Err(e) => {
                                         if e.is_nx_domain() {
+                                            log::debug!("{}Response: error resolving: NXDomain, Duration: {:?}", if server_opts.is_background { "Background"} else { "" }, start.elapsed());
                                             response_header
                                                 .set_response_code(ResponseCode::NXDomain);
                                         }
                                         match e.as_soa() {
                                             Some(soa) => soa,
                                             None => {
-                                                log::debug!("error resolving: {}", e);
+                                                log::debug!(
+                                                    "{}Response: error resolving: {}, Duration: {:?}",
+                                                    if server_opts.is_background { "Background"} else { "" },
+                                                    e,
+                                                    start.elapsed()
+                                                );
                                                 DnsResponse::empty()
                                             }
                                         }

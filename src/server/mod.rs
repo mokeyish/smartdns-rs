@@ -8,7 +8,7 @@ mod tcp;
 mod tls;
 mod udp;
 
-use crate::libdns::proto::op::{Header, Message, ResponseCode};
+use crate::libdns::proto::op::{Header, Message, MessageType, ResponseCode};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::Path,
@@ -218,6 +218,7 @@ impl DnsHandle {
             Err(_) => {
                 let mut response_header = Header::default();
                 response_header.set_response_code(ResponseCode::Refused);
+                response_header.set_message_type(MessageType::Response);
                 let mut response_message = Message::new();
                 response_message.set_header(response_header);
                 response_message.into()
