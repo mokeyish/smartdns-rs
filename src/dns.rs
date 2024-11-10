@@ -210,7 +210,7 @@ mod serial_message {
 
 mod request {
 
-    use std::{net::SocketAddr, ops::Deref, sync::Arc};
+    use std::{fmt::Debug, net::SocketAddr, ops::Deref, sync::Arc};
 
     use crate::libdns::{
         proto::{
@@ -298,6 +298,38 @@ mod request {
         }
     }
 
+    impl Debug for DnsRequest {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let id = self.id();
+            let src_addr = self.src();
+            let protocol = self.protocol();
+            let query = self.query();
+            let query_name = query.name();
+            let query_type = query.query_type();
+            let query_class = query.query_class();
+
+            let message_type = self.message_type();
+            let is_dnssec = self.is_dnssec();
+            let qop_code = self.op_code();
+            let qflags = self.flags();
+
+            write!(f,
+                "{id} src:{proto}://{addr}#{port} type:{message_type} dnssec:{is_dnssec} {op}:{query}:{qtype}:{class} qflags:{qflags}",
+                id = id,
+                proto = protocol,
+                addr = src_addr.ip(),
+                port = src_addr.port(),
+                message_type= message_type,
+                is_dnssec = is_dnssec,
+                op = qop_code,
+                query = query_name,
+                qtype = query_type,
+                class = query_class,
+                qflags = qflags,
+            )
+        }
+    }
+
     impl std::ops::Deref for DnsRequest {
         type Target = Message;
 
@@ -346,7 +378,7 @@ mod response {
 
     use crate::dns_client::MAX_TTL;
     use crate::libdns::proto::{
-        op::{self, Header, Message, Query},
+        op::{self, Header, Message, MessageType, Query},
         rr::{RData, Record},
     };
     use crate::libdns::resolver::TtlClip as _;
@@ -384,6 +416,7 @@ mod response {
         {
             use op::message::{update_header_counts, HeaderCounts};
             let mut message = Message::new();
+            message.set_message_type(MessageType::Response);
             message.add_query(query.clone());
             message.add_answers(records);
 

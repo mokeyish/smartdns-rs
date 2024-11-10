@@ -919,20 +919,19 @@ fn resolve_filepath<P: AsRef<Path>>(filepath: P, base_file: Option<&PathBuf>) ->
                 }
             }
         }
-    } else {
-        // try to resolve absolute path by extracting its file_name
-        if let Some(new_path) = filepath.file_name().map(|f| resolve_filepath(f, base_file)) {
-            if new_path.is_file() {
-                log::warn!(
-                    "File {} not found, but {} found",
-                    filepath.display(),
-                    new_path.display()
-                );
-                return new_path;
-            }
-        }
     }
 
+    // try to resolve absolute path by extracting its file_name
+    if let Some(new_path) = filepath.file_name().map(|f| resolve_filepath(f, base_file)) {
+        if new_path.is_file() {
+            log::warn!(
+                "File {} not found, but {} found",
+                filepath.display(),
+                new_path.display()
+            );
+            return new_path;
+        }
+    }
     filepath.to_path_buf()
 }
 
