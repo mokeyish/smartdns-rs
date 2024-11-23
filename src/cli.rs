@@ -56,10 +56,18 @@ impl Cli {
         let itr = itr.into_iter().collect::<Vec<_>>();
         match Self::try_parse_from(itr.clone()) {
             Ok(cli) => cli,
-            Err(e) => match CompatibleCli::try_parse_from(itr) {
-                Ok(cli) => cli.into(),
-                Err(_) => e.exit(),
-            },
+            Err(e) => {
+                #[cfg(feature = "resolve-cli")]
+                if let Ok(resolve_command) = ResolveCommand::try_parse_from(itr.clone()) {
+                    return resolve_command.into();
+                }
+
+                if let Ok(cli) = CompatibleCli::try_parse_from(itr) {
+                    return cli.into();
+                }
+
+                e.exit()
+            }
         }
     }
 
