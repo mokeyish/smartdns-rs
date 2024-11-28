@@ -224,7 +224,7 @@ anyhow = "1.0"
 
 [target.'cfg(target_os = "linux")'.build-dependencies]
 cc = "1.1"
-bindgen = "0.69.4"
+bindgen = "0.70.1"
 
 
 # Dev-dependencies are not used when compiling a package for building, but are used for compiling tests, examples, and benchmarks.
