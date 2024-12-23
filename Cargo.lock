@@ -136,7 +136,7 @@ checksum = "29faa5d4d308266048bd7505ba55484315a890102f9345b9ff4b87de64201592"
 dependencies = [
  "base64 0.13.1",
  "httparse",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -156,7 +156,7 @@ name = "async-socks5"
 version = "0.6.0"
 source = "git+https://github.com/mokeyish/async-socks5.git?rev=f78eec5#f78eec58e8befd8b9615364b96e06fb2f20e009d"
 dependencies = [
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -439,7 +439,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "190baaad529bcfbde9e1a19022c42781bdb6ff9de25721abdb8fd98c0807730b"
 dependencies = [
  "libc",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1121,7 +1121,7 @@ dependencies = [
  "rustls",
  "rustls-pemfile",
  "serde",
- "thiserror",
+ "thiserror 1.0.69",
  "time",
  "tinyvec",
  "tokio",
@@ -1148,7 +1148,7 @@ dependencies = [
  "rustls",
  "serde",
  "smallvec",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",
  "tracing",
@@ -1449,7 +1449,7 @@ checksum = "3669cf5561f8d27e8fc84cc15e58350e70f557d4d65f70e3154e54cd2f8e1782"
 dependencies = [
  "libc",
  "neli",
- "thiserror",
+ "thiserror 1.0.69",
  "windows-sys 0.59.0",
 ]
 
@@ -1886,7 +1886,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls",
  "socket2",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -1903,7 +1903,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "rustls",
  "slab",
- "thiserror",
+ "thiserror 1.0.69",
  "tinyvec",
  "tracing",
 ]
@@ -2553,7 +2553,7 @@ dependencies = [
  "socket2",
  "surge-ping",
  "sysinfo",
- "thiserror",
+ "thiserror 2.0.9",
  "tokio",
  "tokio-rustls",
  "tokio-util",
@@ -2616,7 +2616,7 @@ dependencies = [
  "pnet_packet",
  "rand",
  "socket2",
- "thiserror",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -2715,18 +2715,38 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.66"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d171f59dbaa811dbbb1aee1e73db92ec2b122911a48e1390dfe327a821ddede"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.69",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f072643fd0190df67a8bab670c20ef5d8737177d6ac6b2e9a236cb096206b2cc"
+dependencies = [
+ "thiserror-impl 2.0.9",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.66"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b08be0f17bd307950653ce45db00cd31200d82b624b36e181337d9c7d92765b5"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b50fa271071aae2e6ee85f842e2e28ba8cd2c5fb67f11fcb1fd70b276f9e7d4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3669,7 +3689,7 @@ dependencies = [
  "flate2",
  "indexmap",
  "memchr",
- "thiserror",
+ "thiserror 1.0.69",
  "time",
  "zopfli",
 ]
@@ -3682,7 +3702,7 @@ checksum = "6413a546ada9dbcd0b9a3e0b0880581279e35047bce9797e523b3408e1df607c"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
