@@ -337,13 +337,13 @@ async fn process(
     message: SerialMessage,
     server_opts: ServerOpts,
 ) -> SerialMessage {
-    use crate::libdns::proto::error::ProtoError;
     use crate::libdns::proto::op::{Header, Message, MessageType, OpCode, ResponseCode};
+    use crate::libdns::proto::ProtoError;
 
     let addr = message.addr();
     let protocol = message.protocol();
 
-    return match DnsRequest::try_from(message) {
+    match DnsRequest::try_from(message) {
         Ok(request) => {
             match request.message_type() {
                 MessageType::Query => {
@@ -408,6 +408,7 @@ async fn process(
                         OpCode::Status => todo!(),
                         OpCode::Notify => todo!(),
                         OpCode::Update => todo!(),
+                        OpCode::Unknown(_) => todo!(),
                     }
                 }
                 MessageType::Response => todo!(),
@@ -438,5 +439,5 @@ async fn process(
             SerialMessage::raw(response_message, addr, protocol)
         }
         _ => SerialMessage::raw(Default::default(), addr, protocol),
-    };
+    }
 }

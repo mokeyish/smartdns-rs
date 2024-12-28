@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use crate::config::ServerOpts;
 use crate::dns_conf::RuntimeConfig;
-use crate::libdns::proto::error::ProtoResult;
+use crate::libdns::proto::ProtoError;
 use crate::log;
 use crate::server::DnsHandle;
 use crate::{
@@ -649,7 +649,7 @@ use crate::libdns::proto::serialize::binary::{
 };
 
 impl BinEncodable for DnsCacheEntry<DnsResponse> {
-    fn emit(&self, encoder: &mut BinEncoder<'_>) -> ProtoResult<()> {
+    fn emit(&self, encoder: &mut BinEncoder<'_>) -> Result<(), ProtoError> {
         let res = &self.data;
 
         // message
@@ -683,7 +683,7 @@ impl BinEncodable for DnsCacheEntry<DnsResponse> {
 }
 
 impl<'r> BinDecodable<'r> for DnsCacheEntry {
-    fn read(decoder: &mut BinDecoder<'r>) -> ProtoResult<Self> {
+    fn read(decoder: &mut BinDecoder<'r>) -> Result<Self, ProtoError> {
         // message
         if !decoder.read_u8()?.verify(|v| *v == 1).is_valid() {
             return Err(DecodeError::InsufficientBytes.into());
@@ -737,7 +737,7 @@ impl DnsCacheEntry {
     fn serialize_many<'a>(
         entries: impl Iterator<Item = &'a DnsCacheEntry>,
         writer: &mut impl std::io::Write,
-    ) -> ProtoResult<()> {
+    ) -> Result<(), ProtoError> {
         let mut buf = vec![];
 
         for entry in entries {
@@ -750,7 +750,7 @@ impl DnsCacheEntry {
         Ok(())
     }
 
-    fn deserialize_many(data: &[u8]) -> ProtoResult<Vec<DnsCacheEntry>> {
+    fn deserialize_many(data: &[u8]) -> Result<Vec<DnsCacheEntry>, ProtoError> {
         let mut entries = vec![];
         let mut offset = 0;
 
@@ -842,7 +842,7 @@ mod tests {
     fn test_lookup_serde() {
         let lookups = vec![
             create_lookup(
-                "abc.exmample.com",
+                "abc.exmample.com.",
                 RData::A("127.0.0.1".parse().unwrap()),
                 30,
             ),

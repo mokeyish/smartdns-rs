@@ -150,7 +150,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
 
     fn parse_item<'a, T: NomParser>(
         keyword: &'static str,
-    ) -> impl FnMut(&'a str) -> IResult<&str, T> {
+    ) -> impl FnMut(&'a str) -> IResult<&'a str, T> {
         preceded(tuple((space0, tag_no_case(keyword), space1)), T::parse)
     }
 

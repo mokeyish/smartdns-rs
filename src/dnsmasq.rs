@@ -179,7 +179,8 @@ fn read_lease_file<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::libdns::resolver::TryParseIp;
+
+    use crate::libdns::resolver::IntoName;
 
     use super::*;
 
@@ -229,7 +230,9 @@ mod tests {
 
         assert_eq!(
             store.lookup(&"iphone-abc".parse().unwrap(), RecordType::AAAA),
-            "2402:4e00:1013:e500:0:9671:f018:4947".try_parse_ip()
+            "2402:4e00:1013:e500:0:9671:f018:4947"
+                .to_ip()
+                .map(|s| s.into())
         );
 
         assert_eq!(
@@ -244,7 +247,9 @@ mod tests {
 
         assert_eq!(
             store.lookup(&"iphone-abc.".parse().unwrap(), RecordType::AAAA),
-            "2402:4e00:1013:e500:0:9671:f018:4947".try_parse_ip()
+            "2402:4e00:1013:e500:0:9671:f018:4947"
+                .to_ip()
+                .map(|s| s.into())
         );
 
         assert_eq!(
@@ -259,7 +264,9 @@ mod tests {
 
         assert_eq!(
             store.lookup(&"iphone-abc.xyz.".parse().unwrap(), RecordType::AAAA),
-            "2402:4e00:1013:e500:0:9671:f018:4947".try_parse_ip()
+            "2402:4e00:1013:e500:0:9671:f018:4947"
+                .to_ip()
+                .map(|s| s.into())
         );
 
         assert_eq!(

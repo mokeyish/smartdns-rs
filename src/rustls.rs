@@ -64,10 +64,7 @@ impl TlsClientConfigBundle {
         };
 
         let certs = {
-            let certs1 = rustls_native_certs::load_native_certs().unwrap_or_else(|err| {
-                warn!("load native certs failed.{}", err);
-                Default::default()
-            });
+            let certs1 = rustls_native_certs::load_native_certs().certs;
 
             let certs2 = paths
                 .iter()
@@ -190,13 +187,13 @@ pub fn load_certificate_and_key(
         .certificate
         .as_deref()
         .or(cert_file)
-        .ok_or_else(|| Error::CertificatePathNotDefined(typ))?;
+        .ok_or(Error::CertificatePathNotDefined(typ))?;
 
     let certificate_key_path = ssl_config
         .certificate_key
         .as_deref()
         .or(key_file)
-        .ok_or_else(|| Error::CertificateKeyPathNotDefined(typ))?;
+        .ok_or(Error::CertificateKeyPathNotDefined(typ))?;
 
     if let Some(server_name) = ssl_config.server_name.as_deref() {
         log::info!(

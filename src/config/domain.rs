@@ -1,6 +1,5 @@
-use std::ops::Deref;
-
 use crate::libdns::proto::rr::Name;
+use std::ops::Deref;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WildcardName {
@@ -33,9 +32,9 @@ impl WildcardName {
     pub fn is_match(&self, name: &Name) -> bool {
         match self {
             WildcardName::Default(n) => n.zone_of(name),
-            WildcardName::Suffix(n) => n != name && n.zone_of(name),
-            WildcardName::Sub(n) => n == &name.base_name(),
-            WildcardName::Full(n) => n == name,
+            WildcardName::Suffix(n) => !n.eq_ignore_root_case(name) && n.zone_of(name),
+            WildcardName::Sub(n) => n.eq_ignore_root_case(&name.base_name()),
+            WildcardName::Full(n) => n.eq_ignore_root_case(name),
         }
     }
 }

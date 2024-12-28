@@ -14,17 +14,17 @@ use crate::dns_conf::RuntimeConfig;
 pub use crate::dns_rule::DomainRuleGetter;
 
 pub use crate::libdns::proto::{
-    error::ProtoErrorKind,
     op,
     rr::{self, rdata::SOA, Name, RData, Record, RecordType},
+    ProtoErrorKind,
 };
 
 pub use crate::libdns::{
     proto::xfer::Protocol,
     resolver::{
         config::{NameServerConfig, NameServerConfigGroup},
-        error::{ResolveError, ResolveErrorKind},
         lookup::Lookup,
+        ResolveError, ResolveErrorKind,
     },
 };
 
@@ -115,7 +115,7 @@ impl Default for LookupFrom {
 mod serial_message {
 
     use crate::dns_error::LookupError;
-    use crate::libdns::proto::error::ProtoError;
+    use crate::libdns::proto::ProtoError;
     use crate::libdns::Protocol;
     use crate::{config::ServerOpts, libdns::proto::op::Message};
     use bytes::Bytes;
@@ -214,9 +214,9 @@ mod request {
 
     use crate::libdns::{
         proto::{
-            error::ProtoError,
             op::{LowerQuery, Message, Query},
             rr::{Name, RecordType},
+            ProtoError,
         },
         Protocol,
     };
@@ -293,7 +293,7 @@ mod request {
             let rtype = self.query().query_type();
             self.extensions()
                 .as_ref()
-                .map(|e| e.dnssec_ok())
+                .map(|e| e.flags().dnssec_ok)
                 .unwrap_or(rtype.is_dnssec())
         }
     }

@@ -1,10 +1,10 @@
 use crate::dns::{DefaultSOA as _, DnsResponse};
 use crate::libdns::proto::{
-    error::{ProtoError, ProtoErrorKind},
     op::{Query, ResponseCode},
     rr::{rdata::SOA, Record},
+    ProtoError, ProtoErrorKind,
 };
-use crate::libdns::resolver::error::{ResolveError, ResolveErrorKind};
+use crate::libdns::resolver::{ResolveError, ResolveErrorKind};
 use std::{io, sync::Arc};
 use thiserror::Error;
 
@@ -79,6 +79,7 @@ impl LookupError {
             response_code: ResponseCode::ServFail,
             trusted: true,
             ns: None,
+            authorities: None,
         }
         .into()
     }

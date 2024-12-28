@@ -68,7 +68,7 @@ service = [
 
 nft = ["dep:which", "dep:either"]
 
-dnssec = ["hickory-proto/dnssec", "hickory-proto/dnssec-ring", "rustls/ring"]
+dnssec = [ "hickory-proto/dnssec-ring", "rustls/ring"]
 
 experimental = ["experimental-trie", "experimental-phf"]
 
@@ -89,13 +89,13 @@ hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
 # axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 # boomphf ={ path = "./target/patch/boomphf-0.6.0"}
-rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1.9.0.smartdns.1" }
+rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1.10.1.smartdns.1" }
 
 [dependencies]
 cfg-if = "1"
 clap = { version = "4.5", features = ["derive"] }
 clap-verbosity-flag = "2.2.2"
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 once_cell = "1.16.0"
 nom = "7.1.3"
@@ -143,8 +143,8 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["serde"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = [
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.6", version = "0.25.0-alpha.4", features = ["serde"]}
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.6", version = "0.25.0-alpha.4", features = [
   "serde",
   "system-config",
 ] }
@@ -155,7 +155,7 @@ quinn = { version = "0.11.2", default-features = false }
 webpki-roots = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"]  }
 rustls-pemfile = "2"
-rustls-native-certs = "0.7"
+rustls-native-certs = "0.8"
 
 lru = { version = "0.12", default-features = false }
 # time = "0.3"
@@ -167,7 +167,7 @@ csv = "1.1"
 hostname = "0.3"
 byte-unit = { version = "5.0.3", features = ["serde"]}
 ipnet = "2.7"
-which = { version = "6.0.1", optional = true }
+which = { version = "7.0.1", optional = true }
 glob = "0.3.1"
 
 # process
@@ -181,7 +181,7 @@ async-http-proxy = { version = "1.2.5", features = [
 ] }
 
 num-traits = "0.2.19"
-url = "2.5.2"
+url = "2.5.4"
 # regex = "1"
 # rnp = "0.1"
 boomphf = { version = "0.6.0", optional = true }
@@ -223,8 +223,8 @@ anyhow = "1.0"
 
 
 [target.'cfg(target_os = "linux")'.build-dependencies]
-cc = "1.1"
-bindgen = "0.69.4"
+cc = "1.2"
+bindgen = "0.70"
 
 
 # Dev-dependencies are not used when compiling a package for building, but are used for compiling tests, examples, and benchmarks.
