@@ -3,7 +3,7 @@ use super::*;
 impl NomParser for Name {
     fn parse(input: &str) -> IResult<&str, Self> {
         let name = is_not(" \n\t\\/|\"#',!+<>");
-        map_res(name, <Name as std::str::FromStr>::from_str)(input)
+        map_res(name, |s: &str| s.parse())(input)
     }
 }
 

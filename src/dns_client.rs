@@ -22,7 +22,6 @@ use crate::{
 
 use crate::libdns::{
     proto::{
-        error::{ProtoError, ProtoErrorKind, ProtoResult},
         op::{Edns, Message, MessageType, OpCode, Query},
         rr::{
             domain::{IntoName, Name},
@@ -30,12 +29,11 @@ use crate::libdns::{
             Record, RecordType,
         },
         xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
-        DnsHandle,
+        DnsHandle, ProtoError, ProtoErrorKind,
     },
     resolver::{
-        config::{ResolverOpts, ServerOrderingStrategy, TlsClientConfig},
+        config::{ResolverOpts, ServerOrderingStrategy},
         name_server::GenericConnector,
-        TryParseIp,
     },
 };
 
@@ -465,7 +463,7 @@ impl NameServer {
                 tls_client_config.normal
             };
 
-            (Some(url.host().to_string()), Some(TlsClientConfig(config)))
+            (Some(url.host().to_string()), Some(config))
         } else {
             (None, None)
         };
@@ -631,7 +629,7 @@ impl GenericResolver for NameServer {
         name: N,
         options: O,
     ) -> Result<DnsResponse, LookupError> {
-        use crate::libdns::proto::error::ProtoErrorKind;
+        use crate::libdns::proto::ProtoErrorKind;
         let name = name.into_name()?;
         let options: LookupOptions = options.into();
 
@@ -780,32 +778,13 @@ pub trait GenericResolver {
 
 #[async_trait::async_trait]
 pub trait GenericResolverExt {
-    /// Generic lookup for any RecordType
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - name of the record to lookup, if name is not a valid domain name, an error will be returned
-    /// * `record_type` - type of record to lookup, all RecordData responses will be filtered to this type
-    ///
-    /// # Returns
-    ///
-    //  A future for the returned Lookup RData
-    // async fn lookup<N: IntoName + Send>(
-    //     &self,
-    //     name: N,
-    //     record_type: RecordType,
-    // ) -> Result<Lookup, ResolveError>;
-
     /// Performs a dual-stack DNS lookup for the IP for the given hostname.
     ///
     /// See the configuration and options parameters for controlling the way in which A(Ipv4) and AAAA(Ipv6) lookups will be performed. For the least expensive query a fully-qualified-domain-name, FQDN, which ends in a final `.`, e.g. `www.example.com.`, will only issue one query. Anything else will always incur the cost of querying the `ResolverConfig::domain` and `ResolverConfig::search`.
     ///
     /// # Arguments
     /// * `host` - string hostname, if this is an invalid hostname, an error will be returned.
-    async fn lookup_ip<N: IntoName + TryParseIp + Send>(
-        &self,
-        host: N,
-    ) -> Result<DnsResponse, LookupError>;
+    async fn lookup_ip<N: IntoName + Send>(&self, host: N) -> Result<DnsResponse, LookupError>;
 }
 
 #[async_trait::async_trait]
@@ -814,18 +793,16 @@ where
     T: GenericResolver + Sync,
 {
     /// * `host` - string hostname, if this is an invalid hostname, an error will be returned.
-    async fn lookup_ip<N: IntoName + TryParseIp + Send>(
-        &self,
-        host: N,
-    ) -> Result<DnsResponse, LookupError> {
+    async fn lookup_ip<N: IntoName + Send>(&self, host: N) -> Result<DnsResponse, LookupError> {
         let mut finally_ip_addr: Option<Record> = None;
-        let maybe_ip = host.try_parse_ip();
-        let maybe_name: ProtoResult<Name> = host.into_name();
+        let maybe_ip = host.to_ip();
+        let maybe_name: Result<Name, ProtoError> = host.into_name();
 
         // if host is a ip address, return directly.
         if let Some(ip_addr) = maybe_ip {
+            let ip_addr = ip_addr.into();
             let name = maybe_name.clone().unwrap_or_default();
-            let record = Record::from_rdata(name.clone(), MAX_TTL, ip_addr.clone());
+            let record = Record::from_rdata(name.clone(), MAX_TTL, Clone::clone(&ip_addr));
 
             // if ndots are greater than 4, then we can't assume the name is an IpAddr
             //   this accepts IPv6 as well, b/c IPv6 can take the form: 2001:db8::198.51.100.35

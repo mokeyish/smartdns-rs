@@ -2,9 +2,7 @@ use super::{reap_tasks, sanitize_src_address, DnsHandle};
 use crate::{
     dns::SerialMessage,
     libdns::{
-        proto::{
-            error::ProtoError, runtime::TokioRuntimeProvider, udp::UdpStream, DnsStreamHandle,
-        },
+        proto::{runtime::TokioRuntimeProvider, udp::UdpStream, DnsStreamHandle, ProtoError},
         Protocol,
     },
     log,

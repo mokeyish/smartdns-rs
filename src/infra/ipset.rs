@@ -94,25 +94,25 @@ pub trait Contains<T> {
     fn contains(&self, other: T) -> bool;
 }
 
-impl<'a> Contains<&'a IpNet> for IpSet {
+impl Contains<&IpNet> for IpSet {
     fn contains(&self, other: &IpNet) -> bool {
         self.0.iter().any(|net| net.contains(other))
     }
 }
 
-impl<'a> Contains<&'a IpAddr> for IpSet {
+impl Contains<&IpAddr> for IpSet {
     fn contains(&self, other: &IpAddr) -> bool {
         self.0.iter().any(|net| net.contains(other))
     }
 }
 
-impl<'a> Contains<&'a Ipv4Addr> for IpSet {
+impl Contains<&Ipv4Addr> for IpSet {
     fn contains(&self, other: &Ipv4Addr) -> bool {
         self.contains(&IpAddr::V4(*other))
     }
 }
 
-impl<'a> Contains<&'a Ipv6Addr> for IpSet {
+impl Contains<&Ipv6Addr> for IpSet {
     fn contains(&self, other: &Ipv6Addr) -> bool {
         self.contains(&IpAddr::V6(*other))
     }

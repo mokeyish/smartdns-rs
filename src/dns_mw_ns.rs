@@ -596,6 +596,7 @@ async fn per_nameserver_lookup_ip(
                     negative_ttl: None,
                     response_code: ResponseCode::NoError,
                     trusted: false,
+                    authorities: None,
                 }
                 .into());
             }

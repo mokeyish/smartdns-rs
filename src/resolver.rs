@@ -261,12 +261,7 @@ impl ResolveCommand {
             .map(Path::new)
             .and_then(|s| s.file_stem())
             .and_then(|s| s.to_str())
-            .map(|s| match s {
-                "dig" => true,
-                "nslookup" => true,
-                "resolve" => true,
-                _ => false,
-            })
+            .map(|s| matches!(s, "dig" | "nslookup" | "resolve"))
             .unwrap_or_default()
     }
 
@@ -364,8 +359,8 @@ impl FromStr for Variant {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.starts_with('@') {
-            return Ok(Self::Server(s[1..].to_string()));
+        if let Some(s) = s.strip_prefix('@') {
+            return Ok(Self::Server(s.to_string()));
         }
 
         let upper = s.to_uppercase();
@@ -477,7 +472,7 @@ mod tests {
             ResolveCommand::try_parse_from(["dig", "example.com", "a"]).unwrap(),
             ResolveCommand {
                 domains: vec!["example.com".parse().unwrap()],
-                record_types: vec!["A"]
+                record_types: ["A"]
                     .iter()
                     .map(|s| s.parse())
                     .collect::<Result<Vec<RecordType>, _>>()
@@ -490,7 +485,7 @@ mod tests {
             ResolveCommand::try_parse_from(["dig", "example.com", "a+aaaa"]).unwrap(),
             ResolveCommand {
                 domains: vec!["example.com".parse().unwrap()],
-                record_types: vec!["A", "AAAA"]
+                record_types: ["A", "AAAA"]
                     .iter()
                     .map(|s| s.parse())
                     .collect::<Result<Vec<RecordType>, _>>()
@@ -503,7 +498,7 @@ mod tests {
             ResolveCommand::try_parse_from(["dig", "example.com", "a", "aaaa", "TXT"]).unwrap(),
             ResolveCommand {
                 domains: vec!["example.com".parse().unwrap()],
-                record_types: vec!["A", "AAAA", "TXT"]
+                record_types: ["A", "AAAA", "TXT"]
                     .iter()
                     .map(|s| s.parse())
                     .collect::<Result<Vec<RecordType>, _>>()
@@ -516,7 +511,7 @@ mod tests {
             ResolveCommand::try_parse_from(["dig", "example.com", "a", "aaaa", "in"]).unwrap(),
             ResolveCommand {
                 domains: vec!["example.com".parse().unwrap()],
-                record_types: vec!["A", "AAAA"]
+                record_types: ["A", "AAAA"]
                     .iter()
                     .map(|s| s.parse())
                     .collect::<Result<Vec<RecordType>, _>>()
@@ -531,7 +526,7 @@ mod tests {
                 .unwrap(),
             ResolveCommand {
                 domains: vec!["example.com".parse().unwrap()],
-                record_types: vec!["A", "AAAA"]
+                record_types: ["A", "AAAA"]
                     .iter()
                     .map(|s| s.parse())
                     .collect::<Result<Vec<RecordType>, _>>()
@@ -547,7 +542,7 @@ mod tests {
                 .unwrap(),
             ResolveCommand {
                 domains: vec!["example.com".parse().unwrap()],
-                record_types: vec!["A", "AAAA"]
+                record_types: ["A", "AAAA"]
                     .iter()
                     .map(|s| s.parse())
                     .collect::<Result<Vec<RecordType>, _>>()

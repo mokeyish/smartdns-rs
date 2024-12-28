@@ -159,7 +159,7 @@ mod tests {
             .iter()
             .flat_map(|r| r.data().as_ptr())
             .collect::<Vec<_>>();
-        assert_eq!(hostnames, vec![&PTR("hi.a1.".parse().unwrap())]);
+        assert_eq!(hostnames, vec![&PTR("hi.a1".parse().unwrap())]);
 
         let lookup = mock
             .lookup("2.2.2.2.in-addr.arpa.", RecordType::PTR)
@@ -169,7 +169,7 @@ mod tests {
             .iter()
             .flat_map(|r| r.data().as_ptr())
             .collect::<Vec<_>>();
-        assert_eq!(hostnames, vec![&PTR("hi.a2.".parse().unwrap())]);
+        assert_eq!(hostnames, vec![&PTR("hi.a2".parse().unwrap())]);
 
         Ok(())
     }
