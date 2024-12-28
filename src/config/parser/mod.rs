@@ -351,6 +351,18 @@ mod tests {
                 }))
             )
         );
+
+        assert_eq!(
+            parse_config("domain-set -n proxy-server -f proxy-server-list.txt").unwrap(),
+            (
+                "",
+                OneConfig::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
+                    name: "proxy-server".to_string(),
+                    file: Path::new("proxy-server-list.txt").to_path_buf(),
+                    content_type: Default::default(),
+                }))
+            )
+        );
     }
 
     #[test]

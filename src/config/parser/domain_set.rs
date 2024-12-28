@@ -150,6 +150,18 @@ mod tests {
     #[test]
     fn test_parse_file_provider() {
         assert_eq!(
+            DomainSetProvider::parse("-n proxy-server -f proxy-server-list.txt"),
+            Ok((
+                "",
+                DomainSetProvider::File(DomainSetFileProvider {
+                    name: "proxy-server".to_string(),
+                    file: PathBuf::from("proxy-server-list.txt"),
+                    content_type: Default::default(),
+                })
+            ))
+        );
+
+        assert_eq!(
             DomainSetProvider::parse("-name set -file /path/to/list"),
             Ok((
                 "",
