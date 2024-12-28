@@ -5,7 +5,7 @@ authors = ["YISH <mokeyish@hotmail.com>"]
 edition = "2021"
 rust-version = "1.75.0"
 
-keywords = ["DNS", "BIND", "dig", "named", "dnssec", "SmartDNS", "Dnsmasq"]
+keywords = ["DNS", "BIND", "dig", "SmartDNS", "Dnsmasq"]
 categories = ["network-programming"]
 
 description = """
@@ -14,7 +14,7 @@ A cross platform local DNS server written in rust to obtain the fastest website 
 
 homepage = "https://github.com/mokeyish/smartdns-rs"
 repository = "https://github.com/mokeyish/smartdns-rs"
-license = "GPL-v3.0"
+license = "GPL-3.0-only"
 readme = "README.md"
 
 [lints.rust]
