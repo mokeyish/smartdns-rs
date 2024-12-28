@@ -36,6 +36,10 @@ test *args: patch
 check *args: patch
   {{cargo}} check --workspace --tests --benches --examples {{args}}
 
+# Publish
+publish *args: patch
+  {{cargo}} publish --no-verify
+
 
 # Run clippy fix
 clippy: patch

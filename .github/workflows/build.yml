@@ -170,3 +170,9 @@ jobs:
             ${{ env.archive_file }}-sha256sum.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to crates.io
+        if: ${{ startsWith(inputs.version, 'v') && env.CARGO_REGISTRY_TOKEN }}
+        run: just publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
