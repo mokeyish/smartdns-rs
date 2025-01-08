@@ -209,21 +209,23 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                 .get(&query, Instant::now(), no_serve_expired)
                 .await;
 
-            if let Some(res) = cached_res.as_ref() {
-                let name_server_group = ctx.server_group_name();
+            match cached_res {
                 // check if it's the same nameserver group.
-                if matches!(res, Ok(res) if res.name_server_group() == Some(name_server_group)) {
-                    debug!(
-                        "name: {} {} using caching",
-                        query.name(),
-                        query.query_type()
-                    );
-                    ctx.source = LookupFrom::Cache;
-                    return res.clone();
+                Some((res, status)) if res.name_server_group() == Some(ctx.server_group_name()) => {
+                    if matches!(status, CacheStatus::Valid) {
+                        debug!(
+                            "name: {} {} using caching",
+                            query.name(),
+                            query.query_type()
+                        );
+                        ctx.source = LookupFrom::Cache;
+                        return Ok(res);
+                    } else {
+                        Some(res)
+                    }
                 }
+                _ => None,
             }
-
-            cached_res
         };
 
         let res = next.run(ctx, req).await;
@@ -254,11 +256,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                 Ok(lookup)
             }
             Err(err) => {
-                // try to return expired result.
-                if ctx.cfg().serve_expired() {
-                    if let Some(Ok(res)) = cached_res {
-                        return Ok(res);
-                    }
+                // fallback to expired result.
+                if let Some(res) = cached_res {
+                    return Ok(res);
                 }
                 Err(err)
             }
@@ -497,7 +497,7 @@ impl DnsCache {
         query: &Query,
         now: Instant,
         no_serve_expired: bool,
-    ) -> Option<Result<DnsResponse, DnsError>> {
+    ) -> Option<(DnsResponse, CacheStatus)> {
         let mut cache = match self.cache.try_lock() {
             Ok(t) => t,
             Err(err) => {
@@ -506,29 +506,28 @@ impl DnsCache {
             }
         };
 
-        let mut expired = false;
-        let lookup = cache.get_mut(query).and_then(|value| {
+        let lookup = cache.get_mut(query).map(|value| {
             value.stats.hit();
             if value.is_current(now) {
                 let mut res = value.data.clone();
                 res.set_max_ttl(value.ttl(now).as_secs() as u32);
-                Some(Ok(res))
-            } else if !no_serve_expired
-                && self.serve_expired
-                && value.is_current(now - Duration::from_secs(self.expired_ttl))
-            {
+                (res, CacheStatus::Valid)
+            } else {
                 let mut res = value.data.clone();
                 res.set_max_ttl(self.expired_reply_ttl as u32);
-                Some(Ok(res))
-            } else {
-                expired = true;
-                None
+                let status = if !no_serve_expired
+                    && self.serve_expired
+                    && value.is_current(now - Duration::from_secs(self.expired_ttl))
+                {
+                    CacheStatus::Valid
+                } else {
+                    CacheStatus::Expired
+                };
+
+                (res, status)
             }
         });
 
-        if expired {
-            cache.pop(query).unwrap();
-        }
         lookup
     }
 
@@ -575,6 +574,12 @@ impl DnsCache {
             (Vec::with_capacity(0), most_recent)
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CacheStatus {
+    Valid,
+    Expired,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -932,9 +937,8 @@ mod tests {
 
         assert!(res.is_some());
 
-        let res = res.unwrap();
+        let (lookup, _) = res.unwrap();
 
-        let lookup = res.unwrap();
         assert_eq!(lookup.query(), lookup1.data.query());
         assert_eq!(lookup.records(), lookup1.data.records());
     }
