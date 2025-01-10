@@ -109,12 +109,10 @@ pub async fn serve(
             let app = app.clone();
             https::serve(
                 app,
-                dns_handle,
                 https_listener,
-                certificate,
-                certificate_key,
-            )
-            .await?
+                dns_handle,
+                (certificate.clone(), certificate_key.clone_key()),
+            )?
         }
         #[cfg(feature = "dns-over-quic")]
         ListenerConfig::Quic(listener) => {

@@ -9,7 +9,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 pub type Certificate = CertificateDer<'static>;
 pub type PrivateKey = PrivateKeyDer<'static>;
 
-use rustls::ClientConfig;
+use rustls::{ClientConfig, ServerConfig};
 
 use crate::{
     config::SslConfig,
@@ -217,4 +217,32 @@ pub fn load_certificate_and_key(
     })?;
 
     Ok((certificate, certificate_key))
+}
+
+#[cfg(feature = "dns-over-rustls")]
+pub fn tls_server_config(
+    protocol: &[u8],
+    cert: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> Result<ServerConfig, io::Error> {
+    let mut config =
+        ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("error creating TLS acceptor: {e}"),
+                )
+            })?
+            .with_no_client_auth()
+            .with_single_cert(cert, key)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("error creating TLS acceptor: {e}"),
+                )
+            })?;
+
+    config.alpn_protocols = vec![protocol.to_vec()];
+    Ok(config)
 }
