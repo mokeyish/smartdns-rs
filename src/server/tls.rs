@@ -23,24 +23,24 @@ pub fn serve(
     timeout: Duration,
     certificate_and_key: (Vec<Certificate>, PrivateKey),
 ) -> io::Result<CancellationToken> {
-    use crate::libdns::proto::rustls::{tls_from_stream, tls_server};
+    use crate::libdns::proto::rustls::tls_from_stream;
+    use crate::rustls::tls_server_config;
     use tokio_rustls::TlsAcceptor;
 
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
 
-    let mut tls_config = tls_server::new_acceptor(certificate_and_key.0, certificate_and_key.1)
+    let tls_config = tls_server_config(b"dot", certificate_and_key.0, certificate_and_key.1)
         .map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
                 format!("error creating TLS acceptor: {e}"),
             )
         })?;
-    tls_config.alpn_protocols = vec![b"dot".to_vec()];
 
     let handler = handler.clone();
 
-    log::debug!("registered tcp: {:?}", listener);
+    log::debug!("registered TLS: {:?}", listener);
 
     let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
