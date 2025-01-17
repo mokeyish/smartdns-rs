@@ -502,7 +502,10 @@ impl NameServer {
             max_cocurrency: Arc::new(Semaphore::const_new(cocurrent.unwrap_or(1))),
             server: url.host().to_owned(),
             connections: Default::default(),
-            ip_addrs: Default::default(),
+            ip_addrs: url
+                .ip()
+                .map(|ip| RwLock::new(Arc::from([ip])))
+                .unwrap_or_default(),
             config,
             options: options.into(),
             connection_provider: provider,

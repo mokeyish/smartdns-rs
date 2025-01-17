@@ -136,6 +136,24 @@ impl NomParser for NameServerInfo {
                     "k" | "no-check-certificate" => {
                         nameserver.server.set_ssl_verify(false);
                     }
+                    "tls-host-verify" => match v {
+                        Some(tls_host_verify) => match nameserver.server.host() {
+                            url::Host::Ipv4(ipv4_addr) => {
+                                nameserver.server.set_ip(IpAddr::V4(*ipv4_addr));
+                                nameserver.server.set_host(tls_host_verify);
+                            }
+                            url::Host::Ipv6(ipv6_addr) => {
+                                nameserver.server.set_ip(IpAddr::V6(*ipv6_addr));
+                                nameserver.server.set_host(tls_host_verify);
+                            }
+                            url::Host::Domain(_) => {
+                                log::warn!("tls-host-verify expects an ip address host");
+                            }
+                        },
+                        None => {
+                            log::warn!("expect tls-host-verify")
+                        }
+                    },
                     _ => {
                         log::warn!("unknown server options: {}, {:?}", k, v);
                     }
