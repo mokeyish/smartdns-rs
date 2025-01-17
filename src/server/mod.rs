@@ -194,7 +194,8 @@ impl DnsHandle {
         )
     }
 
-    pub async fn send(&self, message: SerialMessage) -> SerialMessage {
+    pub async fn send<T: Into<SerialMessage>>(&self, message: T) -> SerialMessage {
+        let message = message.into();
         let (tx, rx) = oneshot::channel();
 
         if let Err(err) = self.sender.send((message, self.opts.clone(), tx)).await {

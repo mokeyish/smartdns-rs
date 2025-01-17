@@ -35,7 +35,7 @@ pub struct DnsCacheMiddleware {
     cfg: Arc<RuntimeConfig>,
     cache: Arc<DnsCache>,
     prefetch_notify: Arc<DomainPrefetchingNotify>,
-    bg_client: DnsHandle,
+    client: DnsHandle,
 }
 
 impl DnsCacheMiddleware {
@@ -76,9 +76,8 @@ impl DnsCacheMiddleware {
             cfg: cfg.clone(),
             cache: Arc::new(cache),
             prefetch_notify: Arc::new(DomainPrefetchingNotify::new()),
-            bg_client: dns_handle.with_new_opt(ServerOpts {
+            client: dns_handle.with_new_opt(ServerOpts {
                 is_background: true,
-                no_cache: Some(true),
                 ..Default::default()
             }),
         };
@@ -97,7 +96,7 @@ impl DnsCacheMiddleware {
     fn start_prefetching(&self) {
         let prefetch_notify = self.prefetch_notify.clone();
 
-        let client = self.bg_client.clone();
+        let client = self.client.clone();
         let cache = self.cache.clone();
         tokio::spawn(async move {
             let min_interval = Duration::from_secs(
@@ -134,32 +133,9 @@ impl DnsCacheMiddleware {
                     if !expired.is_empty() {
                         for query in expired {
                             let client = client.clone();
-                            let cache = cache.cache();
-
                             tokio::spawn(async move {
                                 let now = Instant::now();
-                                let mut message = Message::new();
-                                message.add_query(query.clone());
-                                let serial_message = client.send(message.into()).await;
-
-                                if let Ok(message) = Message::try_from(serial_message) {
-                                    if let Some(entry) = cache.lock().await.peek_mut(&query) {
-                                        let data = message.into();
-                                        entry.set_data(data);
-                                        entry.set_valid_until(
-                                            Instant::now()
-                                                + Duration::from_secs(
-                                                    entry
-                                                        .data
-                                                        .min_ttl()
-                                                        .unwrap_or_default()
-                                                        .min(600)
-                                                        .into(),
-                                                ),
-                                        )
-                                    }
-                                }
-
+                                client.send(query.clone()).await;
                                 debug!(
                                     "Prefetch domain {} {}, elapsed {:?}",
                                     query.name(),
@@ -197,6 +173,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
         let query = req.query().original().to_owned();
 
         let cached_res = if ctx.server_opts.is_background {
+            // for background quering, we don't use cache
             None
         } else {
             let no_serve_expired = ctx
@@ -204,24 +181,50 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                 .get(|r| r.no_serve_expired)
                 .unwrap_or_default();
 
-            let cached_res = self
-                .cache
-                .get(&query, Instant::now(), no_serve_expired)
-                .await;
+            let cached_res = self.cache.get(&query, Instant::now()).await;
 
             match cached_res {
                 // check if it's the same nameserver group.
                 Some((res, status)) if res.name_server_group() == Some(ctx.server_group_name()) => {
-                    if matches!(status, CacheStatus::Valid) {
-                        debug!(
-                            "name: {} {} using caching",
-                            query.name(),
-                            query.query_type()
-                        );
-                        ctx.source = LookupFrom::Cache;
-                        return Ok(res);
-                    } else {
-                        Some(res)
+                    match status {
+                        CacheStatus::Valid => {
+                            // start backgroud query ?
+                            {
+                                let client = self.client.clone();
+                                let query = query.clone();
+                                tokio::spawn(async move {
+                                    client.send(query).await;
+                                });
+                            }
+
+                            debug!(
+                                "name: {} {} using caching",
+                                query.name(),
+                                query.query_type()
+                            );
+
+                            ctx.source = LookupFrom::Cache;
+                            return Ok(res);
+                        }
+                        CacheStatus::Expired if ctx.cfg().serve_expired() && !no_serve_expired => {
+                            // start backgroud query
+                            {
+                                let client = self.client.clone();
+                                let query = query.clone();
+                                tokio::spawn(async move {
+                                    client.send(query).await;
+                                });
+                            }
+
+                            debug!(
+                                "name: {} {} using caching",
+                                query.name(),
+                                query.query_type()
+                            );
+                            ctx.source = LookupFrom::Cache;
+                            return Ok(res);
+                        }
+                        _ => Some(res),
                     }
                 }
                 _ => None,
@@ -397,10 +400,15 @@ impl DnsCache {
             let cache = self.cache.clone();
             let lookup = lookup.clone();
             tokio::spawn(async move {
-                cache
-                    .lock()
-                    .await
-                    .put(query, DnsCacheEntry::new(lookup, valid_until));
+                let mut cache = cache.lock().await;
+
+                if let Some(entry) = cache.get_mut(&query) {
+                    entry.data = lookup;
+                    entry.valid_until = valid_until;
+                    entry.stats.hit();
+                } else {
+                    cache.put(query, DnsCacheEntry::new(lookup, valid_until));
+                }
             });
         }
 
@@ -492,12 +500,7 @@ impl DnsCache {
     }
 
     /// Based on the query, see if there are any records available
-    async fn get(
-        &self,
-        query: &Query,
-        now: Instant,
-        no_serve_expired: bool,
-    ) -> Option<(DnsResponse, CacheStatus)> {
+    async fn get(&self, query: &Query, now: Instant) -> Option<(DnsResponse, CacheStatus)> {
         let mut cache = match self.cache.try_lock() {
             Ok(t) => t,
             Err(err) => {
@@ -515,16 +518,7 @@ impl DnsCache {
             } else {
                 let mut res = value.data.clone();
                 res.set_max_ttl(self.expired_reply_ttl as u32);
-                let status = if !no_serve_expired
-                    && self.serve_expired
-                    && value.is_current(now - Duration::from_secs(self.expired_ttl))
-                {
-                    CacheStatus::Valid
-                } else {
-                    CacheStatus::Expired
-                };
-
-                (res, status)
+                (res, CacheStatus::Expired)
             }
         });
 
@@ -901,7 +895,7 @@ mod tests {
 
         sleep(Duration::from_millis(500)).await;
 
-        assert!(cache.get(lookup1.data.query(), now, false).await.is_some());
+        assert!(cache.get(lookup1.data.query(), now).await.is_some());
 
         {
             let lru_cache = cache.cache();
@@ -933,7 +927,7 @@ mod tests {
             assert!(lru_cache.contains(lookup2.data.query()));
         };
 
-        let res = cache.get(lookup1.data.query(), now, false).await;
+        let res = cache.get(lookup1.data.query(), now).await;
 
         assert!(res.is_some());
 

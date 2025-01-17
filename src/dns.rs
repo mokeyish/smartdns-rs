@@ -115,7 +115,7 @@ impl Default for LookupFrom {
 mod serial_message {
 
     use crate::dns_error::LookupError;
-    use crate::libdns::proto::ProtoError;
+    use crate::libdns::proto::{op::Query, ProtoError};
     use crate::libdns::Protocol;
     use crate::{config::ServerOpts, libdns::proto::op::Message};
     use bytes::Bytes;
@@ -152,6 +152,14 @@ mod serial_message {
                 SerialMessage::Raw(_, a, _) => *a,
                 SerialMessage::Bytes(_, a, _) => *a,
             }
+        }
+    }
+
+    impl From<Query> for SerialMessage {
+        fn from(query: Query) -> Self {
+            let mut message = Message::new();
+            message.add_query(query);
+            message.into()
         }
     }
 
