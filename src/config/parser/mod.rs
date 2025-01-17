@@ -211,6 +211,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("domain"), OneConfig::Domain),
         map(parse_item("hosts-file"), OneConfig::HostsFile),
         map(parse_item("https-record"), OneConfig::HttpsRecord),
+        map(parse_item("ignore-ip"), OneConfig::IgnoreIp),
         map(parse_item("local-ttl"), OneConfig::LocalTtl),
         map(parse_item("log-console"), OneConfig::LogConsole),
         map(parse_item("log-file-mode"), OneConfig::LogFileMode),
