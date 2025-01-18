@@ -1,5 +1,6 @@
 use cfg_if::cfg_if;
 use ipnet::IpNet;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::File;
@@ -45,8 +46,10 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     pub fn load<P: AsRef<Path>>(path: Option<P>) -> Arc<Self> {
         if let Some(ref conf) = path {
-            let path = conf.as_ref();
-
+            let mut path = Cow::Borrowed(conf.as_ref());
+            if path.is_dir() {
+                path = Cow::Owned(path.join(format!("{}.conf", crate::NAME.to_lowercase())));
+            }
             RuntimeConfig::load_from_file(path)
         } else {
             #[cfg(feature = "service")]

@@ -25,9 +25,11 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
 
 [features]
 
-default = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "self-update" ]
+default = ["common", "self-update" ]
 
-homebrew = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all" ]
+homebrew = [ "common" ]
+
+common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn" ]
 
 nom-recipes-all =["nom-recipes-ip"]
 
@@ -75,6 +77,13 @@ nft = ["dep:which", "dep:either"]
 
 dnssec = [ "hickory-proto/dnssec-ring", "rustls/ring"]
 
+
+swagger-ui-cdn = []
+
+swagger-ui-embed = [
+  "dep:utoipa-swagger-ui"
+]
+
 experimental = ["experimental-trie", "experimental-phf"]
 
 experimental-trie = []
@@ -114,6 +123,9 @@ axum = { version = "0.8.1" }
 hyper = { version = "1.1.0", default-features = false }
 hyper-util = { version = "0.1.3", features = ["http2"]}
 tower = { version = "0.5.2", default-features = false }
+utoipa = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.1", package = "utoipa", features = ["axum_extras"] }
+utoipa-axum = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.1", package = "utoipa-axum", features = []}
+utoipa-swagger-ui = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.1", package = "utoipa-swagger-ui", optional = true, default-features = false, features = ["axum"] }
 
 # serde
 serde = { version = "1.0", features = ["derive"]}

@@ -1,31 +1,59 @@
 use std::net::SocketAddr;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use axum::body::Body;
+use axum::extract::Query;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{
     body::Bytes,
-    extract::{self, ConnectInfo, FromRequest, Request, State},
-    routing::any,
-    Router,
+    extract::{ConnectInfo, FromRequest, Request, State},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+use super::openapi::{
+    http::{get, post},
+    routes, IntoParams, IntoRouter, ToSchema,
+};
 use super::{ServeState, StatefulRouter};
 use crate::{dns::SerialMessage, libdns::Protocol, log};
 
 pub fn routes() -> StatefulRouter {
-    Router::new().route("/dns-query", any(serve_dns))
+    routes![serve_dns_get, serve_dns].into_router()
 }
 
-async fn serve_dns(
+#[get("/dns-query", params(QueryParam), responses(
+    (status = 200, description = "DNS response", body = DnsResponse)
+))]
+async fn serve_dns_get(
     State(state): State<Arc<ServeState>>,
-    extract::Query(parameters): extract::Query<HashMap<String, String>>,
+    Query(parameters): Query<QueryParam>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     req: Request,
 ) -> Response {
-    match process(&state, req, addr, parameters).await {
+    // https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-json/
+    match process(&state, req, addr, Some(parameters)).await {
+        Ok((content_type, bytes)) => {
+            let mut res = Body::from(bytes).into_response();
+            res.headers_mut()
+                .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+            res
+        }
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(r#"{{ "error": "{0}" }}"#, err),
+        )
+            .into_response(),
+    }
+}
+
+#[post("/dns-query")]
+async fn serve_dns(
+    State(state): State<Arc<ServeState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> Response {
+    match process(&state, req, addr, None).await {
         Ok((content_type, bytes)) => {
             let mut res = Body::from(bytes).into_response();
             res.headers_mut()
@@ -44,7 +72,7 @@ async fn process(
     state: &ServeState,
     req: Request,
     addr: SocketAddr,
-    parameters: HashMap<String, String>,
+    query_param: Option<QueryParam>,
 ) -> anyhow::Result<(&'static str, Bytes)> {
     const APPLICATION_DNS_MESSAGE: &str = "application/dns-message";
     const APPLICATION_JSON: &str = "application/json";
@@ -63,42 +91,35 @@ async fn process(
 
     let accept_dns_message = accept == APPLICATION_DNS_MESSAGE;
 
-    let req_msg = if !accept_dns_message && parameters.contains_key("name")
-        || parameters.contains_key("query")
-    {
-        // https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-json/
-        use crate::libdns::proto::{
-            op::{Edns, Message, Query},
-            rr::{Name, RecordType},
-        };
+    let req_msg = match query_param {
+        Some(query_param) if !accept_dns_message => {
+            // https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-json/
+            use crate::libdns::proto::{
+                op::{Edns, Message, Query},
+                rr::{Name, RecordType},
+            };
 
-        let name: Name = parameters
-            .get("name")
-            .or_else(|| parameters.get("query"))
-            .ok_or_else(|| anyhow::anyhow!("Query name is required"))?
-            .parse()?;
+            let name: Name = query_param.name.parse()?;
+            let query_type: RecordType = query_param.query_type.parse().unwrap_or(RecordType::A);
 
-        let query_type = match parameters.get("type") {
-            Some(s) => s.parse::<u16>().map(RecordType::from).or(s.parse())?,
-            None => RecordType::A,
-        };
+            let dnssec = query_param.dnssec;
+            let checking_disabled = query_param.checking_disabled;
 
-        let dnssec = matches!(parameters.get("do"), Some(s) if s == "true" || s == "1");
-        let checking_disabled = matches!(parameters.get("cd"), Some(s) if s == "true" || s == "1");
+            let mut message = Message::new();
+            message.add_query(Query::query(name, query_type));
+            message.set_checking_disabled(checking_disabled);
+            if dnssec {
+                let mut edns = Edns::new();
+                edns.set_dnssec_ok(dnssec);
+                message.set_edns(edns);
+            }
 
-        let mut message = Message::new();
-        message.add_query(Query::query(name, query_type));
-        message.set_checking_disabled(checking_disabled);
-        if dnssec {
-            let mut edns = Edns::new();
-            edns.set_dnssec_ok(dnssec);
-            message.set_edns(edns);
+            SerialMessage::raw(message, addr, Protocol::Https)
         }
-
-        SerialMessage::raw(message, addr, Protocol::Https)
-    } else {
-        let bytes = Bytes::from_request(req, &state).await?;
-        SerialMessage::binary(bytes.into(), addr, Protocol::Https)
+        _ => {
+            let bytes = Bytes::from_request(req, &state).await?;
+            SerialMessage::binary(bytes.into(), addr, Protocol::Https)
+        }
     };
 
     let res_msg = state.dns_handle.send(req_msg).await;
@@ -112,16 +133,40 @@ async fn process(
         };
         (
             APPLICATION_JSON,
-            serde_json::to_vec(&JsonMessage::from(message))?,
+            serde_json::to_vec(&DnsResponse::from(message))?,
         )
     };
 
     Ok((content_type, bytes.into()))
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, IntoParams)]
+struct QueryParam {
+    /// Query name
+    name: String,
+
+    /// Query type (either a numeric value or text ↗).
+    #[serde(default = "QueryParam::default_query_type", rename = "type")]
+    query_type: String,
+
+    /// DO bit - whether the client wants DNSSEC data (either empty or one of 0, false, 1, or true).
+    #[serde(default, rename = "do")]
+    dnssec: bool,
+
+    /// CD bit - disable validation (either empty or one of 0, false, 1, or true).
+    #[serde(default, rename = "cd")]
+    checking_disabled: bool,
+}
+
+impl QueryParam {
+    fn default_query_type() -> String {
+        "A".to_string()
+    }
+}
+
+#[derive(Serialize, ToSchema)]
 #[allow(non_snake_case)]
-struct JsonMessage {
+struct DnsResponse {
     /// The Response Code of the DNS Query
     status: u16,
 
@@ -157,13 +202,13 @@ struct JsonMessage {
     Answer: Vec<Answer>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct Question {
     name: String,
     r#type: u16,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[allow(non_snake_case)]
 struct Answer {
     name: String,
@@ -172,9 +217,9 @@ struct Answer {
     data: String,
 }
 
-impl From<crate::libdns::proto::op::Message> for JsonMessage {
+impl From<crate::libdns::proto::op::Message> for DnsResponse {
     fn from(message: crate::libdns::proto::op::Message) -> Self {
-        JsonMessage {
+        DnsResponse {
             status: message.response_code().into(),
             TC: message.truncated(),
             RD: message.recursion_desired(),
