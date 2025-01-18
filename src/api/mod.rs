@@ -1,12 +1,13 @@
-use std::sync::Arc;
-
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
+    Json,
 };
+use cfg_if::cfg_if;
+use openapi::Router;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 mod address;
 mod audit;
@@ -15,6 +16,7 @@ mod forward;
 mod listener;
 mod log;
 mod nameserver;
+mod openapi;
 mod serve_dns;
 mod settings;
 
@@ -27,10 +29,39 @@ pub struct ServeState {
     pub dns_handle: DnsHandle,
 }
 
-pub fn routes() -> StatefulRouter {
-    Router::new()
+pub fn routes() -> axum::Router<Arc<ServeState>> {
+    use utoipa::openapi::InfoBuilder;
+    let (router, mut openapi) = Router::new()
         .merge(serve_dns::routes())
         .nest("/api", api_routes())
+        .split_for_parts();
+    openapi.info = InfoBuilder::new()
+        .title(crate::NAME)
+        .version(crate::version())
+        .build();
+
+    cfg_if! {
+        if #[cfg(feature = "swagger-ui-cdn")]
+        {
+            router.merge(openapi::swagger_cdn("/api/docs", "/api/openapi.json", openapi, None))
+        }
+        else if #[cfg(feature = "swagger-ui-embed")]
+        {
+            use utoipa_swagger_ui::{Config, SwaggerUi};
+            router.merge(
+                SwaggerUi::new("/api/docs")
+                    .config(
+                        Config::default()
+                            .show_extensions(true)
+                            .show_common_extensions(true)
+                            .use_base_layout(),
+                    )
+                    .url("/api/openapi.json", openapi),
+            )
+        } else {
+            router
+        }
+    }
 }
 
 fn api_routes() -> StatefulRouter {

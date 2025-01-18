@@ -1,11 +1,18 @@
-use axum::extract::Request;
+use axum::{
+    extract::{connect_info::IntoMakeServiceWithConnectInfo, Request},
+    Router,
+};
 use hyper::body::Incoming;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server,
 };
 use std::{convert::Infallible, io, net::SocketAddr, sync::Arc};
-use tokio::{net, task::JoinSet};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net,
+    task::JoinSet,
+};
 use tokio_util::sync::CancellationToken;
 use tower::{Service as _, ServiceExt};
 
@@ -24,20 +31,19 @@ pub fn serve(
     app: Arc<App>,
     listener: net::TcpListener,
     dns_handle: DnsHandle,
-    certificate_and_key: (Vec<Certificate>, PrivateKey),
+    (cert, key): (Vec<Certificate>, PrivateKey),
 ) -> io::Result<CancellationToken> {
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
 
-    let tls_config = tls_server_config(b"h2", certificate_and_key.0, certificate_and_key.1)
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("error creating TLS acceptor: {e}"),
-            )
-        })?;
-
     log::debug!("registered HTTPS: {:?}", listener);
+
+    let tls_config = tls_server_config(b"h2", cert, key).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("error creating TLS acceptor: {e}"),
+        )
+    })?;
 
     let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
@@ -83,32 +89,15 @@ pub fn serve(
 
                 // perform the TLS
                 let tls_stream = tls_acceptor.accept(tcp_stream).await;
-
                 let socket = match tls_stream {
-                    Ok(tls_stream) => TokioIo::new(tls_stream),
+                    Ok(tls_stream) => tls_stream,
                     Err(e) => {
                         log::debug!("https handshake src: {} error: {}", src_addr, e);
                         return;
                     }
                 };
-
                 log::debug!("accepted HTTPS request from: {}", src_addr);
-
-                let tower_service = unwrap_infallible(make_service.call(src_addr).await);
-
-                let hyper_service =
-                    hyper::service::service_fn(move |request: Request<Incoming>| {
-                        tower_service.clone().oneshot(request)
-                    });
-
-                if let Err(err) = server::conn::auto::Builder::new(TokioExecutor::new())
-                    .http2()
-                    .enable_connect_protocol()
-                    .serve_connection_with_upgrades(socket, hyper_service)
-                    .await
-                {
-                    eprintln!("failed to serve connection: {err:#}");
-                }
+                serve_connection(&mut make_service, socket, src_addr).await;
             });
 
             reap_tasks(&mut inner_join_set);
@@ -116,6 +105,30 @@ pub fn serve(
     });
 
     Ok(token)
+}
+
+async fn serve_connection<I>(
+    make_service: &mut IntoMakeServiceWithConnectInfo<Router, SocketAddr>,
+    io: I,
+    src_addr: SocketAddr,
+) where
+    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let socket = TokioIo::new(io);
+    let tower_service = unwrap_infallible(make_service.call(src_addr).await);
+
+    let hyper_service = hyper::service::service_fn(move |request: Request<Incoming>| {
+        tower_service.clone().oneshot(request)
+    });
+
+    if let Err(err) = server::conn::auto::Builder::new(TokioExecutor::new())
+        .http2()
+        .enable_connect_protocol()
+        .serve_connection_with_upgrades(socket, hyper_service)
+        .await
+    {
+        eprintln!("failed to serve connection: {err:#}");
+    }
 }
 
 fn unwrap_infallible<T>(result: Result<T, Infallible>) -> T {

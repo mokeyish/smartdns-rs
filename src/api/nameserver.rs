@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
+use axum::{extract::State, response::IntoResponse, Json};
 
+use super::openapi::{http::get, routes, IntoRouter};
 use super::{IntoDataListPayload, ServeState, StatefulRouter};
 
 pub fn routes() -> StatefulRouter {
-    Router::new().route("/nameservers", get(nameservers))
+    routes![nameservers].into_router()
 }
 
+#[get("/nameservers")]
 async fn nameservers(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
     Json(
         state
