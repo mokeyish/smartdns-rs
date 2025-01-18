@@ -384,7 +384,7 @@ async fn process(
                                             response_header
                                                 .set_response_code(ResponseCode::NXDomain);
                                         }
-                                        match e.as_soa() {
+                                        match e.as_soa(request.query().original()) {
                                             Some(soa) => soa,
                                             None => {
                                                 log::debug!(
