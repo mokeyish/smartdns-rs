@@ -1,7 +1,6 @@
 use chrono::DateTime;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::num::NonZeroUsize;
@@ -401,7 +400,7 @@ impl DnsCache {
     ) -> DnsResponse {
         let len = records_and_ttl.len();
         // collapse the values, we're going to take the Minimum TTL as the correct one
-        let (mut records, ttl): (Vec<Record>, Duration) = records_and_ttl.into_iter().fold(
+        let (records, ttl): (Vec<Record>, Duration) = records_and_ttl.into_iter().fold(
             (Vec::with_capacity(len), Duration::from_secs(600)),
             |(mut records, mut min_ttl), (record, ttl)| {
                 records.push(record);
@@ -410,7 +409,6 @@ impl DnsCache {
                 (records, min_ttl)
             },
         );
-        records.sort();
 
         let valid_until = now + ttl;
 
@@ -458,7 +456,7 @@ impl DnsCache {
         let mut is_cname_query = false;
         // collect all records by name
         let records = records.fold(
-            HashMap::<Query, Vec<(Record, u32)>>::new(),
+            Vec::<(Query, Vec<(Record, u32)>)>::new(),
             |mut map, record| {
                 let mut query = Query::query(record.name().clone(), record.record_type());
                 query.set_query_class(record.dns_class());
@@ -469,7 +467,11 @@ impl DnsCache {
                     is_cname_query = true;
                 }
 
-                map.entry(query).or_default().push((record, ttl));
+                let val = (record, ttl);
+                match map.iter_mut().find(|e| e.0 == query) {
+                    Some(entry) => entry.1.push(val),
+                    None => map.push((query, vec![val])),
+                }
 
                 map
             },
@@ -845,6 +847,8 @@ impl PersistCache for LruCache<Query, DnsCacheEntry> {
 #[cfg(test)]
 mod tests {
 
+    use rr::rdata::{A, CNAME};
+
     use super::*;
 
     fn create_lookup(name: &str, data: RData, ttl: u64) -> DnsCacheEntry {
@@ -957,5 +961,63 @@ mod tests {
 
         assert_eq!(lookup.query(), lookup1.data.query());
         assert_eq!(lookup.records(), lookup1.data.records());
+    }
+
+    #[tokio::test]
+    async fn test_cache_record_ordering() {
+        let query = Query::query("www.vscode-unpkg.net.".parse().unwrap(), RecordType::A);
+        let records = [
+            Record::from_rdata(
+                "www.vscode-unpkg.net.".parse().unwrap(),
+                2028,
+                RData::CNAME(CNAME(
+                    "vscode-unpkg-gvgaavacadd3anb4.z01.azurefd.net."
+                        .parse()
+                        .unwrap(),
+                )),
+            ),
+            Record::from_rdata(
+                "vscode-unpkg-gvgaavacadd3anb4.z01.azurefd.net."
+                    .parse()
+                    .unwrap(),
+                2,
+                RData::CNAME(CNAME(
+                    "star-azurefd-prod.trafficmanager.net.".parse().unwrap(),
+                )),
+            ),
+            Record::from_rdata(
+                "star-azurefd-prod.trafficmanager.net.".parse().unwrap(),
+                32,
+                RData::CNAME(CNAME(
+                    "shed.dual-low.s-part-0031.t-0009.t-msedge.net."
+                        .parse()
+                        .unwrap(),
+                )),
+            ),
+            Record::from_rdata(
+                "shed.dual-low.s-part-0031.t-0009.t-msedge.net."
+                    .parse()
+                    .unwrap(),
+                32,
+                RData::CNAME(CNAME("s-part-0031.t-0009.t-msedge.net.".parse().unwrap())),
+            ),
+            Record::from_rdata(
+                "s-part-0031.t-0009.t-msedge.net.".parse().unwrap(),
+                32,
+                RData::A(A("13.107.246.59".parse().unwrap())),
+            ),
+        ];
+
+        let cache = DnsCache::new(10, true, 30, 5);
+
+        let now = Instant::now();
+
+        cache
+            .insert_records(query.clone(), records.iter().cloned(), now, "default")
+            .await;
+
+        tokio::task::yield_now().await;
+
+        assert!(cache.get(&query, now).await.unwrap().0.records() == records);
     }
 }
