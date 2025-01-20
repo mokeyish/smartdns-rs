@@ -235,6 +235,27 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
 
         match res {
             Ok(lookup) => {
+                if lookup
+                    .records()
+                    .iter()
+                    .all(|record| record.record_type() != query.query_type())
+                {
+                    // bypass cache when none of the answer records match the query type
+                    // example case:
+                    // ;; QUESTION SECTION:
+                    // ;secure.sndcdn.com.             IN      AAAA
+                    // ;; ANSWER SECTION:
+                    // secure.sndcdn.com.      7194    IN      CNAME   d10rxg6s8apbfh.cloudfront.net.
+                    // ;; AUTHORITY SECTION:
+                    // d10rxg6s8apbfh.cloudfront.net. 54 IN    SOA     ns-1776.awsdns-30.co.uk. awsdns-hostmaster.amazon.com. 1 7200 900 1209600 86400
+                    //
+                    // the AAAA request resolves to a CNAME, which in turn resolves to an
+                    // SOA record, which means no AAAA records where found, but the cache
+                    // only stores records from the answer section, so the SOA in the
+                    // the authority section is lost, leaving a broken response in cache
+                    return Ok(lookup);
+                }
+
                 if !ctx.no_cache {
                     let query = req.query().original().to_owned();
                     let server_group_name = ctx.server_group_name();
