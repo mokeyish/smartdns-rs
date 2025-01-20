@@ -401,7 +401,7 @@ impl DnsCache {
     ) -> DnsResponse {
         let len = records_and_ttl.len();
         // collapse the values, we're going to take the Minimum TTL as the correct one
-        let (records, ttl): (Vec<Record>, Duration) = records_and_ttl.into_iter().fold(
+        let (mut records, ttl): (Vec<Record>, Duration) = records_and_ttl.into_iter().fold(
             (Vec::with_capacity(len), Duration::from_secs(600)),
             |(mut records, mut min_ttl), (record, ttl)| {
                 records.push(record);
@@ -410,6 +410,7 @@ impl DnsCache {
                 (records, min_ttl)
             },
         );
+        records.sort();
 
         let valid_until = now + ttl;
 
