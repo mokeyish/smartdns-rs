@@ -1512,7 +1512,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -1954,6 +1954,15 @@ name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
+
+[[package]]
+name = "quick-xml"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11bafc859c6815fbaffbbbf4229ecb767ac913fecb27f9ad4343662e9ef099ea"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "quick-xml"
@@ -2472,6 +2481,27 @@ dependencies = [
 
 [[package]]
 name = "self_update"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "469a3970061380c19852269f393e74c0fe607a4e23d85267382cf25486aa8de5"
+dependencies = [
+ "hyper",
+ "indicatif",
+ "log",
+ "quick-xml 0.23.1",
+ "regex",
+ "reqwest",
+ "self-replace",
+ "semver",
+ "serde_json",
+ "tempfile",
+ "urlencoding",
+ "zip",
+ "zipsign-api",
+]
+
+[[package]]
+name = "self_update"
 version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d832c086ece0dacc29fb2947bb4219b8f6e12fe9e40b7108f9e57c4224e47b5c"
@@ -2481,7 +2511,7 @@ dependencies = [
  "hyper",
  "indicatif",
  "log",
- "quick-xml",
+ "quick-xml 0.37.2",
  "regex",
  "reqwest",
  "self-replace",
@@ -2490,7 +2520,6 @@ dependencies = [
  "tar",
  "tempfile",
  "urlencoding",
- "zip",
  "zipsign-api",
 ]
 
@@ -2522,9 +2551,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.135"
+version = "1.0.137"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b0d7ba2887406110130a978386c4e1befb98c674b4fba677954e4db976630d9"
+checksum = "930cfb6e6abf99298aaad7d29abbef7a9999a9a8806a40088f55f0dcec03146b"
 dependencies = [
  "itoa",
  "memchr",
@@ -2685,7 +2714,8 @@ dependencies = [
  "rustls-pemfile",
  "same-file",
  "self-replace",
- "self_update",
+ "self_update 0.41.0",
+ "self_update 0.42.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3445,7 +3475,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
