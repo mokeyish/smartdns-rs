@@ -384,7 +384,8 @@ async fn process(
                                             response_header
                                                 .set_response_code(ResponseCode::NXDomain);
                                         }
-                                        match e.as_soa(request.query().original()) {
+                                        let original = request.query().original();
+                                        match e.as_soa(original) {
                                             Some(soa) => soa,
                                             None => {
                                                 log::debug!(
@@ -393,7 +394,11 @@ async fn process(
                                                     e,
                                                     start.elapsed()
                                                 );
-                                                DnsResponse::empty()
+                                                response_header
+                                                    .set_response_code(ResponseCode::ServFail);
+                                                let mut res = DnsResponse::empty();
+                                                res.add_query(original.to_owned());
+                                                res
                                             }
                                         }
                                     }
