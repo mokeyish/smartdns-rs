@@ -165,6 +165,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("bind-cert-key-file"), OneConfig::BindCertKeyFile),
         map(parse_item("bind-cert-key-pass"), OneConfig::BindCertKeyPass),
         map(parse_item("blacklist-ip"), OneConfig::BlacklistIp),
+        map(parse_item("whitelist-ip"), OneConfig::WhitelistIp),
         map(parse_item("cache-file"), OneConfig::CacheFile),
         map(parse_item("cache-persist"), OneConfig::CachePersist),
         map(parse_item("cache-size"), OneConfig::CacheSize),
@@ -303,6 +304,17 @@ mod tests {
             (
                 "",
                 OneConfig::BlacklistIp("243.185.187.39/32".parse().unwrap())
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_whitelist_ip() {
+        assert_eq!(
+            parse_config("whitelist-ip  243.185.187.39").unwrap(),
+            (
+                "",
+                OneConfig::WhitelistIp("243.185.187.39/32".parse().unwrap())
             )
         );
     }
