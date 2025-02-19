@@ -15,7 +15,9 @@ mod file_mode;
 mod forward_rule;
 mod glob_pattern;
 mod https_record;
+mod ip_set;
 mod ipnet;
+mod iporset;
 mod listener;
 mod log_level;
 mod nameserver;
@@ -85,8 +87,8 @@ pub enum OneConfig {
     BindCertFile(PathBuf),
     BindCertKeyFile(PathBuf),
     BindCertKeyPass(String),
-    BlacklistIp(IpNet),
-    BogusNxDomain(IpNet),
+    BlacklistIp(IpOrSet),
+    BogusNxDomain(IpOrSet),
     CacheFile(PathBuf),
     CachePersist(bool),
     CacheSize(usize),
@@ -111,7 +113,7 @@ pub enum OneConfig {
     ForceQtypeSoa(RecordType),
     ForwardRule(ForwardRule),
     HostsFile(glob::Pattern),
-    IgnoreIp(IpNet),
+    IgnoreIp(IpOrSet),
     Listener(ListenerConfig),
     LocalTtl(u64),
     LogConsole(bool),
@@ -141,8 +143,9 @@ pub enum OneConfig {
     RrTtlReplyMax(u64),
     SpeedMode(Option<SpeedCheckModeList>),
     TcpIdleTime(u64),
-    WhitelistIp(IpNet),
+    WhitelistIp(IpOrSet),
     User(String),
+    IpSetProvider(IpSetProvider),
 }
 
 pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
@@ -251,6 +254,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("tcp-idle-time"), OneConfig::TcpIdleTime),
         map(parse_item("nftset"), OneConfig::NftSet),
         map(parse_item("user"), OneConfig::User),
+        map(parse_item("ip-set"), OneConfig::IpSetProvider),
         map(NomParser::parse, OneConfig::Listener),
         map(NomParser::parse, OneConfig::Server),
     ));
@@ -303,8 +307,13 @@ mod tests {
             parse_config("blacklist-ip  243.185.187.39").unwrap(),
             (
                 "",
-                OneConfig::BlacklistIp("243.185.187.39/32".parse().unwrap())
+                OneConfig::BlacklistIp(IpOrSet::Net("243.185.187.39/32".parse().unwrap()))
             )
+        );
+
+        assert_eq!(
+            parse_config("blacklist-ip ip-set:name").unwrap(),
+            ("", OneConfig::BlacklistIp(IpOrSet::Set("name".to_string())))
         );
     }
 
@@ -314,8 +323,13 @@ mod tests {
             parse_config("whitelist-ip  243.185.187.39").unwrap(),
             (
                 "",
-                OneConfig::WhitelistIp("243.185.187.39/32".parse().unwrap())
+                OneConfig::WhitelistIp(IpOrSet::Net("243.185.187.39/32".parse().unwrap()))
             )
+        );
+
+        assert_eq!(
+            parse_config("whitelist-ip ip-set:name").unwrap(),
+            ("", OneConfig::WhitelistIp(IpOrSet::Set("name".to_string())))
         );
     }
 
@@ -390,6 +404,20 @@ mod tests {
                         address: Some(AddressRuleValue::SOA),
                         ..Default::default()
                     }
+                })
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_ip_set() {
+        assert_eq!(
+            parse_config("ip-set -name name -file /path/to/file.txt").unwrap(),
+            (
+                "",
+                OneConfig::IpSetProvider(IpSetProvider {
+                    name: "name".to_string(),
+                    file: Path::new("/path/to/file.txt").to_path_buf(),
                 })
             )
         );

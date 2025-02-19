@@ -26,6 +26,7 @@ mod cache;
 mod domain;
 mod domain_rule;
 mod domain_set;
+mod ip_set;
 mod listener;
 mod log;
 mod nameserver;
@@ -39,6 +40,7 @@ pub use cache::*;
 pub use domain::*;
 pub use domain_rule::*;
 pub use domain_set::*;
+pub use ip_set::*;
 pub use listener::*;
 pub use log::*;
 pub use nameserver::*;
@@ -120,16 +122,16 @@ pub struct Config {
     pub cache: CacheConfig,
 
     /// List of hosts that supply bogus NX domain results
-    pub bogus_nxdomain: Vec<IpNet>,
+    pub bogus_nxdomain: Vec<IpOrSet>,
 
     /// List of IPs that will be filtered when nameserver is configured -blacklist-ip parameter
-    pub blacklist_ip: Vec<IpNet>,
+    pub blacklist_ip: Vec<IpOrSet>,
 
     /// List of IPs that will be accepted when nameserver is configured -whitelist-ip parameter
-    pub whitelist_ip: Vec<IpNet>,
+    pub whitelist_ip: Vec<IpOrSet>,
 
     /// List of IPs that will be ignored
-    pub ignore_ip: Vec<IpNet>,
+    pub ignore_ip: Vec<IpOrSet>,
 
     /// speed check mode
     ///
@@ -256,6 +258,15 @@ pub struct Config {
 
     pub resolv_file: Option<PathBuf>,
     pub domain_set_providers: HashMap<String, Vec<DomainSetProvider>>,
+
+    /// ip set
+    pub ip_sets: HashMap<String, Vec<IpNet>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpOrSet {
+    Net(IpNet),
+    Set(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
