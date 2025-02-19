@@ -609,10 +609,24 @@ impl RuntimeConfigBuilder {
             cfg.listeners.push(UdpListenerConfig::default().into())
         }
 
-        let bogus_nxdomain = Arc::new(IpSet::new(cfg.bogus_nxdomain.iter().copied()));
-        let blacklist_ip = Arc::new(IpSet::new(cfg.blacklist_ip.iter().copied()));
-        let whitelist_ip = Arc::new(IpSet::new(cfg.whitelist_ip.iter().copied()));
-        let ignore_ip = Arc::new(IpSet::new(cfg.ignore_ip.iter().copied()));
+        let make_ip_set = |set: &[IpOrSet]| {
+            let iter = set.iter().flat_map(|ip| match ip {
+                IpOrSet::Net(net) => std::slice::from_ref(net),
+                IpOrSet::Set(name) => match cfg.ip_sets.get(name) {
+                    Some(net) => &**net,
+                    None => {
+                        warn!("unknown ip-set:{name}");
+                        &[]
+                    }
+                },
+            });
+            Arc::new(IpSet::new(iter.copied()))
+        };
+
+        let bogus_nxdomain = make_ip_set(&cfg.bogus_nxdomain);
+        let blacklist_ip = make_ip_set(&cfg.blacklist_ip);
+        let whitelist_ip = make_ip_set(&cfg.whitelist_ip);
+        let ignore_ip = make_ip_set(&cfg.ignore_ip);
 
         if !cfg.cnames.is_empty() {
             cfg.cnames.dedup_by(|a, b| a.domain == b.domain);
@@ -879,6 +893,20 @@ impl RuntimeConfigBuilder {
                     self.proxy_servers.insert(v.name.clone(), v.config);
                 }
                 HostsFile(file) => self.hosts_file = Some(file),
+                IpSetProvider(p) => {
+                    let path = resolve_filepath(&p.file, self.conf_file.as_ref());
+                    match std::fs::read_to_string(path) {
+                        Ok(text) => {
+                            let net = self.ip_sets.entry(p.name.clone()).or_default();
+                            let len = net.len();
+                            net.extend(parse_ip_set_file(&text));
+                            log::info!("IpSet load {} records into {}", net.len() - len, p.name);
+                        }
+                        Err(err) => {
+                            log::error!("IpSet load failed {} {}", p.name, err);
+                        }
+                    }
+                }
                 MdnsLookup(enable) => self.mdns_lookup = Some(enable),
                 // #[allow(unreachable_patterns)]
                 // c => log::warn!("unhandled config {:?}", c),
@@ -1573,5 +1601,25 @@ mod tests {
         let cfg = RuntimeConfig::builder().with("https-record #").build();
         assert_eq!(cfg.https_records.len(), 1);
         assert_eq!(cfg.https_records[0].config, HttpsRecordRule::SOA);
+    }
+
+    #[test]
+    fn test_ip_set() {
+        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+
+        let v4: Vec<_> = include_str!("../tests/test_data/cf-ipv4.txt")
+            .lines()
+            .map(|line| line.parse().unwrap())
+            .collect();
+        let v6: Vec<_> = include_str!("../tests/test_data/cf-ipv6.txt")
+            .lines()
+            .map(|line| line.parse().unwrap())
+            .collect();
+        let all: [&[_]; 3] = [&["1.1.1.1/32".parse().unwrap()], &v4, &v6];
+        let all = IpSet::new(all.into_iter().flatten().copied());
+
+        assert_eq!(cfg.ip_sets["cf-ipv4"], v4);
+        assert_eq!(cfg.ip_sets["cf-ipv6"], v6);
+        assert_eq!(*cfg.whitelist_ip, all);
     }
 }
