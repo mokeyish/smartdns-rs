@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    infra::{file_mode::FileMode, ipset::IpSet},
+    infra::file_mode::FileMode,
     libdns::proto::rr::{
         rdata::{HTTPS, SRV},
         Name, RecordType,
@@ -120,16 +120,16 @@ pub struct Config {
     pub cache: CacheConfig,
 
     /// List of hosts that supply bogus NX domain results
-    pub bogus_nxdomain: IpSet,
+    pub bogus_nxdomain: Vec<IpNet>,
 
     /// List of IPs that will be filtered when nameserver is configured -blacklist-ip parameter
-    pub blacklist_ip: IpSet,
+    pub blacklist_ip: Vec<IpNet>,
 
     /// List of IPs that will be accepted when nameserver is configured -whitelist-ip parameter
-    pub whitelist_ip: IpSet,
+    pub whitelist_ip: Vec<IpNet>,
 
     /// List of IPs that will be ignored
-    pub ignore_ip: IpSet,
+    pub ignore_ip: Vec<IpNet>,
 
     /// speed check mode
     ///

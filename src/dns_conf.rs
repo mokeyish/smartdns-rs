@@ -609,10 +609,10 @@ impl RuntimeConfigBuilder {
             cfg.listeners.push(UdpListenerConfig::default().into())
         }
 
-        let bogus_nxdomain: Arc<IpSet> = cfg.bogus_nxdomain.compact().into();
-        let blacklist_ip: Arc<IpSet> = cfg.blacklist_ip.compact().into();
-        let whitelist_ip: Arc<IpSet> = cfg.whitelist_ip.compact().into();
-        let ignore_ip: Arc<IpSet> = cfg.ignore_ip.compact().into();
+        let bogus_nxdomain = Arc::new(IpSet::new(cfg.bogus_nxdomain.iter().copied()));
+        let blacklist_ip = Arc::new(IpSet::new(cfg.blacklist_ip.iter().copied()));
+        let whitelist_ip = Arc::new(IpSet::new(cfg.whitelist_ip.iter().copied()));
+        let ignore_ip = Arc::new(IpSet::new(cfg.ignore_ip.iter().copied()));
 
         if !cfg.cnames.is_empty() {
             cfg.cnames.dedup_by(|a, b| a.domain == b.domain);
@@ -844,10 +844,10 @@ impl RuntimeConfigBuilder {
                 LogFilter(v) => self.log.filter = Some(v),
                 LogSize(v) => self.log.size = Some(v),
                 MaxReplyIpNum(v) => self.max_reply_ip_num = Some(v),
-                BlacklistIp(v) => self.blacklist_ip += v,
-                BogusNxDomain(v) => self.bogus_nxdomain += v,
-                WhitelistIp(v) => self.whitelist_ip += v,
-                IgnoreIp(v) => self.ignore_ip += v,
+                BlacklistIp(v) => self.blacklist_ip.push(v),
+                BogusNxDomain(v) => self.bogus_nxdomain.push(v),
+                WhitelistIp(v) => self.whitelist_ip.push(v),
+                IgnoreIp(v) => self.ignore_ip.push(v),
                 CaFile(v) => self.ca_file = Some(v),
                 CaPath(v) => self.ca_path = Some(v),
                 ConfFile(v) => {
