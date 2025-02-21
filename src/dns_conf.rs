@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 pub use crate::config::*;
 use crate::dns::DomainRuleGetter;
+use crate::infra::ipset::IpMap;
 use crate::log;
 use crate::{
     dns_rule::{DomainRuleMap, DomainRuleTreeNode},
@@ -41,6 +42,8 @@ pub struct RuntimeConfig {
 
     /// List of IPs that will be ignored
     ignore_ip: Arc<IpSet>,
+
+    ip_alias: Arc<IpMap<Arc<[IpAddr]>>>,
 }
 
 impl RuntimeConfig {
@@ -337,6 +340,10 @@ impl RuntimeConfig {
         &self.ignore_ip
     }
 
+    pub fn ip_alias(&self) -> &Arc<IpMap<Arc<[IpAddr]>>> {
+        &self.ip_alias
+    }
+
     /// speed check mode
     #[inline]
     pub fn speed_check_mode(&self) -> Option<&SpeedCheckModeList> {
@@ -609,17 +616,21 @@ impl RuntimeConfigBuilder {
             cfg.listeners.push(UdpListenerConfig::default().into())
         }
 
-        let make_ip_set = |set: &[IpOrSet]| {
-            let iter = set.iter().flat_map(|ip| match ip {
+        fn get_ip_set<'a>(ip: &'a IpOrSet, cfg: &'a Config) -> &'a [IpNet] {
+            match ip {
                 IpOrSet::Net(net) => std::slice::from_ref(net),
                 IpOrSet::Set(name) => match cfg.ip_sets.get(name) {
-                    Some(net) => &**net,
+                    Some(net) => net,
                     None => {
                         warn!("unknown ip-set:{name}");
                         &[]
                     }
                 },
-            });
+            }
+        }
+
+        let make_ip_set = |set: &[IpOrSet]| {
+            let iter = set.iter().flat_map(|ip| get_ip_set(ip, &cfg));
             Arc::new(IpSet::new(iter.copied()))
         };
 
@@ -627,6 +638,12 @@ impl RuntimeConfigBuilder {
         let blacklist_ip = make_ip_set(&cfg.blacklist_ip);
         let whitelist_ip = make_ip_set(&cfg.whitelist_ip);
         let ignore_ip = make_ip_set(&cfg.ignore_ip);
+
+        let ip_alias = cfg.ip_alias.iter().flat_map(|alias| {
+            let to = std::iter::repeat(alias.to.clone());
+            get_ip_set(&alias.ip, &cfg).iter().copied().zip(to)
+        });
+        let ip_alias = Arc::new(IpMap::from_iter(ip_alias));
 
         if !cfg.cnames.is_empty() {
             cfg.cnames.dedup_by(|a, b| a.domain == b.domain);
@@ -752,6 +769,7 @@ impl RuntimeConfigBuilder {
             blacklist_ip,
             whitelist_ip,
             ignore_ip,
+            ip_alias,
             proxy_servers: Arc::new(proxy_servers),
         }
     }
@@ -908,6 +926,7 @@ impl RuntimeConfigBuilder {
                     }
                 }
                 MdnsLookup(enable) => self.mdns_lookup = Some(enable),
+                IpAlias(alias) => self.ip_alias.push(alias),
                 // #[allow(unreachable_patterns)]
                 // c => log::warn!("unhandled config {:?}", c),
             },
@@ -1621,5 +1640,16 @@ mod tests {
         assert_eq!(cfg.ip_sets["cf-ipv4"], v4);
         assert_eq!(cfg.ip_sets["cf-ipv6"], v6);
         assert_eq!(*cfg.whitelist_ip, all);
+    }
+
+    #[test]
+    fn test_ip_alias() {
+        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+        let addr = |s: &str| s.parse::<IpAddr>().unwrap();
+        let get_alias = |s: &str| &**cfg.ip_alias.get(&addr(s)).unwrap();
+
+        assert_eq!(get_alias("104.16.0.0"), [addr("1.2.3.4"), addr("::5678")]);
+        assert_eq!(get_alias("2400:cb00::"), [addr("::1234"), addr("5.6.7.8")]);
+        assert_eq!(get_alias("172.64.0.0"), [addr("90AB::CDEF")]);
     }
 }

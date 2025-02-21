@@ -15,6 +15,7 @@ mod file_mode;
 mod forward_rule;
 mod glob_pattern;
 mod https_record;
+mod ip_alias;
 mod ip_set;
 mod ipnet;
 mod iporset;
@@ -146,6 +147,7 @@ pub enum OneConfig {
     WhitelistIp(IpOrSet),
     User(String),
     IpSetProvider(IpSetProvider),
+    IpAlias(IpAlias),
 }
 
 pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
@@ -256,6 +258,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("user"), OneConfig::User),
         map(parse_item("whitelist-ip"), OneConfig::WhitelistIp),
         map(parse_item("ip-set"), OneConfig::IpSetProvider),
+        map(parse_item("ip-alias"), OneConfig::IpAlias),
         map(NomParser::parse, OneConfig::Listener),
         map(NomParser::parse, OneConfig::Server),
     ));
