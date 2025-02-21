@@ -5,7 +5,7 @@ use std::{borrow::Borrow, net::IpAddr, time::Duration};
 
 use crate::dns_client::{LookupOptions, NameServer};
 
-use crate::infra::ipset::IpSet;
+use crate::infra::ipset::{IpMap, IpSet};
 use crate::infra::ping::{PingError, PingOutput};
 use crate::third_ext::FutureTimeoutExt;
 use crate::{
@@ -123,6 +123,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     ignore_ip: cfg.ignore_ip().clone(),
                     blacklist_ip: cfg.blacklist_ip().clone(),
                     whitelist_ip: cfg.whitelist_ip().clone(),
+                    ip_alias: cfg.ip_alias().clone(),
                     lookup_options,
                 },
                 None => LookupIpOptions {
@@ -132,6 +133,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     ignore_ip: cfg.ignore_ip().clone(),
                     blacklist_ip: cfg.blacklist_ip().clone(),
                     whitelist_ip: cfg.whitelist_ip().clone(),
+                    ip_alias: cfg.ip_alias().clone(),
                     lookup_options,
                 },
             };
@@ -155,6 +157,7 @@ struct LookupIpOptions {
     ignore_ip: Arc<IpSet>,
     whitelist_ip: Arc<IpSet>,
     blacklist_ip: Arc<IpSet>,
+    ip_alias: Arc<IpMap<Arc<[IpAddr]>>>,
     lookup_options: LookupOptions,
 }
 
@@ -553,11 +556,12 @@ async fn per_nameserver_lookup_ip(
     let LookupIpOptions {
         whitelist_ip,
         blacklist_ip,
+        ip_alias,
         ignore_ip,
         ..
     } = options;
 
-    if !whitelist_on && !blacklist_on && ignore_ip.is_empty() {
+    if !whitelist_on && !blacklist_on && ignore_ip.is_empty() && ip_alias.is_empty() {
         return res;
     }
 
@@ -578,15 +582,29 @@ async fn per_nameserver_lookup_ip(
         Ok(mut lookup) => {
             let query = lookup.query().clone();
 
-            let answers = lookup
-                .answers()
-                .iter()
-                .filter(|record| match record.data().ip_addr() {
-                    Some(ip) => ip_filter(&ip),
-                    _ => false,
-                })
-                .cloned()
-                .collect::<Vec<_>>();
+            let answers = lookup.take_answers();
+            let answers = {
+                let mut new_ans = Vec::new();
+                let mut alias_set = Vec::new(); // dedup
+                for record in answers {
+                    let Some(ip) = record.data().ip_addr().filter(ip_filter) else {
+                        continue;
+                    };
+                    match ip_alias.get(&ip) {
+                        None => new_ans.push(record),
+                        Some(ip) if !alias_set.contains(&ip.as_ptr()) => {
+                            alias_set.push(ip.as_ptr());
+                            new_ans.extend(ip.iter().map(|&ip| {
+                                let mut record = record.clone();
+                                record.set_data(ip.into());
+                                record
+                            }));
+                        }
+                        Some(_) => continue,
+                    }
+                }
+                new_ans
+            };
 
             if answers.is_empty() {
                 return Err(ProtoErrorKind::NoRecordsFound {

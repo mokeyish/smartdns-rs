@@ -261,6 +261,14 @@ pub struct Config {
 
     /// ip set
     pub ip_sets: HashMap<String, Vec<IpNet>>,
+
+    pub ip_alias: Vec<IpAlias>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpAlias {
+    pub ip: IpOrSet,
+    pub to: Arc<[IpAddr]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
