@@ -29,7 +29,7 @@ default = ["common", "self-update" ]
 
 homebrew = [ "common" ]
 
-common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn" ]
+common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client" ]
 
 nom-recipes-all =["nom-recipes-ip"]
 
@@ -80,12 +80,25 @@ swagger-ui-embed = [
   "dep:utoipa-swagger-ui"
 ]
 
+
+http_client = [
+  "ureq"
+]
+
+ureq = [
+  "dep:ureq",
+  "self_update?/ureq", "self_update?/rustls"
+]
+
+reqwest = ["dep:reqwest", "self_update?/reqwest"]
+
 experimental = ["experimental-trie", "experimental-phf"]
 
 experimental-trie = []
 experimental-phf = [
   "dep:boomphf"
 ]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -99,7 +112,8 @@ hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
 # axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 # boomphf ={ path = "./target/patch/boomphf-0.6.0"}
-rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1.10.1.smartdns.1" }
+rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1.11.0.smartdns.1" }
+self_update = { git = "https://github.com/mokeyish/self_update.git", rev = "0.42.0.smartdns.1"}
 
 [dependencies]
 cfg-if = "1"
@@ -143,10 +157,12 @@ tokio = { version = "1.41", features = [
 tokio-rustls = { version = "0.26.0", default-features = false }
 tokio-util = "0.7.12"
 socket2 = { version = "0.5", features = ["all"] }
-reqwest = { version = "0.12", default-features = false, features = [
+http = "1"
+reqwest = { version = "0.12", optional = true, default-features = false, features = [
   "blocking",
   "rustls-tls",
 ] }
+ureq = { version = "3.0.6", optional = true, default-features = false, features = ["gzip", "json", "socks-proxy", "rustls"]}
 
 # log
 tracing = "0.1"
@@ -206,13 +222,13 @@ rangemap = "1.5.1"
 [target.'cfg(target_os = "linux")'.dependencies]
 uzers = { version = "0.12", default-features = false }
 caps = "0.5.5"
-self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
-self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-self_update = { version = "0.41.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
+self_update = { version = "0.42.0", default-features = false, features=["archive-zip", "compression-zip-deflate"], optional = true }
 
 
 [target.'cfg(windows)'.dependencies]
@@ -222,7 +238,7 @@ windows = { version = "0.58", features = [
   "Win32_Networking", "Win32_Networking_WinSock", "Win32_System_IO", # set UDP_CONNRESET off
 ] }
 windows-service = "0.7.0"
-self_update = { version = "0.41.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
+self_update = { version = "0.42.0", default-features = false, features=["archive-zip", "compression-zip-deflate"], optional = true }
 self-replace = { version = "1.3.7", optional = true }
 same-file = { version = "1", optional = true }
 
@@ -244,10 +260,10 @@ bindgen = "0.71"
 
 # Dev-dependencies are not used when compiling a package for building, but are used for compiling tests, examples, and benchmarks.
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = [
-  "blocking",
-  "rustls-tls",
-] }
+# reqwest = { version = "0.12", default-features = false, features = [
+#   "blocking",
+#   "rustls-tls",
+# ] }
 
 
 [profile.release]
