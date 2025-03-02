@@ -2729,7 +2729,7 @@ checksum = "7fcf8323ef1faaee30a44a340193b1ac6814fd9b7b4e88e9d4519a3e4abe1cfd"
 
 [[package]]
 name = "smartdns"
-version = "0.9.2-alpha.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "async-http-proxy",
