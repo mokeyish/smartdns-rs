@@ -159,7 +159,7 @@ impl FromIterator<WildcardName> for DomainSet {
 mod trie {
     use crate::third_ext::AsSlice;
     use std::{
-        collections::{hash_map::RandomState, HashMap},
+        collections::{HashMap, hash_map::RandomState},
         hash::{BuildHasher, Hash},
     };
 
@@ -555,7 +555,7 @@ mod benchmark {
         for name in domain_list.iter() {
             set.insert(name.clone());
         }
-        let set = phf::create_from_hashmap(set.0 .0);
+        let set = phf::create_from_hashmap(set.0.0);
         let set = &set;
 
         let domain_list = &domain_list;

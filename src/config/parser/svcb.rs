@@ -1,6 +1,6 @@
 use super::*;
 use crate::libdns::proto::rr::rdata::svcb::{
-    Alpn, EchConfigList, IpHint, SvcParamKey, SvcParamValue, SVCB,
+    Alpn, EchConfigList, IpHint, SVCB, SvcParamKey, SvcParamValue,
 };
 use crate::libdns::proto::rr::rdata::{A, AAAA};
 

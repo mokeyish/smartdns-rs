@@ -940,14 +940,18 @@ mod tests {
 
             assert_eq!(lru_cache.len(), 2);
 
-            assert!(lru_cache
-                .iter()
-                .map(|(q, _)| q)
-                .any(|q| q == lookup1.data.query()));
-            assert!(lru_cache
-                .iter()
-                .map(|(q, _)| q)
-                .any(|q| q == lookup2.data.query()));
+            assert!(
+                lru_cache
+                    .iter()
+                    .map(|(q, _)| q)
+                    .any(|q| q == lookup1.data.query())
+            );
+            assert!(
+                lru_cache
+                    .iter()
+                    .map(|(q, _)| q)
+                    .any(|q| q == lookup2.data.query())
+            );
 
             assert!(lru_cache.contains(lookup1.data.query()));
             assert!(lru_cache.contains(lookup2.data.query()));

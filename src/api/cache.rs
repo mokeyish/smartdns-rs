@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use super::openapi::{
+    IntoRouter,
     http::{get, post},
-    routes, IntoRouter,
+    routes,
 };
 use super::{IntoDataListPayload, ServeState, StatefulRouter};
 use crate::log;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 
 pub fn routes() -> StatefulRouter {
     let route1 = routes![flush_cache, caches].into_router();

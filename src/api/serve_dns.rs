@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::Query;
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{
     body::Bytes,
@@ -12,8 +12,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::openapi::{
+    IntoParams, IntoRouter, ToSchema,
     http::{get, post},
-    routes, IntoParams, IntoRouter, ToSchema,
+    routes,
 };
 use super::{ServeState, StatefulRouter};
 use crate::{dns::SerialMessage, libdns::Protocol, log};

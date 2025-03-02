@@ -7,15 +7,15 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     dns::SerialMessage,
     libdns::{
+        Protocol,
         proto::runtime::iocompat::AsyncIoTokioAsStd,
         proto::{tcp::TcpStream, xfer::DnsStreamHandle as _},
-        Protocol,
     },
     log,
     third_ext::FutureTimeoutExt,
 };
 
-use super::{reap_tasks, sanitize_src_address, DnsHandle};
+use super::{DnsHandle, reap_tasks, sanitize_src_address};
 
 pub fn serve(
     listener: net::TcpListener,

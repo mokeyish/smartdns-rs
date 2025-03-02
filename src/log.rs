@@ -1,18 +1,18 @@
 use std::{env, fmt, io, path::Path, sync::OnceLock};
 
 use tracing::{
+    Dispatch, Event, Subscriber,
     dispatcher::{set_default, set_global_default},
     subscriber::DefaultGuard,
-    Dispatch, Event, Subscriber,
 };
 use tracing_subscriber::{
+    EnvFilter,
     fmt::{
-        format, writer::MakeWriterExt, FmtContext, FormatEvent, FormatFields, FormattedFields,
-        MakeWriter,
+        FmtContext, FormatEvent, FormatFields, FormattedFields, MakeWriter, format,
+        writer::MakeWriterExt,
     },
     prelude::__tracing_subscriber_SubscriberExt,
     registry::LookupSpan,
-    EnvFilter,
 };
 
 static CONSOLE_LEVEL: OnceLock<Level> = OnceLock::new();

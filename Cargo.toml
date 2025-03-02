@@ -2,8 +2,8 @@
 name = "smartdns"
 version = "0.9.2-alpha.1"
 authors = ["YISH <mokeyish@hotmail.com>"]
-edition = "2021"
-rust-version = "1.75.0"
+edition = "2024"
+rust-version = "1.85.0"
 
 keywords = ["DNS", "BIND", "dig", "SmartDNS", "Dnsmasq"]
 categories = ["network-programming"]
@@ -45,26 +45,22 @@ self-update = ["dep:self_update"]
 
 resolve-cli = ["dep:console"]
 
-dns-over-tls = []
-dns-over-https = ["dns-over-https-rustls"]
+dns-over-tls = [
+  "hickory-proto/tls-ring",
+  "hickory-resolver/tls-ring",
+]
+dns-over-https = [
+  "hickory-proto/https-ring",
+  "hickory-resolver/https-ring"
+]
 dns-over-quic = [
-  "dns-over-rustls",
-  "hickory-proto/dns-over-quic",
-  "hickory-resolver/dns-over-quic",
+  "hickory-proto/quic-ring",
+  "hickory-resolver/quic-ring",
 ]
 dns-over-h3 = [
-  "dns-over-rustls",
-  "hickory-proto/dns-over-h3",
-  "hickory-resolver/dns-over-h3"
+  "hickory-proto/h3-ring",
+  "hickory-resolver/h3-ring"
 ]
-
-dns-over-https-rustls = [
-  "dns-over-rustls",
-  "hickory-proto/dns-over-https-rustls",
-  "hickory-resolver/dns-over-https-rustls",
-]
-
-dns-over-rustls = []
 
 mdns = []
 
@@ -162,12 +158,11 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.6", version = "0.25.0-alpha.4", features = ["serde"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.6", version = "0.25.0-alpha.4", features = [
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.7", features = ["serde"]}
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.7", features = [
   "serde",
   "system-config",
 ] }
-# hickory-server = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["resolver"], optional = true }
 quinn = { version = "0.11.2", default-features = false }
 
 # ssl
@@ -244,7 +239,7 @@ anyhow = "1.0"
 
 [target.'cfg(target_os = "linux")'.build-dependencies]
 cc = "1.2"
-bindgen = "0.70"
+bindgen = "0.71"
 
 
 # Dev-dependencies are not used when compiling a package for building, but are used for compiling tests, examples, and benchmarks.

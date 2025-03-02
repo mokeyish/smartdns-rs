@@ -188,10 +188,10 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<Vec<RDat
                 }
                 SOA if !no_rule_soa => return Some(vec![RData::default_soa()]),
                 SOAv4 if !no_rule_soa && query_type == A => {
-                    return Some(vec![RData::default_soa()])
+                    return Some(vec![RData::default_soa()]);
                 }
                 SOAv6 if !no_rule_soa && query_type == AAAA => {
-                    return Some(vec![RData::default_soa()])
+                    return Some(vec![RData::default_soa()]);
                 }
                 IGN => return None, // ignore rule
                 IGNv4 if query_type == A => return None,

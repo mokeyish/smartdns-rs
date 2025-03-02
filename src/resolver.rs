@@ -5,7 +5,7 @@ use std::{ops::Deref, str::FromStr, time::Duration};
 
 use clap::Parser;
 use console::Style;
-use console::{style, StyledObject};
+use console::{StyledObject, style};
 
 use crate::libdns::proto::{
     op::Message,

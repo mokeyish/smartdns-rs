@@ -253,7 +253,13 @@ mod tests {
             lookup_source: LookupFrom::Server("default".to_string()),
         };
 
-        assert_eq!(audit.to_string(), format!("[{}] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A", now.format("%Y-%m-%d %H:%M:%S,%3f")));
+        assert_eq!(
+            audit.to_string(),
+            format!(
+                "[{}] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A",
+                now.format("%Y-%m-%d %H:%M:%S,%3f")
+            )
+        );
     }
 
     #[test]
@@ -277,7 +283,10 @@ mod tests {
             lookup_source: LookupFrom::Server("default".to_string()),
         };
 
-        assert_eq!(audit.to_string_without_date(), "127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A");
+        assert_eq!(
+            audit.to_string_without_date(),
+            "127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A"
+        );
     }
 
     #[test]
@@ -320,7 +329,13 @@ mod tests {
             .read_to_string(&mut s)
             .unwrap();
 
-        assert_eq!(s, format!("[{}] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A\n", now.format("%Y-%m-%d %H:%M:%S,%3f")));
+        assert_eq!(
+            s,
+            format!(
+                "[{}] 127.0.0.1 query www.example.com, type: A, elapsed: 10ms, speed: 11ms, result 93.184.216.34 86400 A\n",
+                now.format("%Y-%m-%d %H:%M:%S,%3f")
+            )
+        );
 
         std::fs::remove_file(file).unwrap();
 
@@ -376,7 +391,10 @@ mod tests {
             .read_to_string(&mut s)
             .unwrap();
 
-        assert_eq!(s, "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n");
+        assert_eq!(
+            s,
+            "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n"
+        );
 
         record_audit_to_file(
             &mut MappedFile::open(file, 102400, None, Default::default()),
@@ -391,7 +409,10 @@ mod tests {
             .read_to_string(&mut s)
             .unwrap();
 
-        assert_eq!(s, "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n12,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default2\n");
+        assert_eq!(
+            s,
+            "id,timestamp,client,name,type,elapsed,speed,state,result,lookup_source\n11,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default1\n12,1668169091,127.0.0.1,www.example.com,A,10ms,11ms,success,93.184.216.34 86400 A,Server: default2\n"
+        );
 
         std::fs::remove_file(file).unwrap();
 

@@ -186,8 +186,8 @@ async fn lookup_ip(
     name: Name,
     options: &LookupIpOptions,
 ) -> Result<DnsResponse, LookupError> {
-    use futures_util::future::{select, select_all, Either};
     use ResponseMode::*;
+    use futures_util::future::{Either, select, select_all};
 
     assert!(options.record_type.is_ip_addr());
 
@@ -459,7 +459,7 @@ async fn multi_mode_ping_fastest(
     ip_addrs: Vec<IpAddr>,
     modes: Vec<SpeedCheckMode>,
 ) -> Option<IpAddr> {
-    use crate::infra::ping::{ping_fastest, PingOptions};
+    use crate::infra::ping::{PingOptions, ping_fastest};
     let duration = Duration::from_millis(200);
     let ping_ops = PingOptions::default().with_timeout_secs(2);
 
@@ -504,7 +504,7 @@ async fn multi_mode_ping(
     ip_addr: IpAddr,
     modes: Vec<SpeedCheckMode>,
 ) -> Result<PingOutput, PingError> {
-    use crate::infra::ping::{ping, PingOptions};
+    use crate::infra::ping::{PingOptions, ping};
     let duration = Duration::from_millis(200);
     let ping_ops = PingOptions::default().with_timeout_secs(2);
 

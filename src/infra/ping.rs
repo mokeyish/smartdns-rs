@@ -290,9 +290,9 @@ mod icmp {
     use std::{net::IpAddr, time::Duration};
 
     use rand::random;
-    use surge_ping::{Client, Config, IcmpPacket, PingIdentifier, PingSequence, Pinger, ICMP};
+    use surge_ping::{Client, Config, ICMP, IcmpPacket, PingIdentifier, PingSequence, Pinger};
 
-    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
+    use super::{PingAddr, PingError, PingOptions, PingOutput, do_agg};
 
     mod auto_sock_type {
         use cfg_if::cfg_if;
@@ -508,7 +508,7 @@ mod tcp {
 
     use crate::third_ext::FutureTimeoutExt;
 
-    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
+    use super::{PingAddr, PingError, PingOptions, PingOutput, do_agg};
 
     #[inline]
     pub async fn ping(sock_addr: SocketAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
@@ -590,7 +590,7 @@ mod tcp {
 }
 
 mod http {
-    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
+    use super::{PingAddr, PingError, PingOptions, PingOutput, do_agg};
     use crate::third_ext::FutureTimeoutExt;
     use std::net::SocketAddr;
     use std::time::{Duration, Instant};
@@ -675,7 +675,7 @@ mod https {
 
     use crate::third_ext::FutureTimeoutExt;
 
-    use super::{do_agg, PingAddr, PingError, PingOptions, PingOutput};
+    use super::{PingAddr, PingError, PingOptions, PingOutput, do_agg};
 
     #[inline]
     pub async fn ping(sock_addr: SocketAddr, opts: PingOptions) -> Result<PingOutput, PingError> {

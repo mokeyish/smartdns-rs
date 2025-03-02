@@ -22,9 +22,8 @@ pub mod serde_str {
 pub mod serde_opt_str {
     use super::serde_str;
     use serde::{
-        self,
+        self, Deserialize, Deserializer, Serialize, Serializer,
         de::{self, Visitor},
-        Deserialize, Deserializer, Serialize, Serializer,
     };
     use std::fmt;
     use std::marker::PhantomData;
