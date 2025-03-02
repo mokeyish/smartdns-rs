@@ -1,7 +1,7 @@
 use super::{
+    SERVICE_NAME,
     installer::{InstallStrategy::*, Installer, UninstallStrategy::*},
     service_manager::{ServiceCommand, ServiceCommands, ServiceDefinition},
-    SERVICE_NAME,
 };
 
 pub const BIN_PATH: &str = "/usr/sbin/smartdns";

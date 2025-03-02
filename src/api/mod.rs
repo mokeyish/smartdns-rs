@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json,
 };
 use cfg_if::cfg_if;
 use openapi::Router;

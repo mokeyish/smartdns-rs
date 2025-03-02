@@ -30,7 +30,7 @@ impl NomParser for HttpsRecordRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::libdns::proto::rr::rdata::svcb::{Alpn, IpHint, SvcParamKey, SvcParamValue, SVCB};
+    use crate::libdns::proto::rr::rdata::svcb::{Alpn, IpHint, SVCB, SvcParamKey, SvcParamValue};
 
     #[test]
     fn test_parse() {

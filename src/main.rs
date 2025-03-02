@@ -251,7 +251,7 @@ mod signal {
 
         #[cfg(unix)]
         {
-            use tokio::signal::unix::{signal, SignalKind};
+            use tokio::signal::unix::{SignalKind, signal};
             match signal(SignalKind::terminate()) {
                 Ok(mut terminate) => tokio::select! {
                     _ = terminate.recv() => SignalKind::terminate(),
@@ -311,12 +311,11 @@ mod run_user {
             (Some(user), Some(group)) => switch_user_group(user.uid(), group.gid()),
             _ => Err(io::ErrorKind::Other.into()),
         }
-        .map(|guard| {
+        .inspect(|_guard| {
             if let Some(caps) = caps {
                 caps::set(None, CapSet::Effective, caps).unwrap();
                 caps::set(None, CapSet::Permitted, caps).unwrap();
             }
-            guard
         })
     }
 }

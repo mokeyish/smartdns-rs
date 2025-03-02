@@ -2,8 +2,8 @@
 
 use axum::routing::MethodRouter;
 use utoipa::{
-    openapi::{Paths, RefOr, Schema},
     OpenApi,
+    openapi::{Paths, RefOr, Schema},
 };
 
 pub use utoipa::{IntoParams, ToSchema};
@@ -33,10 +33,10 @@ pub fn swagger_cdn<S: Clone + Send + Sync + 'static>(
     cdn: Option<&str>,
 ) -> axum::Router<S> {
     use axum::{
+        Router,
         extract::State,
         response::{Html, Json},
         routing::get,
-        Router,
     };
     use std::sync::Arc;
     use utoipa::openapi::OpenApi;

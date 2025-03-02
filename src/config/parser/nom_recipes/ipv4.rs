@@ -1,12 +1,12 @@
 use std::net::Ipv4Addr;
 
 use nom::{
+    IResult,
     character::complete::{char, digit1},
     combinator::{map, map_res, recognize},
     error::context,
     multi::many_m_n,
     sequence::{preceded, tuple},
-    IResult,
 };
 
 pub fn ipv4(input: &str) -> IResult<&str, Ipv4Addr> {

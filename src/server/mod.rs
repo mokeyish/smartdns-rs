@@ -8,7 +8,10 @@ mod tcp;
 mod tls;
 mod udp;
 
-use crate::libdns::proto::op::{Header, Message, MessageType, ResponseCode};
+use crate::{
+    config::SslConfig,
+    libdns::proto::op::{Header, Message, MessageType, ResponseCode},
+};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::Path,
@@ -36,11 +39,31 @@ pub async fn serve(
     certificate_file: Option<&Path>,
     certificate_key_file: Option<&Path>,
 ) -> Result<ServerHandle, crate::Error> {
-    use crate::rustls::load_certificate_and_key;
+    use crate::rustls::TlsServerCertResolver;
     use net::{bind_to, setup_tcp_socket, setup_udp_socket};
     use std::time::Duration;
 
     let dns_handle = handle.with_new_opt(listener_config.server_opts().clone());
+
+    fn create_cert_resolver(
+        ssl_config: &SslConfig,
+        certificate_file: Option<&Path>,
+        certificate_key_file: Option<&Path>,
+        typ: &'static str,
+    ) -> Result<Arc<TlsServerCertResolver>, crate::Error> {
+        let certificate_file = ssl_config
+            .certificate
+            .as_deref()
+            .or(certificate_file)
+            .ok_or(crate::Error::CertificatePathNotDefined(typ))?;
+        let certificate_key_file = ssl_config
+            .certificate_key
+            .as_deref()
+            .or(certificate_key_file)
+            .ok_or(crate::Error::CertificateKeyPathNotDefined(typ))?;
+        let resolver = TlsServerCertResolver::new(certificate_file, certificate_key_file)?;
+        Ok(Arc::new(resolver))
+    }
 
     let token = match listener_config {
         ListenerConfig::Udp(listener) => {
@@ -66,7 +89,7 @@ pub async fn serve(
             const LISTENER_TYPE: &str = "DNS over TLS";
             let ssl_config = &listener.ssl_config;
 
-            let (certificate, certificate_key) = load_certificate_and_key(
+            let server_cert_resolver = create_cert_resolver(
                 ssl_config,
                 certificate_file,
                 certificate_key_file,
@@ -84,7 +107,7 @@ pub async fn serve(
                 tls_listener,
                 dns_handle,
                 Duration::from_secs(idle_time),
-                (certificate.clone(), certificate_key.clone_key()),
+                server_cert_resolver,
             )?
         }
         #[cfg(feature = "dns-over-https")]
@@ -92,7 +115,7 @@ pub async fn serve(
             const LISTENER_TYPE: &str = "DNS over HTTPS";
             let ssl_config = &listener.ssl_config;
 
-            let (certificate, certificate_key) = load_certificate_and_key(
+            let server_cert_resolver = create_cert_resolver(
                 ssl_config,
                 certificate_file,
                 certificate_key_file,
@@ -107,19 +130,14 @@ pub async fn serve(
             );
 
             let app = app.clone();
-            https::serve(
-                app,
-                https_listener,
-                dns_handle,
-                (certificate.clone(), certificate_key.clone_key()),
-            )?
+            https::serve(app, https_listener, dns_handle, server_cert_resolver)?
         }
         #[cfg(feature = "dns-over-quic")]
         ListenerConfig::Quic(listener) => {
             const LISTENER_TYPE: &str = "DNS over QUIC";
             let ssl_config = &listener.ssl_config;
 
-            let (certificate, certificate_key) = load_certificate_and_key(
+            let server_cert_resolver = create_cert_resolver(
                 ssl_config,
                 certificate_file,
                 certificate_key_file,
@@ -137,7 +155,7 @@ pub async fn serve(
                 quic_listener,
                 dns_handle,
                 Duration::from_secs(idle_time),
-                (certificate, certificate_key),
+                server_cert_resolver,
                 ssl_config.server_name.clone(),
             )?
         }
@@ -199,7 +217,7 @@ impl DnsHandle {
         let (tx, rx) = oneshot::channel();
 
         if let Err(err) = self.sender.send((message, self.opts.clone(), tx)).await {
-            let message = err.0 .0;
+            let message = err.0.0;
             let addr = message.addr();
             let protocol = message.protocol();
             let request_header = DnsRequest::try_from(message)

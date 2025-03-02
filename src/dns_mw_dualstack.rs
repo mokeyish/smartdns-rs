@@ -1,8 +1,8 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use futures::future::{select, Either};
 use futures::FutureExt;
+use futures::future::{Either, select};
 use tokio::time::sleep;
 
 use crate::config::SpeedCheckMode;
@@ -192,7 +192,7 @@ async fn multi_mode_ping_fastest(
     ip_addrs: Vec<IpAddr>,
     modes: Vec<SpeedCheckMode>,
 ) -> Option<(IpAddr, Duration)> {
-    use crate::infra::ping::{ping_fastest, PingOptions};
+    use crate::infra::ping::{PingOptions, ping_fastest};
     let duration = Duration::from_millis(200);
     let ping_ops = PingOptions::default().with_timeout_secs(2);
 

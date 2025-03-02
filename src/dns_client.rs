@@ -22,14 +22,14 @@ use crate::{
 
 use crate::libdns::{
     proto::{
+        DnsHandle, ProtoError, ProtoErrorKind,
         op::{Edns, Message, MessageType, OpCode, Query},
         rr::{
+            Record, RecordType,
             domain::{IntoName, Name},
             rdata::opt::{ClientSubnet, EdnsOption},
-            Record, RecordType,
         },
         xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
-        DnsHandle, ProtoError, ProtoErrorKind,
     },
     resolver::{
         config::{ResolverOpts, ServerOrderingStrategy},
@@ -478,6 +478,11 @@ impl NameServer {
                 .map(|r| r.options().clone())
                 .unwrap_or_default(),
         );
+
+        if let Some(tls_config) = tls_config.as_deref() {
+            options.resolver_opts.tls_config = tls_config.clone();
+        }
+
         options.resolver_opts.server_ordering_strategy = ServerOrderingStrategy::QueryStatistics;
 
         let so_mark = config.so_mark;
@@ -492,7 +497,6 @@ impl NameServer {
             socket_addr,
             protocol,
             trust_negative_responses: true,
-            tls_config,
             tls_dns_name,
             bind_addr: None,
             http_endpoint,
@@ -840,7 +844,7 @@ where
             Ipv4Only => self.lookup(name.clone(), RecordType::A).await,
             Ipv6Only => self.lookup(name.clone(), RecordType::AAAA).await,
             Ipv4AndIpv6 => {
-                use futures_util::future::{select, Either};
+                use futures_util::future::{Either, select};
                 match select(
                     self.lookup(name.clone(), RecordType::A),
                     self.lookup(name.clone(), RecordType::AAAA),
@@ -938,15 +942,15 @@ mod connection_provider {
     use async_trait::async_trait;
 
     use std::future::Future;
-    use std::task::ready;
     use std::task::Poll;
+    use std::task::ready;
     use std::time::Duration;
     use std::{io, net::SocketAddr, pin::Pin};
 
     use crate::libdns::proto::{
         self,
         runtime::{
-            iocompat::AsyncIoTokioAsStd, QuicSocketBinder, RuntimeProvider, TokioHandle, TokioTime,
+            QuicSocketBinder, RuntimeProvider, TokioHandle, TokioTime, iocompat::AsyncIoTokioAsStd,
         },
     };
 
@@ -1368,11 +1372,13 @@ mod tests {
             .lookup("dns.alidns.com", RecordType::A)
             .await
             .unwrap();
-        assert!(lookup_ip
-            .ip_addrs()
-            .into_iter()
-            .any(|i| i == "223.5.5.5".parse::<IpAddr>().unwrap()
-                || i == "223.6.6.6".parse::<IpAddr>().unwrap()));
+        assert!(
+            lookup_ip
+                .ip_addrs()
+                .into_iter()
+                .any(|i| i == "223.5.5.5".parse::<IpAddr>().unwrap()
+                    || i == "223.6.6.6".parse::<IpAddr>().unwrap())
+        );
     }
 
     async fn query_google(client: &DnsClient) -> bool {

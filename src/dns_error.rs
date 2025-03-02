@@ -1,8 +1,8 @@
 use crate::dns::{DefaultSOA as _, DnsResponse};
 use crate::libdns::proto::{
-    op::{Query, ResponseCode},
-    rr::{rdata::SOA, Record},
     ProtoError, ProtoErrorKind,
+    op::{Query, ResponseCode},
+    rr::{Record, rdata::SOA},
 };
 use crate::libdns::resolver::{ResolveError, ResolveErrorKind};
 use std::{io, sync::Arc};

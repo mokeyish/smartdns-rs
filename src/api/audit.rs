@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use super::openapi::{http::get, routes, IntoRouter};
-use axum::{extract::State, response::IntoResponse, Json};
+use super::openapi::{IntoRouter, http::get, routes};
+use axum::{Json, extract::State, response::IntoResponse};
 
 use super::{ServeState, StatefulRouter};
 

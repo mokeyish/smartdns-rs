@@ -88,7 +88,7 @@ pub fn setup_udp_socket(
         use std::{mem, os::windows::io::AsRawSocket, ptr};
         use windows::Win32::Foundation::FALSE;
         use windows::Win32::Networking::WinSock::{
-            WSAGetLastError, WSAIoctl, SIO_UDP_CONNRESET, SOCKET, SOCKET_ERROR,
+            SIO_UDP_CONNRESET, SOCKET, SOCKET_ERROR, WSAGetLastError, WSAIoctl,
         };
 
         let handle = SOCKET(udp_socket.as_raw_socket() as usize);

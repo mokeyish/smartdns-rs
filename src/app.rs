@@ -337,8 +337,8 @@ async fn process(
     message: SerialMessage,
     server_opts: ServerOpts,
 ) -> SerialMessage {
-    use crate::libdns::proto::op::{Header, Message, MessageType, OpCode, ResponseCode};
     use crate::libdns::proto::ProtoError;
+    use crate::libdns::proto::op::{Header, Message, MessageType, OpCode, ResponseCode};
 
     let addr = message.addr();
     let protocol = message.protocol();
@@ -380,7 +380,15 @@ async fn process(
                                     }
                                     Err(e) => {
                                         if e.is_nx_domain() {
-                                            log::debug!("{}Response: error resolving: NXDomain, Duration: {:?}", if server_opts.is_background { "Background"} else { "" }, start.elapsed());
+                                            log::debug!(
+                                                "{}Response: error resolving: NXDomain, Duration: {:?}",
+                                                if server_opts.is_background {
+                                                    "Background"
+                                                } else {
+                                                    ""
+                                                },
+                                                start.elapsed()
+                                            );
                                             response_header
                                                 .set_response_code(ResponseCode::NXDomain);
                                         }
@@ -390,7 +398,11 @@ async fn process(
                                             None => {
                                                 log::debug!(
                                                     "{}Response: error resolving: {}, Duration: {:?}",
-                                                    if server_opts.is_background { "Background"} else { "" },
+                                                    if server_opts.is_background {
+                                                        "Background"
+                                                    } else {
+                                                        ""
+                                                    },
                                                     e,
                                                     start.elapsed()
                                                 );
@@ -432,7 +444,7 @@ async fn process(
                 proto = protocol,
                 addr = addr.ip(),
                 port = addr.port(),
-                message_type= request_header.message_type(),
+                message_type = request_header.message_type(),
                 op = request_header.op_code(),
                 error = error,
             );

@@ -9,8 +9,8 @@ use std::{
 use crate::{
     infra::file_mode::FileMode,
     libdns::proto::rr::{
-        rdata::{HTTPS, SRV},
         Name, RecordType,
+        rdata::{HTTPS, SRV},
     },
     log::Level,
     proxy::ProxyConfig,

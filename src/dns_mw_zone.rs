@@ -108,7 +108,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                             no_ipv4_hint,
                             no_ipv6_hint,
                         } => {
-                            use crate::libdns::proto::rr::rdata::{svcb::SvcParamKey, SVCB};
+                            use crate::libdns::proto::rr::rdata::{SVCB, svcb::SvcParamKey};
                             let no_ipv4_hint = *no_ipv4_hint;
                             let no_ipv6_hint = *no_ipv6_hint;
                             return match next.run(ctx, req).await {
@@ -142,7 +142,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                             return Ok(DnsResponse::from_rdata(
                                 req.query().original().to_owned(),
                                 RData::HTTPS(https.clone()),
-                            ))
+                            ));
                         }
                     }
                 }

@@ -1,21 +1,18 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{self, BufReader},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 pub type Certificate = CertificateDer<'static>;
 pub type PrivateKey = PrivateKeyDer<'static>;
 
-use rustls::{ClientConfig, ServerConfig};
+pub use rustls::server::ResolvesServerCert;
+use rustls::{ClientConfig, ServerConfig, sign::CertifiedKey};
 
-use crate::{
-    config::SslConfig,
-    error::Error,
-    log::{self, warn},
-};
+use crate::log::{info, warn};
 
 #[derive(Clone)]
 pub struct TlsClientConfigBundle {
@@ -175,55 +172,10 @@ fn load_pem_certs(path: &Path) -> Result<Vec<Certificate>, io::Error> {
     }
 }
 
-pub fn load_certificate_and_key(
-    ssl_config: &SslConfig,
-    cert_file: Option<&Path>,
-    key_file: Option<&Path>,
-    typ: &'static str,
-) -> Result<(Vec<Certificate>, PrivateKey), Error> {
-    use crate::libdns::proto::rustls::tls_server::{read_cert, read_key};
-
-    let certificate_path = ssl_config
-        .certificate
-        .as_deref()
-        .or(cert_file)
-        .ok_or(Error::CertificatePathNotDefined(typ))?;
-
-    let certificate_key_path = ssl_config
-        .certificate_key
-        .as_deref()
-        .or(key_file)
-        .ok_or(Error::CertificateKeyPathNotDefined(typ))?;
-
-    if let Some(server_name) = ssl_config.server_name.as_deref() {
-        log::info!(
-            "loading cert for DNS over Https named {} from {:?}",
-            server_name,
-            certificate_path
-        );
-    } else {
-        log::info!(
-            "loading cert for DNS over Https from {:?}",
-            certificate_path
-        );
-    }
-
-    let certificate = read_cert(certificate_path).map_err(|err| {
-        Error::LoadCertificateFailed(certificate_path.to_path_buf(), err.to_string())
-    })?;
-
-    let certificate_key = read_key(certificate_key_path).map_err(|err| {
-        Error::LoadCertificateKeyFailed(certificate_key_path.to_path_buf(), err.to_string())
-    })?;
-
-    Ok((certificate, certificate_key))
-}
-
-#[cfg(feature = "dns-over-rustls")]
+#[cfg(feature = "dns-over-tls")]
 pub fn tls_server_config(
     protocol: &[u8],
-    cert: Vec<CertificateDer<'static>>,
-    key: PrivateKeyDer<'static>,
+    server_cert_resolver: Arc<dyn ResolvesServerCert>,
 ) -> Result<ServerConfig, io::Error> {
     let mut config =
         ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
@@ -235,14 +187,119 @@ pub fn tls_server_config(
                 )
             })?
             .with_no_client_auth()
-            .with_single_cert(cert, key)
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("error creating TLS acceptor: {e}"),
-                )
-            })?;
+            .with_cert_resolver(server_cert_resolver);
 
     config.alpn_protocols = vec![protocol.to_vec()];
     Ok(config)
+}
+
+#[derive(Debug)]
+pub struct TlsServerCertResolver {
+    path: PathBuf,
+    private_key: PathBuf,
+    certified_key: RwLock<Arc<CertifiedKey>>,
+}
+
+impl TlsServerCertResolver {
+    pub fn new(cert_path: &Path, key_path: &Path) -> Result<Self, crate::Error> {
+        let certified_key = Self::load(cert_path, key_path)?;
+        Ok(TlsServerCertResolver {
+            path: cert_path.to_path_buf(),
+            private_key: key_path.to_path_buf(),
+            certified_key: RwLock::new(Arc::new(certified_key)),
+        })
+    }
+
+    pub fn load(cert_path: &Path, key_path: &Path) -> Result<CertifiedKey, crate::Error> {
+        use crate::Error;
+        use rustls::crypto::ring::default_provider;
+
+        let cert_chain = CertificateDer::pem_file_iter(cert_path)
+            .map_err(|e| {
+                Error::LoadCertificateFailed(
+                    cert_path.to_path_buf(),
+                    format!(
+                        "failed to read cert chain from {}: {e}",
+                        cert_path.display()
+                    ),
+                )
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                Error::LoadCertificateFailed(
+                    cert_path.to_path_buf(),
+                    format!(
+                        "failed to parse cert chain from {}: {e}",
+                        cert_path.display()
+                    ),
+                )
+            })?;
+
+        let key_extension = key_path.extension();
+
+        fn from_pem_file(key_path: &Path) -> Result<PrivateKeyDer<'static>, Error> {
+            let key_path = &key_path;
+            info!("loading TLS PKCS8 key from PEM: {}", key_path.display());
+            PrivateKeyDer::from_pem_file(key_path).map_err(|e| {
+                Error::LoadCertificateKeyFailed(
+                    key_path.to_path_buf(),
+                    format!("failed to read key from {}: {e}", key_path.display()),
+                )
+            })
+        }
+
+        fn try_from(key_path: &Path) -> Result<PrivateKeyDer<'static>, Error> {
+            let key_path = &key_path;
+            info!("loading TLS PKCS8 key from DER: {}", key_path.display());
+
+            let buf = fs::read(key_path).map_err(|e| {
+                Error::LoadCertificateKeyFailed(
+                    key_path.to_path_buf(),
+                    format!("error reading key from file: {e}"),
+                )
+            })?;
+
+            PrivateKeyDer::try_from(buf).map_err(|e| {
+                Error::LoadCertificateKeyFailed(
+                    key_path.to_path_buf(),
+                    format!("error parsing key DER: {e}"),
+                )
+            })
+        }
+
+        let key = if key_extension.is_some_and(|ext| ext == "pem") {
+            from_pem_file(key_path)?
+        } else if key_extension.is_some_and(|ext| ext == "der") {
+            try_from(key_path)?
+        } else {
+            from_pem_file(key_path).or_else(|_| try_from(key_path)).map_err(|_| {
+                Error::LoadCertificateKeyFailed(
+                    key_path.to_path_buf(),
+                    format!(
+                        "unsupported private key file format (expected `.pem` or `.der` `.key` extension): {}",
+                        key_path.display()
+                    ),
+                )
+            })?
+        };
+
+        let certified_key =
+            CertifiedKey::from_der(cert_chain, key, &default_provider()).map_err(|err| {
+                Error::LoadCertificateKeyFailed(
+                    key_path.to_path_buf(),
+                    format!("failed to read certificate and keys: {err:?}"),
+                )
+            })?;
+
+        Ok(certified_key)
+    }
+}
+
+impl ResolvesServerCert for TlsServerCertResolver {
+    fn resolve(
+        &self,
+        _client_hello: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        self.certified_key.read().ok().as_deref().cloned()
+    }
 }

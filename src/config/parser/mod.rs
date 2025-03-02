@@ -1,6 +1,6 @@
 use nom::{
-    branch::*, bytes::complete::*, character::complete::*, combinator::*, multi::*, sequence::*,
-    IResult,
+    IResult, branch::*, bytes::complete::*, character::complete::*, combinator::*, multi::*,
+    sequence::*,
 };
 
 mod address_rule;

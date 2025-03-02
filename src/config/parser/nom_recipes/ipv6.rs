@@ -1,6 +1,7 @@
 use std::net::Ipv6Addr;
 
 use nom::{
+    IResult,
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, hex_digit1},
@@ -8,7 +9,6 @@ use nom::{
     error::context,
     multi::{many_m_n, separated_list0},
     sequence::{pair, preceded},
-    IResult,
 };
 
 use super::ipv4;

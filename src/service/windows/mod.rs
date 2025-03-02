@@ -6,9 +6,9 @@ use std::{
 // use regex::Regex;
 
 use super::{
+    SERVICE_NAME,
     installer::{InstallStrategy::*, Installer, UninstallStrategy::*},
     service_manager::{ServiceCommand, ServiceCommands, ServiceDefinition},
-    SERVICE_NAME,
 };
 
 mod shell_escape;

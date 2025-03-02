@@ -4,16 +4,16 @@ use futures_util::StreamExt as _;
 use tokio::{net, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use super::{reap_tasks, sanitize_src_address, DnsHandle};
+use super::{DnsHandle, reap_tasks, sanitize_src_address};
 
 use crate::{
     dns::SerialMessage,
     libdns::{
-        proto::{runtime::iocompat::AsyncIoTokioAsStd, xfer::DnsStreamHandle as _},
         Protocol,
+        proto::{runtime::iocompat::AsyncIoTokioAsStd, xfer::DnsStreamHandle as _},
     },
     log,
-    rustls::{Certificate, PrivateKey},
+    rustls::ResolvesServerCert,
     third_ext::FutureTimeoutExt,
 };
 
@@ -21,7 +21,7 @@ pub fn serve(
     listener: net::TcpListener,
     handler: DnsHandle,
     timeout: Duration,
-    certificate_and_key: (Vec<Certificate>, PrivateKey),
+    server_cert_resolver: Arc<dyn ResolvesServerCert>,
 ) -> io::Result<CancellationToken> {
     use crate::libdns::proto::rustls::tls_from_stream;
     use crate::rustls::tls_server_config;
@@ -30,13 +30,12 @@ pub fn serve(
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
 
-    let tls_config = tls_server_config(b"dot", certificate_and_key.0, certificate_and_key.1)
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("error creating TLS acceptor: {e}"),
-            )
-        })?;
+    let tls_config = tls_server_config(b"dot", server_cert_resolver).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("error creating TLS acceptor: {e}"),
+        )
+    })?;
 
     let handler = handler.clone();
 

@@ -1,6 +1,6 @@
 use axum::{
-    extract::{connect_info::IntoMakeServiceWithConnectInfo, Request},
     Router,
+    extract::{Request, connect_info::IntoMakeServiceWithConnectInfo},
 };
 use hyper::body::Incoming;
 use hyper_util::{
@@ -18,27 +18,27 @@ use tower::{Service as _, ServiceExt};
 
 use tokio_rustls::TlsAcceptor;
 
-use super::{reap_tasks, sanitize_src_address, DnsHandle};
+use super::{DnsHandle, reap_tasks, sanitize_src_address};
 
 use crate::{
     api::ServeState,
     app::App,
     log,
-    rustls::{tls_server_config, Certificate, PrivateKey},
+    rustls::{ResolvesServerCert, tls_server_config},
 };
 
 pub fn serve(
     app: Arc<App>,
     listener: net::TcpListener,
     dns_handle: DnsHandle,
-    (cert, key): (Vec<Certificate>, PrivateKey),
+    server_cert_resolver: Arc<dyn ResolvesServerCert>,
 ) -> io::Result<CancellationToken> {
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
 
     log::debug!("registered HTTPS: {:?}", listener);
 
-    let tls_config = tls_server_config(b"h2", cert, key).map_err(|e| {
+    let tls_config = tls_server_config(b"h2", server_cert_resolver).map_err(|e| {
         io::Error::new(
             io::ErrorKind::Other,
             format!("error creating TLS acceptor: {e}"),

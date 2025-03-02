@@ -1,7 +1,7 @@
 use std::{future::Future, time::Duration};
 
 use futures::future::JoinAll;
-use tokio::time::{timeout, Timeout};
+use tokio::time::{Timeout, timeout};
 
 pub trait FutureTimeoutExt: Future + Sized {
     #[inline]
