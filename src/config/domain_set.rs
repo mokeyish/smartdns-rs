@@ -60,10 +60,10 @@ impl IDomainSetProvider for DomainSetHttpProvider {
     }
 
     fn get_domain_set(&self) -> Result<HashSet<WildcardName>> {
-        use reqwest::blocking as http;
+        use crate::infra::http_client::{self, HttpResponse};
 
         let mut domain_set = HashSet::new();
-        let res = http::get(self.url.clone())?;
+        let res = http_client::get(self.url.to_string())?;
 
         let text = res.text()?;
         read_to_domain_set(&text, &mut domain_set);
