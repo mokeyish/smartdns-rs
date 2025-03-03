@@ -2022,6 +2022,15 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quick-xml"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11bafc859c6815fbaffbbbf4229ecb767ac913fecb27f9ad4343662e9ef099ea"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
 version = "0.37.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "165859e9e55f79d67b96c5d96f4e88b6f2695a1972849c15a6a3f5c59fc2c003"
@@ -2568,6 +2577,27 @@ dependencies = [
 
 [[package]]
 name = "self_update"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "469a3970061380c19852269f393e74c0fe607a4e23d85267382cf25486aa8de5"
+dependencies = [
+ "hyper",
+ "indicatif",
+ "log",
+ "quick-xml 0.23.1",
+ "regex",
+ "reqwest",
+ "self-replace",
+ "semver",
+ "serde_json",
+ "tempfile",
+ "urlencoding",
+ "zip",
+ "zipsign-api",
+]
+
+[[package]]
+name = "self_update"
 version = "0.42.0"
 source = "git+https://github.com/mokeyish/self_update.git?rev=0.42.0.smartdns.1#7f6052dbd85820e928362172a6e2ca317f435b84"
 dependencies = [
@@ -2576,7 +2606,7 @@ dependencies = [
  "http",
  "indicatif",
  "log",
- "quick-xml",
+ "quick-xml 0.37.2",
  "regex",
  "reqwest",
  "self-replace",
@@ -2587,7 +2617,6 @@ dependencies = [
  "tempfile",
  "ureq",
  "urlencoding",
- "zip",
  "zipsign-api",
 ]
 
@@ -2784,7 +2813,8 @@ dependencies = [
  "rustls-pemfile",
  "same-file",
  "self-replace",
- "self_update",
+ "self_update 0.41.0",
+ "self_update 0.42.0",
  "serde",
  "serde_json",
  "serde_yaml",
