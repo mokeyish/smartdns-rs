@@ -10,7 +10,8 @@ impl NomParser for IpNet {
                 map_res(is_a("0123456789abcdef:./"), IpAddr::from_str),
                 |ip| ip.into(),
             ),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 

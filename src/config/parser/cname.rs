@@ -5,7 +5,8 @@ impl NomParser for CNameRule {
         alt((
             value(CNameRule::IGN, char('-')),
             map(NomParser::parse, CNameRule::Value),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 

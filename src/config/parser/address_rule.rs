@@ -10,7 +10,8 @@ impl NomParser for AddressRule {
                 NomParser::parse,
             ),
             |(domain, address)| AddressRule { domain, address },
-        )(input)
+        )
+        .parse(input)
     }
 }
 
@@ -26,7 +27,7 @@ impl NomParser for AddressRuleValue {
         let ign_v6 = value(IGNv6, tag("-6"));
 
         let ip_addrs = map(
-            separated_list1(tuple((space0, char(','), space0)), nom_recipes::ip),
+            separated_list1((space0, char(','), space0), nom_recipes::ip),
             |ip_addrs| {
                 let mut v4 = vec![];
                 let mut v6 = vec![];
@@ -42,7 +43,7 @@ impl NomParser for AddressRuleValue {
             },
         );
 
-        alt((soa_v4, soa_v6, soa, ign_v4, ign_v6, ign, ip_addrs))(input)
+        alt((soa_v4, soa_v6, soa, ign_v4, ign_v6, ign, ip_addrs)).parse(input)
     }
 }
 

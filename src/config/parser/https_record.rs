@@ -23,7 +23,8 @@ impl NomParser for HttpsRecordRule {
                 },
             ),
             map(NomParser::parse, Self::RecordData),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 

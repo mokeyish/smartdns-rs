@@ -77,7 +77,7 @@ impl NomParser for DomainRule {
             }),
         ));
 
-        let (input, _) = separated_list1(space1, one)(input)?;
+        let (input, _) = separated_list1(space1, one).parse(input)?;
 
         Ok((input, rule))
     }

@@ -5,7 +5,8 @@ impl NomParser for Option<SpeedCheckModeList> {
         alt((
             value(None, tag_no_case("none")),
             map(SpeedCheckModeList::parse, Some),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 
@@ -14,7 +15,8 @@ impl NomParser for SpeedCheckModeList {
         map(
             separated_list1(delimited(space0, char(','), space0), NomParser::parse),
             SpeedCheckModeList,
-        )(input)
+        )
+        .parse(input)
     }
 }
 
@@ -40,7 +42,7 @@ impl NomParser for SpeedCheckMode {
             Https,
         );
 
-        alt((none, ping, tcp, https, http))(input)
+        alt((none, ping, tcp, https, http)).parse(input)
     }
 }
 

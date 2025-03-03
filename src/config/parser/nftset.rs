@@ -20,7 +20,7 @@ impl NomParser for NFTsetConfig {
             take_while1(|c: char| c.is_ascii_alphanumeric() || c == '_'),
         );
 
-        let (input, (family, table, name)) = tuple((family, table, name))(input)?;
+        let (input, (family, table, name)) = (family, table, name).parse(input)?;
         Ok((
             input,
             NFTsetConfig {
@@ -52,16 +52,18 @@ impl NomParser for ConfigForIP<NFTsetConfig> {
             map(char('-'), |_| ConfigForIP::None),
             map(v4, ConfigForIP::V4),
             map(v6, ConfigForIP::V6),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 
 impl NomParser for Vec<ConfigForIP<NFTsetConfig>> {
     fn parse(input: &str) -> IResult<&str, Self> {
         separated_list1(
-            tuple((space0, char(','), space0)),
+            (space0, char(','), space0),
             ConfigForIP::<NFTsetConfig>::parse,
-        )(input)
+        )
+        .parse(input)
     }
 }
 

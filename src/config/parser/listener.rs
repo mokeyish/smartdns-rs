@@ -25,7 +25,7 @@ fn parse_listen_address(input: &str) -> IResult<&str, ListenerAddress> {
 
     let any = value(ListenerAddress::All, char('*'));
 
-    alt((ip, any))(input)
+    alt((ip, any)).parse(input)
 }
 
 impl NomParser for ListenerConfig {
@@ -37,31 +37,31 @@ impl NomParser for ListenerConfig {
 impl NomParser for UdpListenerConfig {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
 impl NomParser for TcpListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
 impl NomParser for TlsListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
 impl NomParser for QuicListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
 impl NomParser for HttpsListenerConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
@@ -106,14 +106,15 @@ fn parse(input: &str) -> IResult<&str, ListenerConfig> {
         s.to_string()
     });
 
-    let (input, (proto, listen, port, device)) = tuple((
+    let (input, (proto, listen, port, device)) = (
         preceded(space0, proto),
         preceded(space1, listen),
         preceded(char(':'), port),
         opt(preceded(char('@'), device)),
-    ))(input)?;
+    )
+        .parse(input)?;
 
-    let (input, options) = opt(preceded(space1, options::parse))(input)?;
+    let (input, options) = opt(preceded(space1, options::parse)).parse(input)?;
 
     let (options, opts) = if let Some(options) = options {
         parse_server_opts(&options)

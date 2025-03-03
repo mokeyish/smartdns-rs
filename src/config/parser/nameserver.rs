@@ -70,9 +70,10 @@ impl NomParser for NameServerInfo {
                 preceded(space1, dns_url("quic://")),
             ),
             preceded(tag_no_case("server"), preceded(space1, dns_url("udp://"))),
-        ))(input)?;
+        ))
+        .parse(input)?;
 
-        let (input, options) = opt(preceded(space1, options::parse))(input)?;
+        let (input, options) = opt(preceded(space1, options::parse)).parse(input)?;
 
         let mut nameserver = Self {
             server: url,
@@ -223,7 +224,8 @@ mod tests {
                     tag_no_case("h3://"),
                 ))),
                 move |p| p.unwrap_or(default_proto),
-            )(input)
+            )
+            .parse(input)
         }
 
         assert_eq!(
