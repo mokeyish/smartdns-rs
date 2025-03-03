@@ -9,7 +9,8 @@ impl<T: NomParser + Clone> NomParser for ConfigForDomain<T> {
         map(
             pair(domain, preceded(space0, config)),
             |(domain, config)| ConfigForDomain { domain, config },
-        )(input)
+        )
+        .parse(input)
     }
 }
 

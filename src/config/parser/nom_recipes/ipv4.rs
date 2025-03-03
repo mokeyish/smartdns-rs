@@ -1,31 +1,32 @@
 use std::net::Ipv4Addr;
 
 use nom::{
-    IResult,
+    IResult, Parser,
     character::complete::{char, digit1},
     combinator::{map, map_res, recognize},
     error::context,
     multi::many_m_n,
-    sequence::{preceded, tuple},
+    sequence::preceded,
 };
 
 pub fn ipv4(input: &str) -> IResult<&str, Ipv4Addr> {
     fn octal(input: &str) -> IResult<&str, u8> {
-        map_res(recognize(many_m_n(1, 3, digit1)), |s: &str| s.parse())(input)
+        map_res(recognize(many_m_n(1, 3, digit1)), |s: &str| s.parse()).parse(input)
     }
 
     context(
         "Ipv4Addr",
         map(
-            tuple((
+            (
                 octal,
                 preceded(char('.'), octal),
                 preceded(char('.'), octal),
                 preceded(char('.'), octal),
-            )),
+            ),
             |(a, b, c, d)| Ipv4Addr::new(a, b, c, d),
         ),
-    )(input)
+    )
+    .parse(input)
 }
 
 #[cfg(test)]

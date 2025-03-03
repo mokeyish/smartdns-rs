@@ -8,7 +8,7 @@ impl NomParser for ResponseMode {
         let fatest_ip = value(FastestIp, tag_no_case("fastest-ip"));
         let fatest_response = value(FastestResponse, tag_no_case("fastest-response"));
 
-        alt((first_ping, fatest_ip, fatest_response))(input)
+        alt((first_ping, fatest_ip, fatest_response)).parse(input)
     }
 }
 

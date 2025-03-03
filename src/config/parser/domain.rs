@@ -3,7 +3,7 @@ use super::*;
 impl NomParser for Name {
     fn parse(input: &str) -> IResult<&str, Self> {
         let name = is_not(" \n\t\\/|\"#',!+<>");
-        map_res(name, |s: &str| s.parse())(input)
+        map_res(name, |s: &str| s.parse()).parse(input)
     }
 }
 
@@ -11,15 +11,15 @@ impl NomParser for WildcardName {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             map(
-                preceded(tuple((char('*'), char('.'))), NomParser::parse),
+                preceded((char('*'), char('.')), NomParser::parse),
                 WildcardName::Sub,
             ),
             map(
-                preceded(tuple((char('-'), char('.'))), NomParser::parse),
+                preceded((char('-'), char('.')), NomParser::parse),
                 WildcardName::Full,
             ),
             map(
-                preceded(tuple((opt(char('+')), char('.'))), NomParser::parse),
+                preceded((opt(char('+')), char('.')), NomParser::parse),
                 WildcardName::Suffix,
             ),
             map(NomParser::parse, |name: Name| {
@@ -34,7 +34,8 @@ impl NomParser for WildcardName {
             map(pair(char('+'), opt(char('.'))), |_| {
                 WildcardName::Suffix(Name::root())
             }),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 
@@ -60,7 +61,8 @@ impl NomParser for Domain {
                 Domain::Set,
             ),
             map(NomParser::parse, Domain::Name),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 

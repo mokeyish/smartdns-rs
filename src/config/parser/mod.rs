@@ -1,6 +1,6 @@
 use nom::{
-    IResult, branch::*, bytes::complete::*, character::complete::*, combinator::*, multi::*,
-    sequence::*,
+    IResult, Parser, branch::*, bytes::complete::*, character::complete::*, combinator::*,
+    multi::*, sequence::*,
 };
 
 mod address_rule;
@@ -49,7 +49,7 @@ pub trait NomParser: Sized {
 impl NomParser for usize {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Self> {
-        map(u64, |v| v as usize)(input)
+        map(u64, |v| v as usize).parse(input)
     }
 }
 
@@ -69,7 +69,7 @@ impl NomParser for u8 {
 
 impl NomParser for String {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map(is_not(" \t\r\n"), ToString::to_string)(input)
+        map(is_not(" \t\r\n"), ToString::to_string).parse(input)
     }
 }
 
@@ -151,12 +151,14 @@ pub enum OneConfig {
 }
 
 pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
-    let comment = opt(preceded(space1, preceded(char('#'), not_line_ending)));
+    fn comment(input: &str) -> IResult<&str, Option<&str>> {
+        opt(preceded(space1, preceded(char('#'), not_line_ending))).parse(input)
+    }
 
     fn parse_item<'a, T: NomParser>(
         keyword: &'static str,
-    ) -> impl FnMut(&'a str) -> IResult<&'a str, T> {
-        preceded(tuple((space0, tag_no_case(keyword), space1)), T::parse)
+    ) -> impl Parser<&'a str, Output = T, Error = nom::error::Error<&'a str>> {
+        preceded((space0, tag_no_case(keyword), space1), T::parse)
     }
 
     let group1 = alt((
@@ -263,7 +265,9 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(NomParser::parse, OneConfig::Server),
     ));
 
-    terminated(alt((group1, group2, group3, group4)), comment)(input)
+    let group = alt((group1, group2, group3, group4));
+
+    terminated(group, comment).parse(input)
 }
 
 #[cfg(test)]

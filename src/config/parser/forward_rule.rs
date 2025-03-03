@@ -11,7 +11,8 @@ impl NomParser for ForwardRule {
                 domain,
                 nameserver: server,
             },
-        )(input)
+        )
+        .parse(input)
     }
 }
 

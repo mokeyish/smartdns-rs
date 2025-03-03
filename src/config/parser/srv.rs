@@ -3,14 +3,15 @@ use super::*;
 impl NomParser for SRV {
     fn parse(input: &str) -> IResult<&str, Self> {
         map(
-            tuple((
+            (
                 NomParser::parse,
                 preceded(delimited(space0, char(','), space0), u16),
                 preceded(delimited(space0, char(','), space0), u16),
                 preceded(delimited(space0, char(','), space0), u16),
-            )),
+            ),
             |(target, port, priority, weight)| SRV::new(priority, weight, port, target),
-        )(input)
+        )
+        .parse(input)
     }
 }
 

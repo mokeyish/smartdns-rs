@@ -22,7 +22,7 @@ impl NomParser for IpSetProvider {
             ),
         ));
 
-        let (rest_input, _) = separated_list1(space1, one)(input)?;
+        let (rest_input, _) = separated_list1(space1, one).parse(input)?;
 
         if let (Some(name), Some(file)) = (name, file) {
             return Ok((rest_input, IpSetProvider { name, file }));

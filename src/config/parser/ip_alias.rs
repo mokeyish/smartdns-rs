@@ -2,11 +2,12 @@ use super::*;
 
 impl NomParser for IpAlias {
     fn parse(input: &str) -> IResult<&str, Self> {
-        let ip_list = separated_list1(tuple((space0, char(','), space0)), nom_recipes::ip);
+        let ip_list = separated_list1((space0, char(','), space0), nom_recipes::ip);
         map(
             separated_pair(IpOrSet::parse, space1, ip_list),
             |(ip, to)| IpAlias { ip, to: to.into() },
-        )(input)
+        )
+        .parse(input)
     }
 }
 

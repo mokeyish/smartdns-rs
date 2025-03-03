@@ -1,7 +1,7 @@
 use std::net::Ipv6Addr;
 
 use nom::{
-    IResult,
+    IResult, Parser,
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, hex_digit1},
@@ -17,7 +17,8 @@ pub fn ipv6(input: &str) -> IResult<&str, Ipv6Addr> {
     fn octal(input: &str) -> IResult<&str, u16> {
         map_res(recognize(many_m_n(1, 4, hex_digit1)), |s| {
             u16::from_str_radix(s, 16)
-        })(input)
+        })
+        .parse(input)
     }
 
     context(
@@ -53,7 +54,8 @@ pub fn ipv6(input: &str) -> IResult<&str, Ipv6Addr> {
                 },
             ),
         )),
-    )(input)
+    )
+    .parse(input)
 }
 
 #[cfg(test)]

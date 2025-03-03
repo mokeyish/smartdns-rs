@@ -8,7 +8,8 @@ impl NomParser for IpOrSet {
                 IpOrSet::Set,
             ),
             map(NomParser::parse, IpOrSet::Net),
-        ))(input)
+        ))
+        .parse(input)
     }
 }
 
