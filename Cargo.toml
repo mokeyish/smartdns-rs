@@ -162,7 +162,7 @@ reqwest = { version = "0.12", optional = true, default-features = false, feature
   "blocking",
   "rustls-tls",
 ] }
-ureq = { version = "3.0.6", optional = true, default-features = false, features = ["gzip", "json", "socks-proxy", "rustls"]}
+ureq = { version = "3.0.9", optional = true, default-features = false, features = ["gzip", "json", "socks-proxy", "rustls"]}
 
 # log
 tracing = "0.1"
