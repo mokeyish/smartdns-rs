@@ -232,7 +232,7 @@ self_update = { version = "0.42.0", default-features = false, features=["archive
 
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = [
+windows = { version = "0.60", features = [
   "Win32_System_Console",
   "Win32_Foundation",
   "Win32_Networking", "Win32_Networking_WinSock", "Win32_System_IO", # set UDP_CONNRESET off
