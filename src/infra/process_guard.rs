@@ -46,7 +46,7 @@ pub fn create<P: AsRef<Path>>(path: P) -> Result<ProcessGuard, ProcessGuardError
 fn is_process_running(id: u32) -> bool {
     use sysinfo::{ProcessRefreshKind, RefreshKind, System};
     let sys = System::new_with_specifics(
-        RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+        RefreshKind::nothing().with_processes(ProcessRefreshKind::everything()),
     );
     sys.process(Pid::from_u32(id)).is_some()
 }
