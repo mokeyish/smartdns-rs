@@ -174,8 +174,8 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.7", features = ["serde"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.7", features = [
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.1-smartdns.1", features = ["serde"]}
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.1-smartdns.1", features = [
   "serde",
   "system-config",
 ] }
@@ -189,7 +189,7 @@ rustls-native-certs = "0.8"
 
 lru = { version = "0.12", default-features = false }
 # time = "0.3"
-chrono = { version = "0.4.38", features = ["serde"]}
+chrono = { version = "0.4.38", default-features = false, features = ["serde", "clock"]}
 surge-ping = "0.8.1"
 rand = "0.8.5"
 smallvec = "1.13.2"
