@@ -42,7 +42,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
                 None => {
                     let hosts = match ctx.cfg().hosts_file() {
                         Some(pattern) => read_hosts(pattern.as_str()),
-                        None => Hosts::new(), // read from system hosts file
+                        None => Hosts::default(), // read from system hosts file
                     };
                     let hosts = Arc::new(hosts);
                     *self.0.write().await = Some((Instant::now(), hosts.clone()));
