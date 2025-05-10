@@ -140,7 +140,7 @@ impl App {
                 ));
             }
 
-            if !cfg.cnames().is_empty() {
+            if cfg.rule_groups().values().all(|x| !x.cnames.is_empty()) {
                 middleware_builder = middleware_builder.with(DnsCNameMiddleware);
             }
 

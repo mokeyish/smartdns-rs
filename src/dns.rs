@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 
 use std::net::IpAddr;
@@ -39,7 +40,9 @@ pub struct DnsContext {
 
 impl DnsContext {
     pub fn new(name: &Name, cfg: Arc<RuntimeConfig>, server_opts: ServerOpts) -> Self {
-        let domain_rule = cfg.find_domain_rule(name);
+        let group_name = server_opts.rule_group.as_deref().unwrap_or_default();
+        let rule_group = cfg.domain_rule_group(group_name);
+        let domain_rule = rule_group.find(name).cloned();
 
         let no_cache = domain_rule.get(|n| n.no_cache).unwrap_or_default();
 

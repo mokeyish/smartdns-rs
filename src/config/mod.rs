@@ -23,6 +23,7 @@ use serde::{self, Deserialize, Serialize};
 
 mod audit;
 mod cache;
+mod client_rule;
 mod domain;
 mod domain_rule;
 mod domain_set;
@@ -32,11 +33,13 @@ mod log;
 mod nameserver;
 pub mod parser;
 mod response_mode;
+mod rule_group;
 mod server_opts;
 mod speed_mode;
 
 pub use audit::*;
 pub use cache::*;
+pub use client_rule::*;
 pub use domain::*;
 pub use domain_rule::*;
 pub use domain_set::*;
@@ -45,6 +48,7 @@ pub use listener::*;
 pub use log::*;
 pub use nameserver::*;
 pub use response_mode::*;
+pub use rule_group::*;
 pub use server_opts::*;
 pub use speed_mode::*;
 
@@ -219,38 +223,6 @@ pub struct Config {
     /// remote dns server list
     pub nameservers: Vec<NameServerInfo>,
 
-    /// specific nameserver to domain
-    ///
-    /// nameserver /domain/[group|-]
-    ///
-    /// ```
-    /// example:
-    ///   nameserver /www.example.com/office, Set the domain name to use the appropriate server group.
-    ///   nameserver /www.example.com/-, ignore this domain
-    /// ```
-    pub forward_rules: Vec<ForwardRule>,
-
-    /// specific address to domain
-    ///
-    /// address /domain/[ip|-|-4|-6|#|#4|#6]
-    ///
-    /// ```
-    /// example:
-    ///   address /www.example.com/1.2.3.4, return ip 1.2.3.4 to client
-    ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
-    ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
-    /// ```
-    pub address_rules: AddressRules,
-
-    /// set domain rules
-    pub domain_rules: DomainRules,
-
-    pub cnames: CNameRules,
-
-    pub srv_records: SrvRecords,
-
-    pub https_records: HttpsRecords,
-
     /// The proxy server for upstream querying.
     pub proxy_servers: HashMap<String, ProxyConfig>,
 
@@ -263,6 +235,8 @@ pub struct Config {
     pub ip_sets: HashMap<String, Vec<IpNet>>,
 
     pub ip_alias: Vec<IpAlias>,
+
+    pub client_rules: Vec<ClientRule>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

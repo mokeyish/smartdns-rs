@@ -223,7 +223,9 @@ mod tests {
             .build();
 
         assert_eq!(
-            cfg.find_domain_rule(&"google.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"google.com".parse().unwrap())
+                .cloned()
                 .unwrap()
                 .address,
             Some(AddressRuleValue::SOAv6)
@@ -259,7 +261,9 @@ mod tests {
             .build();
 
         assert_eq!(
-            cfg.find_domain_rule(&"google.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"google.com".parse().unwrap())
+                .cloned()
                 .unwrap()
                 .address,
             Some(AddressRuleValue::Addr {

@@ -31,13 +31,14 @@ homebrew = [ "common" ]
 
 common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client" ]
 
-nom-recipes-all =["nom-recipes-ip"]
+nom-recipes-all =["nom-recipes-ip", "nom-recipes-mac"]
 
 nom-recipes-ip = ["nom-recipes-ipv4", "nom-recipes-ipv6"]
 nom-recipes-ipv4 = []
 nom-recipes-ipv6 = [
   "nom-recipes-ipv4" # support IPv4-mapped IPv6 addresses
-] 
+]
+nom-recipes-mac = []
 
 failed_tests = []
 disable_icmp_ping = []
