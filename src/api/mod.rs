@@ -116,6 +116,11 @@ impl IntoResponse for crate::dns::DnsError {
 }
 
 #[derive(Deserialize, Serialize)]
+struct DataPayload<T> {
+    data: T,
+}
+
+#[derive(Deserialize, Serialize)]
 struct DataListPayload<T> {
     count: usize,
     data: Vec<T>,

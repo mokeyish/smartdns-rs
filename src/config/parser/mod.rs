@@ -6,6 +6,7 @@ use nom::{
 mod address_rule;
 mod bool;
 mod bytes;
+mod client_rule;
 mod cname;
 mod config_for_domain;
 mod domain;
@@ -16,8 +17,8 @@ mod forward_rule;
 mod glob_pattern;
 mod https_record;
 mod ip_alias;
+mod ip_net;
 mod ip_set;
-mod ipnet;
 mod iporset;
 mod listener;
 mod log_level;
@@ -96,8 +97,11 @@ pub enum OneConfig {
     CacheCheckpointTime(u64),
     CaFile(PathBuf),
     CaPath(PathBuf),
+    ClientRule(ClientRule),
     CNAME(ConfigForDomain<CNameRule>),
     SrvRecord(ConfigForDomain<SRV>),
+    GroupBegin(String),
+    GroupEnd,
     HttpsRecord(ConfigForDomain<HttpsRecordRule>),
     ConfFile(PathBuf),
     DnsmasqLeaseFile(PathBuf),
@@ -155,10 +159,17 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         opt(preceded(space1, preceded(char('#'), not_line_ending))).parse(input)
     }
 
+    fn parse_tag<'a>(
+        keyword: &'static str,
+    ) -> impl Parser<&'a str, Output = (&'a str, &'a str, &'a str), Error = nom::error::Error<&'a str>>
+    {
+        (space0, tag_no_case(keyword), space1)
+    }
+
     fn parse_item<'a, T: NomParser>(
         keyword: &'static str,
     ) -> impl Parser<&'a str, Output = T, Error = nom::error::Error<&'a str>> {
-        preceded((space0, tag_no_case(keyword), space1), T::parse)
+        preceded(parse_tag(keyword), T::parse)
     }
 
     let group1 = alt((
@@ -182,13 +193,15 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         ),
         map(parse_item("ca-file"), OneConfig::CaFile),
         map(parse_item("ca-path"), OneConfig::CaPath),
+        map(parse_item("client-rules"), OneConfig::ClientRule),
+        map(parse_item("client-rule"), OneConfig::ClientRule),
         map(parse_item("conf-file"), OneConfig::ConfFile),
-        map(parse_item("domain-rules"), OneConfig::DomainRule),
-        map(parse_item("domain-rule"), OneConfig::DomainRule),
-        map(parse_item("domain-set"), OneConfig::DomainSetProvider),
     ));
 
     let group2 = alt((
+        map(parse_item("domain-rules"), OneConfig::DomainRule),
+        map(parse_item("domain-rule"), OneConfig::DomainRule),
+        map(parse_item("domain-set"), OneConfig::DomainSetProvider),
         map(
             parse_item("dnsmasq-lease-file"),
             OneConfig::DnsmasqLeaseFile,
@@ -213,21 +226,23 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("force-HTTPS-SOA"), OneConfig::ForceHTTPSSOA),
         map(parse_item("force-qtype-soa"), OneConfig::ForceQtypeSoa),
         map(parse_item("response"), OneConfig::ResponseMode),
+        map(parse_item("group-begin"), OneConfig::GroupBegin),
+        map(parse_tag("group-end"), |_| OneConfig::GroupEnd),
         map(parse_item("prefetch-domain"), OneConfig::PrefetchDomain),
         map(parse_item("cname"), OneConfig::CNAME),
         map(parse_item("num-workers"), OneConfig::NumWorkers),
         map(parse_item("domain"), OneConfig::Domain),
         map(parse_item("hosts-file"), OneConfig::HostsFile),
         map(parse_item("https-record"), OneConfig::HttpsRecord),
+    ));
+
+    let group3 = alt((
         map(parse_item("ignore-ip"), OneConfig::IgnoreIp),
         map(parse_item("local-ttl"), OneConfig::LocalTtl),
         map(parse_item("log-console"), OneConfig::LogConsole),
         map(parse_item("log-file-mode"), OneConfig::LogFileMode),
         map(parse_item("log-file"), OneConfig::LogFile),
         map(parse_item("log-filter"), OneConfig::LogFilter),
-    ));
-
-    let group3 = alt((
         map(parse_item("log-level"), OneConfig::LogLevel),
         map(parse_item("log-num"), OneConfig::LogNum),
         map(parse_item("log-size"), OneConfig::LogSize),
@@ -241,6 +256,9 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(parse_item("rr-ttl"), OneConfig::RrTtl),
         map(parse_item("resolv-file"), OneConfig::ResolvFile),
         map(parse_item("resolv-hostanme"), OneConfig::ResolvHostname),
+    ));
+
+    let group4 = alt((
         map(parse_item("response-mode"), OneConfig::ResponseMode),
         map(parse_item("server-name"), OneConfig::ServerName),
         map(parse_item("speed-check-mode"), OneConfig::SpeedMode),
@@ -250,14 +268,14 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         ),
         map(parse_item("serve-expired-ttl"), OneConfig::ServeExpiredTtl),
         map(parse_item("serve-expired"), OneConfig::ServeExpired),
-    ));
-
-    let group4 = alt((
         map(parse_item("srv-record"), OneConfig::SrvRecord),
         map(parse_item("resolv-hostname"), OneConfig::ResolvHostname),
         map(parse_item("tcp-idle-time"), OneConfig::TcpIdleTime),
         map(parse_item("nftset"), OneConfig::NftSet),
         map(parse_item("user"), OneConfig::User),
+    ));
+
+    let group5 = alt((
         map(parse_item("whitelist-ip"), OneConfig::WhitelistIp),
         map(parse_item("ip-set"), OneConfig::IpSetProvider),
         map(parse_item("ip-alias"), OneConfig::IpAlias),
@@ -265,7 +283,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(NomParser::parse, OneConfig::Server),
     ));
 
-    let group = alt((group1, group2, group3, group4));
+    let group = alt((group1, group2, group3, group4, group5));
 
     terminated(group, comment).parse(input)
 }
