@@ -22,7 +22,6 @@ pub use crate::libdns::proto::{
 pub use crate::libdns::{
     proto::xfer::Protocol,
     resolver::{
-        ResolveError, ResolveErrorKind,
         config::{NameServerConfig, NameServerConfigGroup},
         lookup::Lookup,
     },
