@@ -17,8 +17,7 @@ use crate::{
     middleware::*,
 };
 
-use crate::libdns::proto::op::ResponseCode;
-use crate::libdns::proto::rr::rdata::opt::EdnsCode;
+use crate::libdns::proto::{AuthorityData, rr::rdata::opt::EdnsCode};
 use futures::FutureExt;
 use rr::rdata::opt::EdnsOption;
 use tokio::time::sleep;
@@ -607,16 +606,8 @@ async fn per_nameserver_lookup_ip(
             };
 
             if answers.is_empty() {
-                return Err(ProtoErrorKind::NoRecordsFound {
-                    query: Box::new(query),
-                    ns: None,
-                    soa: None,
-                    negative_ttl: None,
-                    response_code: ResponseCode::NoError,
-                    trusted: false,
-                    authorities: None,
-                }
-                .into());
+                let no_records = AuthorityData::new(Box::new(query), None, true, true, None);
+                return Err(ProtoErrorKind::NoRecordsFound(no_records.into()).into());
             }
 
             *lookup.answers_mut() = answers;
