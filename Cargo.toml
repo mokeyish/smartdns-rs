@@ -187,7 +187,7 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 rustls-pemfile = "2"
 rustls-native-certs = "0.8"
 
-lru = { version = "0.12", default-features = false }
+lru = { version = "0.14", default-features = false }
 # time = "0.3"
 chrono = { version = "0.4.38", default-features = false, features = ["serde", "clock"]}
 surge-ping = "0.8.1"
