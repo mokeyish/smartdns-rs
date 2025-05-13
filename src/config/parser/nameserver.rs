@@ -117,7 +117,7 @@ impl NomParser for NameServerInfo {
                         nameserver.interface = v.map(|p| p.to_string());
                     }
                     "subnet" => match v {
-                        Some(s) => nameserver.subnet = s.parse().ok(),
+                        Some(s) => nameserver.subnet = IpNet::parse(s).ok().map(|s| s.1),
                         None => {
                             log::warn!("expect suedns client subnetbnet")
                         }
@@ -208,6 +208,27 @@ mod tests {
                     bootstrap_dns: Default::default(),
                     resolve_group: None,
                     subnet: None,
+                    so_mark: None,
+                    interface: None,
+                }
+            ))
+        );
+
+        assert_eq!(
+            NameServerInfo::parse("server 8.8.8.8 -subnet 192.168.1.1"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
+                    group: Default::default(),
+                    blacklist_ip: Default::default(),
+                    whitelist_ip: Default::default(),
+                    check_edns: Default::default(),
+                    exclude_default_group: Default::default(),
+                    proxy: None,
+                    bootstrap_dns: Default::default(),
+                    resolve_group: None,
+                    subnet: Some("192.168.1.1/32".parse().unwrap()),
                     so_mark: None,
                     interface: None,
                 }
