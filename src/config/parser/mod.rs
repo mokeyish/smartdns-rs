@@ -36,7 +36,7 @@ mod svcb;
 
 use super::*;
 
-pub trait NomParser: Sized {
+pub(crate) trait NomParser: Sized {
     fn parse(input: &str) -> IResult<&str, Self>;
 
     // fn from_str(s: &str) -> Result<Self, nom::Err<nom::error::Error<&str>>> {
@@ -159,126 +159,119 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         opt(preceded(space1, preceded(char('#'), not_line_ending))).parse(input)
     }
 
-    fn parse_tag<'a>(
+    fn config_name<'a>(
         keyword: &'static str,
-    ) -> impl Parser<&'a str, Output = (&'a str, &'a str, &'a str), Error = nom::error::Error<&'a str>>
-    {
-        (space0, tag_no_case(keyword), space1)
+    ) -> impl Parser<&'a str, Output = &'a str, Error = nom::error::Error<&'a str>> {
+        preceded(space0, tag_no_case(keyword))
     }
 
-    fn parse_item<'a, T: NomParser>(
-        keyword: &'static str,
+    fn config<'a, T: NomParser>(
+        name: &'static str,
     ) -> impl Parser<&'a str, Output = T, Error = nom::error::Error<&'a str>> {
-        preceded(parse_tag(keyword), T::parse)
+        preceded(config_name(name), preceded(space1, T::parse))
     }
 
     let group1 = alt((
-        map(parse_item("address"), OneConfig::Address),
-        map(parse_item("audit-enable"), OneConfig::AuditEnable),
-        map(parse_item("audit-file-mode"), OneConfig::AuditFileMode),
-        map(parse_item("audit-file"), OneConfig::AuditFile),
-        map(parse_item("audit-num"), OneConfig::AuditNum),
-        map(parse_item("audit-size"), OneConfig::AuditSize),
-        map(parse_item("bind-cert-file"), OneConfig::BindCertFile),
-        map(parse_item("bind-cert-key-file"), OneConfig::BindCertKeyFile),
-        map(parse_item("bind-cert-key-pass"), OneConfig::BindCertKeyPass),
-        map(parse_item("bogus-nxdomain"), OneConfig::BogusNxDomain),
-        map(parse_item("blacklist-ip"), OneConfig::BlacklistIp),
-        map(parse_item("cache-file"), OneConfig::CacheFile),
-        map(parse_item("cache-persist"), OneConfig::CachePersist),
-        map(parse_item("cache-size"), OneConfig::CacheSize),
+        map(config("address"), OneConfig::Address),
+        map(config("audit-enable"), OneConfig::AuditEnable),
+        map(config("audit-file-mode"), OneConfig::AuditFileMode),
+        map(config("audit-file"), OneConfig::AuditFile),
+        map(config("audit-num"), OneConfig::AuditNum),
+        map(config("audit-size"), OneConfig::AuditSize),
+        map(config("bind-cert-file"), OneConfig::BindCertFile),
+        map(config("bind-cert-key-file"), OneConfig::BindCertKeyFile),
+        map(config("bind-cert-key-pass"), OneConfig::BindCertKeyPass),
+        map(config("bogus-nxdomain"), OneConfig::BogusNxDomain),
+        map(config("blacklist-ip"), OneConfig::BlacklistIp),
+        map(config("cache-file"), OneConfig::CacheFile),
+        map(config("cache-persist"), OneConfig::CachePersist),
+        map(config("cache-size"), OneConfig::CacheSize),
         map(
-            parse_item("cache-checkpoint-time"),
+            config("cache-checkpoint-time"),
             OneConfig::CacheCheckpointTime,
         ),
-        map(parse_item("ca-file"), OneConfig::CaFile),
-        map(parse_item("ca-path"), OneConfig::CaPath),
-        map(parse_item("client-rules"), OneConfig::ClientRule),
-        map(parse_item("client-rule"), OneConfig::ClientRule),
-        map(parse_item("conf-file"), OneConfig::ConfFile),
+        map(config("ca-file"), OneConfig::CaFile),
+        map(config("ca-path"), OneConfig::CaPath),
+        map(config("client-rules"), OneConfig::ClientRule),
+        map(config("client-rule"), OneConfig::ClientRule),
+        map(config("conf-file"), OneConfig::ConfFile),
     ));
 
     let group2 = alt((
-        map(parse_item("domain-rules"), OneConfig::DomainRule),
-        map(parse_item("domain-rule"), OneConfig::DomainRule),
-        map(parse_item("domain-set"), OneConfig::DomainSetProvider),
+        map(config("domain-rules"), OneConfig::DomainRule),
+        map(config("domain-rule"), OneConfig::DomainRule),
+        map(config("domain-set"), OneConfig::DomainSetProvider),
+        map(config("dnsmasq-lease-file"), OneConfig::DnsmasqLeaseFile),
         map(
-            parse_item("dnsmasq-lease-file"),
-            OneConfig::DnsmasqLeaseFile,
-        ),
-        map(
-            parse_item("dualstack-ip-allow-force-AAAA"),
+            config("dualstack-ip-allow-force-AAAA"),
             OneConfig::DualstackIpAllowForceAAAA,
         ),
         map(
-            parse_item("dualstack-ip-selection"),
+            config("dualstack-ip-selection"),
             OneConfig::DualstackIpSelection,
         ),
+        map(config("edns-client-subnet"), OneConfig::EdnsClientSubnet),
         map(
-            parse_item("edns-client-subnet"),
-            OneConfig::EdnsClientSubnet,
-        ),
-        map(
-            parse_item("expand-ptr-from-address"),
+            config("expand-ptr-from-address"),
             OneConfig::ExpandPtrFromAddress,
         ),
-        map(parse_item("force-AAAA-SOA"), OneConfig::ForceAAAASOA),
-        map(parse_item("force-HTTPS-SOA"), OneConfig::ForceHTTPSSOA),
-        map(parse_item("force-qtype-soa"), OneConfig::ForceQtypeSoa),
-        map(parse_item("response"), OneConfig::ResponseMode),
-        map(parse_item("group-begin"), OneConfig::GroupBegin),
-        map(parse_tag("group-end"), |_| OneConfig::GroupEnd),
-        map(parse_item("prefetch-domain"), OneConfig::PrefetchDomain),
-        map(parse_item("cname"), OneConfig::CNAME),
-        map(parse_item("num-workers"), OneConfig::NumWorkers),
-        map(parse_item("domain"), OneConfig::Domain),
-        map(parse_item("hosts-file"), OneConfig::HostsFile),
-        map(parse_item("https-record"), OneConfig::HttpsRecord),
+        map(config("force-AAAA-SOA"), OneConfig::ForceAAAASOA),
+        map(config("force-HTTPS-SOA"), OneConfig::ForceHTTPSSOA),
+        map(config("force-qtype-soa"), OneConfig::ForceQtypeSoa),
+        map(config("response"), OneConfig::ResponseMode),
+        map(config("group-begin"), OneConfig::GroupBegin),
+        map(config_name("group-end"), |_| OneConfig::GroupEnd),
+        map(config("prefetch-domain"), OneConfig::PrefetchDomain),
+        map(config("cname"), OneConfig::CNAME),
+        map(config("num-workers"), OneConfig::NumWorkers),
+        map(config("domain"), OneConfig::Domain),
+        map(config("hosts-file"), OneConfig::HostsFile),
+        map(config("https-record"), OneConfig::HttpsRecord),
     ));
 
     let group3 = alt((
-        map(parse_item("ignore-ip"), OneConfig::IgnoreIp),
-        map(parse_item("local-ttl"), OneConfig::LocalTtl),
-        map(parse_item("log-console"), OneConfig::LogConsole),
-        map(parse_item("log-file-mode"), OneConfig::LogFileMode),
-        map(parse_item("log-file"), OneConfig::LogFile),
-        map(parse_item("log-filter"), OneConfig::LogFilter),
-        map(parse_item("log-level"), OneConfig::LogLevel),
-        map(parse_item("log-num"), OneConfig::LogNum),
-        map(parse_item("log-size"), OneConfig::LogSize),
-        map(parse_item("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
-        map(parse_item("mdns-lookup"), OneConfig::MdnsLookup),
-        map(parse_item("nameserver"), OneConfig::ForwardRule),
-        map(parse_item("proxy-server"), OneConfig::ProxyConfig),
-        map(parse_item("rr-ttl-reply-max"), OneConfig::RrTtlReplyMax),
-        map(parse_item("rr-ttl-min"), OneConfig::RrTtlMin),
-        map(parse_item("rr-ttl-max"), OneConfig::RrTtlMax),
-        map(parse_item("rr-ttl"), OneConfig::RrTtl),
-        map(parse_item("resolv-file"), OneConfig::ResolvFile),
-        map(parse_item("resolv-hostanme"), OneConfig::ResolvHostname),
+        map(config("ignore-ip"), OneConfig::IgnoreIp),
+        map(config("local-ttl"), OneConfig::LocalTtl),
+        map(config("log-console"), OneConfig::LogConsole),
+        map(config("log-file-mode"), OneConfig::LogFileMode),
+        map(config("log-file"), OneConfig::LogFile),
+        map(config("log-filter"), OneConfig::LogFilter),
+        map(config("log-level"), OneConfig::LogLevel),
+        map(config("log-num"), OneConfig::LogNum),
+        map(config("log-size"), OneConfig::LogSize),
+        map(config("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
+        map(config("mdns-lookup"), OneConfig::MdnsLookup),
+        map(config("nameserver"), OneConfig::ForwardRule),
+        map(config("proxy-server"), OneConfig::ProxyConfig),
+        map(config("rr-ttl-reply-max"), OneConfig::RrTtlReplyMax),
+        map(config("rr-ttl-min"), OneConfig::RrTtlMin),
+        map(config("rr-ttl-max"), OneConfig::RrTtlMax),
+        map(config("rr-ttl"), OneConfig::RrTtl),
+        map(config("resolv-file"), OneConfig::ResolvFile),
+        map(config("resolv-hostanme"), OneConfig::ResolvHostname),
     ));
 
     let group4 = alt((
-        map(parse_item("response-mode"), OneConfig::ResponseMode),
-        map(parse_item("server-name"), OneConfig::ServerName),
-        map(parse_item("speed-check-mode"), OneConfig::SpeedMode),
+        map(config("response-mode"), OneConfig::ResponseMode),
+        map(config("server-name"), OneConfig::ServerName),
+        map(config("speed-check-mode"), OneConfig::SpeedMode),
         map(
-            parse_item("serve-expired-reply-ttl"),
+            config("serve-expired-reply-ttl"),
             OneConfig::ServeExpiredReplyTtl,
         ),
-        map(parse_item("serve-expired-ttl"), OneConfig::ServeExpiredTtl),
-        map(parse_item("serve-expired"), OneConfig::ServeExpired),
-        map(parse_item("srv-record"), OneConfig::SrvRecord),
-        map(parse_item("resolv-hostname"), OneConfig::ResolvHostname),
-        map(parse_item("tcp-idle-time"), OneConfig::TcpIdleTime),
-        map(parse_item("nftset"), OneConfig::NftSet),
-        map(parse_item("user"), OneConfig::User),
+        map(config("serve-expired-ttl"), OneConfig::ServeExpiredTtl),
+        map(config("serve-expired"), OneConfig::ServeExpired),
+        map(config("srv-record"), OneConfig::SrvRecord),
+        map(config("resolv-hostname"), OneConfig::ResolvHostname),
+        map(config("tcp-idle-time"), OneConfig::TcpIdleTime),
+        map(config("nftset"), OneConfig::NftSet),
+        map(config("user"), OneConfig::User),
     ));
 
     let group5 = alt((
-        map(parse_item("whitelist-ip"), OneConfig::WhitelistIp),
-        map(parse_item("ip-set"), OneConfig::IpSetProvider),
-        map(parse_item("ip-alias"), OneConfig::IpAlias),
+        map(config("whitelist-ip"), OneConfig::WhitelistIp),
+        map(config("ip-set"), OneConfig::IpSetProvider),
+        map(config("ip-alias"), OneConfig::IpAlias),
         map(NomParser::parse, OneConfig::Listener),
         map(NomParser::parse, OneConfig::Server),
     ));

@@ -4,13 +4,27 @@ use super::*;
 
 impl NomParser for IpNet {
     fn parse(input: &str) -> IResult<&str, Self> {
-        alt((
-            map_res(is_a("0123456789abcdef:./"), IpNet::from_str),
+        map_res(
             map(
-                map_res(is_a("0123456789abcdef:./"), IpAddr::from_str),
-                |ip| ip.into(),
+                pair(
+                    nom_recipes::ip,
+                    opt(preceded(
+                        char('/'),
+                        map_res(digit1, |s: &str| s.parse::<u8>()),
+                    )),
+                ),
+                |(ip, len)| {
+                    (
+                        ip,
+                        len.unwrap_or(match ip {
+                            IpAddr::V4(_) => 32,
+                            IpAddr::V6(_) => 128,
+                        }),
+                    )
+                },
             ),
-        ))
+            |(ip, len)| IpNet::new(ip, len),
+        )
         .parse(input)
     }
 }
