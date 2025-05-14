@@ -14,7 +14,7 @@ use crate::dns::DomainRuleGetter;
 use crate::infra::ipset::IpMap;
 use crate::log;
 use crate::{
-    dns_rule::DomainRuleMap,
+    dns_rule::{DomainRuleMap, DomainRuleTreeNode},
     infra::ipset::IpSet,
     libdns::proto::rr::{Name, RecordType},
     log::{debug, info, warn},
@@ -575,6 +575,14 @@ impl RuntimeConfig {
         self.domain_rule_group_map
             .get(name)
             .unwrap_or(DomainRuleMap::empty())
+    }
+
+    #[inline]
+    pub fn find_domain_rule(&self, domain: &Name, group: &str) -> Option<Arc<DomainRuleTreeNode>> {
+        self.domain_rule_group(group)
+            .find(domain)
+            .or_else(|| self.domain_rule_group(DEFAULT_GROUP).find(domain))
+            .cloned()
     }
 
     fn get_server_group(&self, group: &str) -> Vec<&NameServerInfo> {

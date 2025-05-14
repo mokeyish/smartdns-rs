@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, net::IpAddr, sync::Arc};
 
 use crate::libdns::proto::{
     op::Query,
@@ -44,9 +44,10 @@ impl DnsMiddlewareHandler {
                 std::net::IpAddr::V4(addr) => {
                     IpNet::V4(Ipv4Net::new(addr, s.source_prefix()).unwrap())
                 }
-                std::net::IpAddr::V6(addr) => {
-                    IpNet::V6(Ipv6Net::new(addr, s.source_prefix()).unwrap())
-                }
+                std::net::IpAddr::V6(addr) => match addr.to_ipv4_mapped() {
+                    Some(addr) => IpNet::V4(Ipv4Net::new(addr, s.source_prefix()).unwrap()),
+                    None => IpNet::V6(Ipv6Net::new(addr, s.source_prefix()).unwrap()),
+                },
             });
 
         let client_rules = cfg.client_rules();
@@ -56,7 +57,14 @@ impl DnsMiddlewareHandler {
                 .find(|s| s.match_net(&subnet))
                 .map(|s| s.group.as_str()),
             None => {
-                let client_ip = req.src().ip();
+                let mut client_ip = req.src().ip();
+
+                if let IpAddr::V6(addr) = client_ip {
+                    if let Some(addr) = addr.to_ipv4_mapped() {
+                        client_ip = addr.into();
+                    }
+                }
+
                 client_rules
                     .iter()
                     .find(|s| s.match_ip(&client_ip))
