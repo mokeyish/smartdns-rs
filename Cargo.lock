@@ -1132,7 +1132,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hickory-proto"
 version = "0.26.0-alpha.1"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.1#e05c7b3007835c0d073c23b2bd716f2be537702b"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.3#6e036072b0324a845e2dca02fc5b9417267cc6cb"
 dependencies = [
  "async-trait",
  "bitflags",
@@ -1157,6 +1157,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde",
+ "socket2",
  "thiserror 2.0.12",
  "time",
  "tinyvec",
@@ -1169,7 +1170,7 @@ dependencies = [
 [[package]]
 name = "hickory-resolver"
 version = "0.26.0-alpha.1"
-source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.1#e05c7b3007835c0d073c23b2bd716f2be537702b"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.3#6e036072b0324a845e2dca02fc5b9417267cc6cb"
 dependencies = [
  "cfg-if",
  "futures-util",

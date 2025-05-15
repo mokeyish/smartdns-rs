@@ -29,7 +29,7 @@ default = ["common", "self-update" ]
 
 homebrew = [ "common" ]
 
-common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client" ]
+common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "mdns", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client" ]
 
 nom-recipes-all =["nom-recipes-ip", "nom-recipes-mac"]
 
@@ -63,7 +63,10 @@ dns-over-h3 = [
   "hickory-resolver/h3-ring"
 ]
 
-mdns = []
+mdns = [
+  "hickory-proto/mdns",
+  "hickory-resolver/mdns",
+]
 
 service = [
   "dep:which",
@@ -174,8 +177,8 @@ tracing-subscriber = { version = "0.3", features = [
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.1", features = ["serde"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.1", features = [
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.3", features = ["serde"]}
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.3", features = [
   "serde",
   "system-config",
 ] }

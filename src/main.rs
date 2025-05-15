@@ -2,7 +2,9 @@
 // #![feature(test)]
 
 use cli::*;
-use std::path::PathBuf;
+use config::NameServerInfo;
+use dns_url::DnsUrl;
+use std::{path::PathBuf, str::FromStr};
 
 mod api;
 mod app;
@@ -225,6 +227,23 @@ impl RuntimeConfig {
         let proxies = self.proxies().clone();
 
         let mut builder = DnsClient::builder();
+
+        #[cfg(feature = "mdns")]
+        if self.mdns_lookup() {
+            use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
+            let mdns_servers = [*MDNS_IPV4, *MDNS_IPV6]
+                .into_iter()
+                .map(|ip| format!("mdns://{}", ip))
+                .flat_map(|s| DnsUrl::from_str(&s).ok())
+                .map(|url| {
+                    let mut config = NameServerInfo::from(url);
+                    config.group = vec!["mdns".to_string()];
+                    config.exclude_default_group = true;
+                    config
+                })
+                .collect::<Vec<_>>();
+            builder = builder.add_servers(mdns_servers.to_vec());
+        }
         builder = builder.add_servers(servers.to_vec());
         if let Some(path) = ca_path {
             builder = builder.with_ca_path(path.to_owned());
