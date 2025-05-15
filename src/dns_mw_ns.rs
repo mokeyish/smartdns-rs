@@ -17,6 +17,7 @@ use crate::{
     middleware::*,
 };
 
+use crate::libdns::proto::rr::domain::usage::LOCAL;
 use crate::libdns::proto::{AuthorityData, rr::rdata::opt::EdnsCode};
 use futures::FutureExt;
 use rr::rdata::opt::EdnsOption;
@@ -85,11 +86,24 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
         let group_name = ctx.server_group_name().to_string();
 
-        let name_server = match client.get_server_group(group_name.as_ref()).await {
-            Some(ns) => ns,
-            None => {
-                error!("no available nameserver found for {}", name);
-                return Err(ProtoErrorKind::NoConnections.into());
+        let name_server = {
+            let name_server = if ctx.cfg().mdns_lookup() && LOCAL.zone_of(name) {
+                client.get_server_group("mdns").await
+            } else {
+                None
+            };
+
+            let name_server = match name_server {
+                Some(ns) => Some(ns),
+                None => client.get_server_group(group_name.as_ref()).await,
+            };
+
+            match name_server {
+                Some(ns) => ns,
+                None => {
+                    error!("no available nameserver found for {}", name);
+                    return Err(ProtoErrorKind::NoConnections.into());
+                }
             }
         };
 

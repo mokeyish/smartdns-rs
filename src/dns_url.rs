@@ -1,3 +1,5 @@
+#[cfg(feature = "mdns")]
+use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
 use crate::libdns::proto::xfer::Protocol;
 use std::collections::BTreeMap;
 use std::hash::Hash;
@@ -168,10 +170,34 @@ impl FromStr for DnsUrl {
 
         if let Host::Domain(ref domain) = host {
             if let Ok(ip) = IpAddr::from_str(domain) {
-                host = match ip {
-                    IpAddr::V4(ip) => Host::Ipv4(ip),
-                    IpAddr::V6(ip) => Host::Ipv6(ip),
-                };
+                #[cfg(feature = "mdns")]
+                {
+                    host = match ip {
+                        IpAddr::V4(ip) => {
+                            if MDNS_IPV4.ip().eq(&ip)
+                                && matches!(port, Some(port) if port == MDNS_IPV4.port())
+                            {
+                                proto = Protocol::Mdns;
+                            }
+                            Host::Ipv4(ip)
+                        }
+                        IpAddr::V6(ip) => {
+                            if MDNS_IPV6.ip().eq(&ip)
+                                && matches!(port, Some(port) if port == MDNS_IPV6.port())
+                            {
+                                proto = Protocol::Mdns;
+                            }
+                            Host::Ipv6(ip)
+                        }
+                    };
+                }
+                #[cfg(not(feature = "mdns"))]
+                {
+                    host = match ip {
+                        IpAddr::V4(ip) => Host::Ipv4(ip),
+                        IpAddr::V6(ip) => Host::Ipv6(ip),
+                    };
+                }
             }
         }
 
@@ -217,6 +243,8 @@ impl std::fmt::Display for DnsUrl {
                     "h3://"
                 }
             }
+            #[cfg(feature = "mdns")]
+            Mdns => "mdns://",
             _ => unimplemented!(),
         };
         write!(f, "{}", proto)?;
@@ -294,7 +322,6 @@ fn dns_proto_default_port(proto: &Protocol) -> u16 {
         #[cfg(feature = "dns-over-quic")]
         Quic => 853,
         #[cfg(feature = "mdns")]
-        #[cfg_attr(docsrs, doc(cfg(feature = "mdns")))]
         Mdns => 5353,
         _ => unimplemented!(),
     }
