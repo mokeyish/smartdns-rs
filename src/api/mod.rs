@@ -5,9 +5,12 @@ use axum::{
     routing::get,
 };
 use cfg_if::cfg_if;
+use http::{HeaderValue, header};
 use openapi::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tower::ServiceBuilder;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 mod address;
 mod audit;
@@ -40,28 +43,37 @@ pub fn routes() -> axum::Router<Arc<ServeState>> {
         .version(crate::version())
         .build();
 
-    cfg_if! {
-        if #[cfg(feature = "swagger-ui-cdn")]
-        {
-            router.merge(openapi::swagger_cdn("/api/docs", "/api/openapi.json", openapi, None))
+    let router = {
+        cfg_if! {
+            if #[cfg(feature = "swagger-ui-cdn")]
+            {
+                router.merge(openapi::swagger_cdn("/api/docs", "/api/openapi.json", openapi, None))
+            }
+            else if #[cfg(feature = "swagger-ui-embed")]
+            {
+                use utoipa_swagger_ui::{Config, SwaggerUi};
+                router.merge(
+                    SwaggerUi::new("/api/docs")
+                        .config(
+                            Config::default()
+                                .show_extensions(true)
+                                .show_common_extensions(true)
+                                .use_base_layout(),
+                        )
+                        .url("/api/openapi.json", openapi),
+                )
+            } else {
+                router
+            }
         }
-        else if #[cfg(feature = "swagger-ui-embed")]
-        {
-            use utoipa_swagger_ui::{Config, SwaggerUi};
-            router.merge(
-                SwaggerUi::new("/api/docs")
-                    .config(
-                        Config::default()
-                            .show_extensions(true)
-                            .show_common_extensions(true)
-                            .use_base_layout(),
-                    )
-                    .url("/api/openapi.json", openapi),
-            )
-        } else {
-            router
-        }
-    }
+    };
+
+    router.layer(
+        ServiceBuilder::new().layer(SetResponseHeaderLayer::overriding(
+            header::SERVER,
+            HeaderValue::from_static(crate::NAME),
+        )),
+    )
 }
 
 fn api_routes() -> StatefulRouter {

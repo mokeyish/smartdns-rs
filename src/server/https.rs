@@ -1,20 +1,15 @@
-use axum::{
-    Router,
-    extract::{Request, connect_info::IntoMakeServiceWithConnectInfo},
-};
+use axum::extract::Request;
+use http::{HeaderValue, header};
 use hyper::body::Incoming;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server,
 };
 use std::{convert::Infallible, io, net::SocketAddr, sync::Arc};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net,
-    task::JoinSet,
-};
+use tokio::{net, task::JoinSet};
 use tokio_util::sync::CancellationToken;
-use tower::{Service as _, ServiceExt};
+use tower::{Service as _, ServiceBuilder, ServiceExt};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use tokio_rustls::TlsAcceptor;
 
@@ -32,6 +27,7 @@ pub fn serve(
     listener: net::TcpListener,
     dns_handle: DnsHandle,
     server_cert_resolver: Arc<dyn ResolvesServerCert>,
+    h3_port: Option<u16>,
 ) -> io::Result<CancellationToken> {
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
@@ -49,7 +45,16 @@ pub fn serve(
 
     let state = Arc::new(ServeState { app, dns_handle });
 
+    let service_builder = ServiceBuilder::new().option_layer(h3_port.map(|port| {
+        let alt_svc = format!(r#"h3=":{port}"; h3-29=":{port}"; ma=86400"#);
+        SetResponseHeaderLayer::overriding(
+            header::ALT_SVC,
+            HeaderValue::from_str(alt_svc.as_str()).expect("invalid header value"), // TODO: handle error better?
+        )
+    }));
+
     let make_service = crate::api::routes()
+        .layer(service_builder)
         .with_state(state.clone())
         .into_make_service_with_connect_info::<SocketAddr>();
 
@@ -97,7 +102,24 @@ pub fn serve(
                     }
                 };
                 log::debug!("accepted HTTPS request from: {}", src_addr);
-                serve_connection(&mut make_service, socket, src_addr).await;
+
+                let tower_service = unwrap_infallible(make_service.call(src_addr).await);
+
+                let hyper_service =
+                    hyper::service::service_fn(move |request: Request<Incoming>| {
+                        tower_service.clone().oneshot(request)
+                    });
+
+                let socket = TokioIo::new(socket);
+
+                if let Err(err) = server::conn::auto::Builder::new(TokioExecutor::new())
+                    .http2()
+                    .enable_connect_protocol()
+                    .serve_connection_with_upgrades(socket, hyper_service)
+                    .await
+                {
+                    eprintln!("failed to serve connection: {err:#}");
+                }
             });
 
             reap_tasks(&mut inner_join_set);
@@ -105,30 +127,6 @@ pub fn serve(
     });
 
     Ok(token)
-}
-
-async fn serve_connection<I>(
-    make_service: &mut IntoMakeServiceWithConnectInfo<Router, SocketAddr>,
-    io: I,
-    src_addr: SocketAddr,
-) where
-    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    let socket = TokioIo::new(io);
-    let tower_service = unwrap_infallible(make_service.call(src_addr).await);
-
-    let hyper_service = hyper::service::service_fn(move |request: Request<Incoming>| {
-        tower_service.clone().oneshot(request)
-    });
-
-    if let Err(err) = server::conn::auto::Builder::new(TokioExecutor::new())
-        .http2()
-        .enable_connect_protocol()
-        .serve_connection_with_upgrades(socket, hyper_service)
-        .await
-    {
-        eprintln!("failed to serve connection: {err:#}");
-    }
 }
 
 fn unwrap_infallible<T>(result: Result<T, Infallible>) -> T {

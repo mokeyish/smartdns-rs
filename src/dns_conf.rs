@@ -867,8 +867,18 @@ impl RuntimeConfigBuilder {
                 AuditFileMode(v) => self.audit.file_mode = Some(v),
                 AuditNum(v) => self.audit.num = Some(v),
                 AuditSize(v) => self.audit.size = Some(v),
-                BindCertFile(v) => self.bind_cert_file = Some(v),
-                BindCertKeyFile(v) => self.bind_cert_key_file = Some(v),
+                BindCertFile(mut v) => {
+                    if !v.exists() {
+                        v = resolve_filepath(&v, self.conf_file.as_ref());
+                    }
+                    self.bind_cert_file = Some(v)
+                }
+                BindCertKeyFile(mut v) => {
+                    if !v.exists() {
+                        v = resolve_filepath(&v, self.conf_file.as_ref());
+                    }
+                    self.bind_cert_key_file = Some(v)
+                }
                 BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
                 CacheFile(v) => self.cache.file = Some(v),
                 CachePersist(v) => self.cache.persist = Some(v),

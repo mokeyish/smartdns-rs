@@ -70,7 +70,7 @@ pub fn setup_udp_socket(
         sock_ref.set_nonblocking(true)?;
         sock_ref.set_reuse_address(true)?;
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         sock_ref.set_reuse_port(true)?;
 
         #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
