@@ -4,6 +4,7 @@ use nom::{
 };
 
 mod address_rule;
+mod bind_addr;
 mod bool;
 mod bytes;
 mod client_rule;
@@ -20,7 +21,6 @@ mod ip_alias;
 mod ip_net;
 mod ip_set;
 mod iporset;
-mod listener;
 mod log_level;
 mod nameserver;
 mod nftset;
@@ -119,7 +119,7 @@ pub enum OneConfig {
     ForwardRule(ForwardRule),
     HostsFile(glob::Pattern),
     IgnoreIp(IpOrSet),
-    Listener(ListenerConfig),
+    Listener(BindAddrConfig),
     LocalTtl(u64),
     LogConsole(bool),
     LogNum(u64),

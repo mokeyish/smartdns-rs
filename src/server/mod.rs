@@ -1,3 +1,5 @@
+#[cfg(feature = "dns-over-h3")]
+mod h3;
 #[cfg(feature = "dns-over-https")]
 mod https;
 mod net;
@@ -27,13 +29,13 @@ use tokio::{
 
 use crate::{
     app::App,
-    config::{IListenerConfig as _, ListenerConfig, ServerOpts},
+    config::{BindAddrConfig, IBindConfig as _, ServerOpts},
     dns::{DnsRequest, SerialMessage},
 };
 
 pub async fn serve(
     app: &Arc<App>,
-    listener_config: &ListenerConfig,
+    bind_addr_config: &BindAddrConfig,
     handle: &DnsHandle,
     idle_time: u64,
     certificate_file: Option<&Path>,
@@ -43,7 +45,7 @@ pub async fn serve(
     use net::{bind_to, setup_tcp_socket, setup_udp_socket};
     use std::time::Duration;
 
-    let dns_handle = handle.with_new_opt(listener_config.server_opts().clone());
+    let dns_handle = handle.with_new_opt(bind_addr_config.server_opts().clone());
 
     fn create_cert_resolver(
         ssl_config: &SslConfig,
@@ -65,29 +67,29 @@ pub async fn serve(
         Ok(Arc::new(resolver))
     }
 
-    let token = match listener_config {
-        ListenerConfig::Udp(listener) => {
-            let udp_socket = bind_to(
+    let token = match bind_addr_config {
+        BindAddrConfig::Udp(bind_addr_config) => {
+            let socket = bind_to(
                 setup_udp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 "UDP",
             );
-            udp::serve(udp_socket, dns_handle)
+            udp::serve(socket, dns_handle)
         }
-        ListenerConfig::Tcp(listener) => {
-            let tcp_listener = bind_to(
+        BindAddrConfig::Tcp(bind_addr_config) => {
+            let listener = bind_to(
                 setup_tcp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 "TCP",
             );
-            tcp::serve(tcp_listener, dns_handle, Duration::from_secs(idle_time))
+            tcp::serve(listener, dns_handle, Duration::from_secs(idle_time))
         }
         #[cfg(feature = "dns-over-tls")]
-        ListenerConfig::Tls(listener) => {
+        BindAddrConfig::Tls(bind_addr_config) => {
             const LISTENER_TYPE: &str = "DNS over TLS";
-            let ssl_config = &listener.ssl_config;
+            let ssl_config = &bind_addr_config.ssl_config;
 
             let server_cert_resolver = create_cert_resolver(
                 ssl_config,
@@ -96,24 +98,24 @@ pub async fn serve(
                 LISTENER_TYPE,
             )?;
 
-            let tls_listener = bind_to(
+            let listener = bind_to(
                 setup_tcp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 LISTENER_TYPE,
             );
 
             tls::serve(
-                tls_listener,
+                listener,
                 dns_handle,
                 Duration::from_secs(idle_time),
                 server_cert_resolver,
             )?
         }
         #[cfg(feature = "dns-over-https")]
-        ListenerConfig::Https(listener) => {
+        BindAddrConfig::Https(bind_addr_config) => {
             const LISTENER_TYPE: &str = "DNS over HTTPS";
-            let ssl_config = &listener.ssl_config;
+            let ssl_config = &bind_addr_config.ssl_config;
 
             let server_cert_resolver = create_cert_resolver(
                 ssl_config,
@@ -122,20 +124,20 @@ pub async fn serve(
                 LISTENER_TYPE,
             )?;
 
-            let https_listener = bind_to(
+            let listener = bind_to(
                 setup_tcp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 LISTENER_TYPE,
             );
 
             let app = app.clone();
-            https::serve(app, https_listener, dns_handle, server_cert_resolver)?
+            https::serve(app, listener, dns_handle, server_cert_resolver)?
         }
-        #[cfg(feature = "dns-over-quic")]
-        ListenerConfig::Quic(listener) => {
-            const LISTENER_TYPE: &str = "DNS over QUIC";
-            let ssl_config = &listener.ssl_config;
+        #[cfg(feature = "dns-over-h3")]
+        BindAddrConfig::H3(bind_addr_config) => {
+            const LISTENER_TYPE: &str = "DNS over H3";
+            let ssl_config = &bind_addr_config.ssl_config;
 
             let server_cert_resolver = create_cert_resolver(
                 ssl_config,
@@ -144,15 +146,37 @@ pub async fn serve(
                 LISTENER_TYPE,
             )?;
 
-            let quic_listener = bind_to(
+            let listener = bind_to(
                 setup_udp_socket,
-                listener.sock_addr(),
-                listener.device(),
-                "QUIC",
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
+                LISTENER_TYPE,
+            );
+
+            let app = app.clone();
+            h3::serve(app, listener, dns_handle, server_cert_resolver)?
+        }
+        #[cfg(feature = "dns-over-quic")]
+        BindAddrConfig::Quic(bind_addr_config) => {
+            const LISTENER_TYPE: &str = "DNS over QUIC";
+            let ssl_config = &bind_addr_config.ssl_config;
+
+            let server_cert_resolver = create_cert_resolver(
+                ssl_config,
+                certificate_file,
+                certificate_key_file,
+                LISTENER_TYPE,
+            )?;
+
+            let listener = bind_to(
+                setup_udp_socket,
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
+                LISTENER_TYPE,
             );
 
             quic::serve(
-                quic_listener,
+                listener,
                 dns_handle,
                 Duration::from_secs(idle_time),
                 server_cert_resolver,
@@ -160,15 +184,19 @@ pub async fn serve(
             )?
         }
         #[cfg(not(feature = "dns-over-tls"))]
-        ListenerConfig::Tls(listener) => {
+        BindAddrConfig::Tls(_) => {
             warn!("Bind DoT not enabled")
         }
         #[cfg(not(feature = "dns-over-https"))]
-        ListenerConfig::Https(listener) => {
+        BindAddrConfig::Https(_) => {
             warn!("Bind DoH not enabled")
         }
+        #[cfg(not(feature = "dns-over-h3"))]
+        BindAddrConfig::H3(_) => {
+            warn!("Bind DoH3 not enabled")
+        }
         #[cfg(not(feature = "dns-over-quic"))]
-        ListenerConfig::Quic(listener) => {
+        BindAddrConfig::Quic(_) => {
             warn!("Bind DoQ not enabled")
         }
     };

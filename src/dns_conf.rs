@@ -201,7 +201,7 @@ impl RuntimeConfig {
             .unwrap_or(std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
     }
 
-    pub fn listeners(&self) -> &[ListenerConfig] {
+    pub fn listeners(&self) -> &[BindAddrConfig] {
         &self.listeners
     }
 
@@ -627,7 +627,7 @@ impl RuntimeConfigBuilder {
         }
 
         if cfg.listeners.is_empty() {
-            cfg.listeners.push(UdpListenerConfig::default().into())
+            cfg.listeners.push(UdpBindAddrConfig::default().into())
         }
 
         fn get_ip_set<'a>(ip: &'a IpOrSet, cfg: &'a Config) -> &'a [IpNet] {
@@ -738,15 +738,15 @@ impl RuntimeConfigBuilder {
                                 warn!("network device {} not found.", device);
                             }
 
-                            let ip = ips.into_iter().find(|ip| match listener.listen() {
-                                ListenerAddress::Localhost => true,
-                                ListenerAddress::All => true,
-                                ListenerAddress::V4(_) => ip.is_ipv4(),
-                                ListenerAddress::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
+                            let ip = ips.into_iter().find(|ip| match listener.addr() {
+                                BindAddr::Localhost => true,
+                                BindAddr::All => true,
+                                BindAddr::V4(_) => ip.is_ipv4(),
+                                BindAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
                             });
 
                             match ip {
-                                Some(ip) => *listener.mut_listen() = ip.into(),
+                                Some(ip) => *listener.mut_addr() = ip.into(),
                                 None => {
                                     warn!("no ip address on device {}", device)
                                 }
@@ -768,7 +768,7 @@ impl RuntimeConfigBuilder {
             let mut remove_idx = vec![];
             for (idx, listener) in cfg.listeners.iter().enumerate().rev() {
                 let addr = listener.sock_addr();
-                if matches!(listener, ListenerConfig::Udp(_) | ListenerConfig::Quic(_)) {
+                if matches!(listener, BindAddrConfig::Udp(_) | BindAddrConfig::Quic(_)) {
                     if !udp_addr.insert(addr) {
                         remove_idx.push(idx)
                     }
@@ -1048,7 +1048,7 @@ mod tests {
     use crate::{dns::DomainRuleGetter, libdns::Protocol};
     use byte_unit::Byte;
 
-    use crate::config::{HttpsListenerConfig, ListenerAddress, ServerOpts, SslConfig};
+    use crate::config::{BindAddr, HttpsBindAddrConfig, ServerOpts, SslConfig};
 
     use super::*;
 
@@ -1063,21 +1063,21 @@ mod tests {
         assert_eq!(
             cfg.listeners()
                 .iter()
-                .filter(|x| matches!(x, ListenerConfig::Tcp(_)))
+                .filter(|x| matches!(x, BindAddrConfig::Tcp(_)))
                 .count(),
             0
         );
         assert_eq!(
             cfg.listeners()
                 .iter()
-                .filter(|x| matches!(x, ListenerConfig::Tls(_)))
+                .filter(|x| matches!(x, BindAddrConfig::Tls(_)))
                 .count(),
             1
         );
         assert_eq!(
             cfg.listeners()
                 .iter()
-                .filter(|x| matches!(x, ListenerConfig::Https(_)))
+                .filter(|x| matches!(x, BindAddrConfig::Https(_)))
                 .count(),
             1
         );
@@ -1094,10 +1094,7 @@ mod tests {
 
         let bind = cfg.listeners().first().unwrap();
 
-        assert_eq!(
-            bind.listen(),
-            ListenerAddress::V4("0.0.0.0".parse().unwrap())
-        );
+        assert_eq!(bind.addr(), BindAddr::V4("0.0.0.0".parse().unwrap()));
         assert_eq!(bind.port(), 4453);
 
         assert_eq!(bind.device(), Some("eth100"));
@@ -1113,8 +1110,8 @@ mod tests {
 
         assert_eq!(
             listener,
-            &ListenerConfig::Https(HttpsListenerConfig {
-                listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+            &BindAddrConfig::Https(HttpsBindAddrConfig {
+                addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                 port: 443,
                 device: Some("eth2".to_string()),
                 opts: ServerOpts {
@@ -1142,8 +1139,8 @@ mod tests {
 
         assert_eq!(
             listener,
-            &ListenerConfig::Https(HttpsListenerConfig {
-                listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+            &BindAddrConfig::Https(HttpsBindAddrConfig {
+                addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                 port: 4453,
                 ssl_config: SslConfig {
                     server_name: Some("dns.example.com".to_string()),

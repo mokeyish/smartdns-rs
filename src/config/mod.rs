@@ -22,13 +22,13 @@ use ipnet::IpNet;
 use serde::{self, Deserialize, Serialize};
 
 mod audit;
+mod bind_addr;
 mod cache;
 mod client_rule;
 mod domain;
 mod domain_rule;
 mod domain_set;
 mod ip_set;
-mod listener;
 mod log;
 mod nameserver;
 pub mod parser;
@@ -38,13 +38,13 @@ mod server_opts;
 mod speed_mode;
 
 pub use audit::*;
+pub use bind_addr::*;
 pub use cache::*;
 pub use client_rule::*;
 pub use domain::*;
 pub use domain_rule::*;
 pub use domain_set::*;
 pub use ip_set::*;
-pub use listener::*;
 pub use log::*;
 pub use nameserver::*;
 pub use response_mode::*;
@@ -109,7 +109,7 @@ pub struct Config {
     pub conf_file: Option<PathBuf>,
 
     /// listeners
-    pub listeners: Vec<ListenerConfig>,
+    pub listeners: Vec<BindAddrConfig>,
 
     /// SSL Certificate file path
     pub bind_cert_file: Option<PathBuf>,
@@ -407,4 +407,4 @@ macro_rules! impl_from_str {
     };
 }
 
-impl_from_str!(AddressRule, Domain, AddressRuleValue, ListenerAddress);
+impl_from_str!(AddressRule, Domain, AddressRuleValue, BindAddr);
