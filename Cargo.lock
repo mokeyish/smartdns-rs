@@ -222,6 +222,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-h3"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f734ad750ac04711db93582e340bc2effb3cf0ba3e12621869e81585153b99d"
+dependencies = [
+ "axum",
+ "futures",
+ "h3 0.0.8",
+ "h3-util",
+ "hyper",
+ "hyper-util",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1089,6 +1106,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "h3"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10872b55cfb02a821b69dc7cf8dc6a71d6af25eb9a79662bec4a9d016056b3be"
+dependencies = [
+ "bytes",
+ "fastrand",
+ "futures-util",
+ "http",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "h3-quinn"
 version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1096,10 +1127,39 @@ checksum = "6d482318ae94198fc8e3cbb0b7ba3099c865d744e6ec7c62039ca7b6b6c66fbf"
 dependencies = [
  "bytes",
  "futures",
- "h3",
+ "h3 0.0.7",
  "quinn",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "h3-quinn"
+version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b2e732c8d91a74731663ac8479ab505042fbf547b9a207213ab7fbcbfc4f8b4"
+dependencies = [
+ "bytes",
+ "futures",
+ "h3 0.0.8",
+ "quinn",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "h3-util"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cebf30a639e7dd660bd9df063da86c8678fa50ec331e0280e2fb5d999963d01a"
+dependencies = [
+ "futures",
+ "h3 0.0.8",
+ "h3-quinn 0.0.10",
+ "hyper",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -1144,8 +1204,8 @@ dependencies = [
  "futures-io",
  "futures-util",
  "h2",
- "h3",
- "h3-quinn",
+ "h3 0.0.7",
+ "h3-quinn 0.0.9",
  "http",
  "idna",
  "ipnet",
@@ -2742,6 +2802,7 @@ dependencies = [
  "async-socks5",
  "async-trait",
  "axum",
+ "axum-h3",
  "bindgen",
  "boomphf",
  "byte-unit",
@@ -2760,6 +2821,7 @@ dependencies = [
  "futures-intrusive",
  "futures-util",
  "glob",
+ "h3-util",
  "hickory-proto",
  "hickory-resolver",
  "hostname",

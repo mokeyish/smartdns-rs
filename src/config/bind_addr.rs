@@ -6,41 +6,40 @@ use crate::third_ext::serde_str;
 
 use super::{ServerOpts, SslConfig};
 
-#[enum_dispatch(NomParser, IListenerConfig)]
+#[enum_dispatch(NomParser, IBindConfig)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum ListenerConfig {
-    Udp(UdpListenerConfig),
-    Tcp(TcpListenerConfig),
-    Tls(TlsListenerConfig),
-    Https(HttpsListenerConfig),
-    Quic(QuicListenerConfig),
+pub enum BindAddrConfig {
+    Udp(UdpBindAddrConfig),
+    Tcp(TcpBindAddrConfig),
+    Tls(TlsBindAddrConfig),
+    Https(HttpsBindAddrConfig),
+    H3(H3BindAddrConfig),
+    Quic(QuicBindAddrConfig),
 }
 
 #[enum_dispatch]
-pub trait IListenerConfig {
-    fn listen(&self) -> ListenerAddress;
-    fn mut_listen(&mut self) -> &mut ListenerAddress;
+pub trait IBindConfig {
+    fn addr(&self) -> BindAddr;
+    fn mut_addr(&mut self) -> &mut BindAddr;
     fn port(&self) -> u16;
     fn device(&self) -> Option<&str>;
     fn server_opts(&self) -> &ServerOpts;
     fn sock_addr(&self) -> SocketAddr {
-        match self.listen() {
-            ListenerAddress::Localhost => {
-                SocketAddrV4::new(Ipv4Addr::LOCALHOST, self.port()).into()
-            }
-            ListenerAddress::All => SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, self.port()).into(),
-            ListenerAddress::V4(ip) => (ip, self.port()).into(),
-            ListenerAddress::V6(ip) => (ip, self.port()).into(),
+        match self.addr() {
+            BindAddr::Localhost => SocketAddrV4::new(Ipv4Addr::LOCALHOST, self.port()).into(),
+            BindAddr::All => SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, self.port()).into(),
+            BindAddr::V4(ip) => (ip, self.port()).into(),
+            BindAddr::V6(ip) => (ip, self.port()).into(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct UdpListenerConfig {
+pub struct UdpBindAddrConfig {
     /// listen adress
     #[serde(with = "serde_str")]
-    pub listen: ListenerAddress,
+    pub addr: BindAddr,
     /// listen port
     pub port: u16,
     /// bind network device.
@@ -51,10 +50,10 @@ pub struct UdpListenerConfig {
     pub opts: ServerOpts,
 }
 
-impl Default for UdpListenerConfig {
+impl Default for UdpBindAddrConfig {
     fn default() -> Self {
         Self {
-            listen: ListenerAddress::V4(Ipv4Addr::UNSPECIFIED),
+            addr: BindAddr::V4(Ipv4Addr::UNSPECIFIED),
             port: 53,
             device: Default::default(),
             opts: Default::default(),
@@ -63,11 +62,11 @@ impl Default for UdpListenerConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TcpListenerConfig {
-    /// listen adress
+pub struct TcpBindAddrConfig {
+    /// addr adress
     #[serde(with = "serde_str")]
-    pub listen: ListenerAddress,
-    /// listen port
+    pub addr: BindAddr,
+    /// addr port
     pub port: u16,
     /// bind network device.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,29 +77,11 @@ pub struct TcpListenerConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TlsListenerConfig {
-    /// listen adress
+pub struct TlsBindAddrConfig {
+    /// addr adress
     #[serde(with = "serde_str")]
-    pub listen: ListenerAddress,
-    /// listen port
-    pub port: u16,
-    /// bind network device.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub device: Option<String>,
-    /// the server options
-    #[serde(flatten)]
-    pub opts: ServerOpts,
-    /// ssl config
-    #[serde(flatten)]
-    pub ssl_config: SslConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct HttpsListenerConfig {
-    /// listen adress
-    #[serde(with = "serde_str")]
-    pub listen: ListenerAddress,
-    /// listen port
+    pub addr: BindAddr,
+    /// addr port
     pub port: u16,
     /// bind network device.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,11 +95,47 @@ pub struct HttpsListenerConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct QuicListenerConfig {
-    /// listen adress
+pub struct HttpsBindAddrConfig {
+    /// addr adress
     #[serde(with = "serde_str")]
-    pub listen: ListenerAddress,
-    /// listen port
+    pub addr: BindAddr,
+    /// addr port
+    pub port: u16,
+    /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    /// the server options
+    #[serde(flatten)]
+    pub opts: ServerOpts,
+    /// ssl config
+    #[serde(flatten)]
+    pub ssl_config: SslConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct H3BindAddrConfig {
+    /// addr adress
+    #[serde(with = "serde_str")]
+    pub addr: BindAddr,
+    /// addr port
+    pub port: u16,
+    /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    /// the server options
+    #[serde(flatten)]
+    pub opts: ServerOpts,
+    /// ssl config
+    #[serde(flatten)]
+    pub ssl_config: SslConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct QuicBindAddrConfig {
+    /// addr adress
+    #[serde(with = "serde_str")]
+    pub addr: BindAddr,
+    /// addr port
     pub port: u16,
     /// bind network device.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,12 +151,12 @@ pub struct QuicListenerConfig {
 macro_rules! impl_listener {
     ($($name:ident),+) => {
         $(
-            impl IListenerConfig for $name {
-                fn listen(&self) -> ListenerAddress {
-                    self.listen
+            impl IBindConfig for $name {
+                fn addr(&self) -> BindAddr {
+                    self.addr
                 }
-                fn mut_listen(&mut self) -> &mut ListenerAddress {
-                    &mut self.listen
+                fn mut_addr(&mut self) -> &mut BindAddr {
+                    &mut self.addr
                 }
 
                 fn port(&self) -> u16 {
@@ -158,24 +175,25 @@ macro_rules! impl_listener {
 }
 
 impl_listener!(
-    UdpListenerConfig,
-    TcpListenerConfig,
-    TlsListenerConfig,
-    HttpsListenerConfig,
-    QuicListenerConfig
+    UdpBindAddrConfig,
+    TcpBindAddrConfig,
+    TlsBindAddrConfig,
+    HttpsBindAddrConfig,
+    H3BindAddrConfig,
+    QuicBindAddrConfig
 );
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum ListenerAddress {
+pub enum BindAddr {
     Localhost,
     All,
     V4(Ipv4Addr),
     V6(Ipv6Addr),
 }
 
-impl std::fmt::Display for ListenerAddress {
+impl std::fmt::Display for BindAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ListenerAddress::*;
+        use BindAddr::*;
 
         match self {
             Localhost => write!(f, "localhost"),
@@ -186,23 +204,23 @@ impl std::fmt::Display for ListenerAddress {
     }
 }
 
-impl From<IpAddr> for ListenerAddress {
+impl From<IpAddr> for BindAddr {
     fn from(value: IpAddr) -> Self {
         match value {
-            IpAddr::V4(ip) => ListenerAddress::V4(ip),
-            IpAddr::V6(ip) => ListenerAddress::V6(ip),
+            IpAddr::V4(ip) => BindAddr::V4(ip),
+            IpAddr::V6(ip) => BindAddr::V6(ip),
         }
     }
 }
 
-impl ListenerAddress {
+impl BindAddr {
     /// Returns the ip addr of this [`ListenerAddress`].
     fn ip_addr(self) -> IpAddr {
         match self {
-            ListenerAddress::Localhost => IpAddr::V4(Ipv4Addr::LOCALHOST),
-            ListenerAddress::All => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-            ListenerAddress::V4(ip) => ip.into(),
-            ListenerAddress::V6(ip) => ip.into(),
+            BindAddr::Localhost => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            BindAddr::All => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            BindAddr::V4(ip) => ip.into(),
+            BindAddr::V6(ip) => ip.into(),
         }
     }
 }

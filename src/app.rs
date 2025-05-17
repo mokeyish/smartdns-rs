@@ -26,7 +26,7 @@ pub struct App {
     cfg: RwLock<Arc<RuntimeConfig>>,
     mw_handler: RwLock<Arc<DnsMiddlewareHandler>>,
     dns_handle: DnsHandle,
-    listener_map: Arc<RwLock<HashMap<crate::config::ListenerConfig, ServerHandle>>>,
+    listener_map: Arc<RwLock<HashMap<crate::config::BindAddrConfig, ServerHandle>>>,
     cache: RwLock<Option<Arc<DnsCache>>>,
     runtime: Handle,
     guard: AppGuard,
@@ -303,7 +303,7 @@ async fn register_listeners(app: &Arc<App>) {
 
 async fn serve(
     app: &Arc<App>,
-    listener: &crate::config::ListenerConfig,
+    listener: &crate::config::BindAddrConfig,
 ) -> Result<ServerHandle, crate::Error> {
     use crate::server::serve;
 
