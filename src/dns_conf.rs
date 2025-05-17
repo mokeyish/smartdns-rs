@@ -109,6 +109,7 @@ impl RuntimeConfig {
             loaded_files: Default::default(),
             rule_groups: Default::default(),
             rule_group_stack: Default::default(),
+            dirs: Default::default(),
         }
     }
 }
@@ -614,6 +615,7 @@ pub struct RuntimeConfigBuilder {
     rule_groups: HashMap<String, RuleGroup>,
     rule_group_stack: Vec<(String, RuleGroup)>,
     loaded_files: HashSet<PathBuf>,
+    dirs: HashSet<PathBuf>,
 }
 
 impl RuntimeConfigBuilder {
@@ -824,7 +826,7 @@ impl RuntimeConfigBuilder {
     }
 
     pub fn load_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn std::error::Error>> {
-        let path = resolve_filepath(path, self.conf_file.as_ref());
+        let path = self.resolve_filepath(path);
 
         if path.exists() {
             if self.conf_file.is_none() {
@@ -867,18 +869,8 @@ impl RuntimeConfigBuilder {
                 AuditFileMode(v) => self.audit.file_mode = Some(v),
                 AuditNum(v) => self.audit.num = Some(v),
                 AuditSize(v) => self.audit.size = Some(v),
-                BindCertFile(mut v) => {
-                    if !v.exists() {
-                        v = resolve_filepath(&v, self.conf_file.as_ref());
-                    }
-                    self.bind_cert_file = Some(v)
-                }
-                BindCertKeyFile(mut v) => {
-                    if !v.exists() {
-                        v = resolve_filepath(&v, self.conf_file.as_ref());
-                    }
-                    self.bind_cert_key_file = Some(v)
-                }
+                BindCertFile(v) => self.bind_cert_file = Some(self.resolve_filepath(v)),
+                BindCertKeyFile(v) => self.bind_cert_key_file = Some(self.resolve_filepath(v)),
                 BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
                 CacheFile(v) => self.cache.file = Some(v),
                 CachePersist(v) => self.cache.persist = Some(v),
@@ -930,6 +922,10 @@ impl RuntimeConfigBuilder {
                 ConfFile(v) => {
                     if !self.loaded_files.contains(&v) {
                         self.load_file(v.clone()).expect("load_file failed");
+                        if let Some(dir) = v.parent() {
+                            self.dirs.insert(dir.to_path_buf());
+                        }
+
                         self.loaded_files.insert(v);
                     }
                 }
@@ -945,7 +941,7 @@ impl RuntimeConfigBuilder {
                 DomainSetProvider(mut v) => {
                     use crate::config::DomainSetProvider;
                     if let DomainSetProvider::File(provider) = &mut v {
-                        provider.file = resolve_filepath(&provider.file, self.conf_file.as_ref());
+                        provider.file = self.resolve_filepath(&provider.file);
                     }
                     self.domain_set_providers
                         .entry(v.name().to_string())
@@ -988,6 +984,26 @@ impl RuntimeConfigBuilder {
                 warn!("unknown conf: {}, {:?}", line, err);
             }
         }
+    }
+
+    #[inline]
+    fn resolve_filepath<P: AsRef<Path>>(&self, filepath: P) -> PathBuf {
+        let path = resolve_filepath(filepath, self.conf_file.as_ref());
+
+        if path.exists() {
+            return path;
+        }
+        let Some(name) = path.file_name() else {
+            return path;
+        };
+
+        for dir in self.dirs.iter() {
+            let p = dir.join(&name);
+            if p.is_file() {
+                return p;
+            }
+        }
+        path
     }
 }
 
