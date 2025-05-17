@@ -132,7 +132,16 @@ pub async fn serve(
             );
 
             let app = app.clone();
-            https::serve(app, listener, dns_handle, server_cert_resolver)?
+
+            let h3_port = app
+                .cfg()
+                .await
+                .listeners()
+                .iter()
+                .filter(|c| matches!(c, BindAddrConfig::H3(_)))
+                .map(|c| c.port())
+                .next();
+            https::serve(app, listener, dns_handle, server_cert_resolver, h3_port)?
         }
         #[cfg(feature = "dns-over-h3")]
         BindAddrConfig::H3(bind_addr_config) => {
