@@ -2835,7 +2835,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "quinn",
- "rand 0.8.5",
+ "rand 0.9.1",
  "rangemap",
  "reqwest",
  "rustls",
