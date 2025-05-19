@@ -2865,7 +2865,7 @@ dependencies = [
  "utoipa-axum",
  "utoipa-swagger-ui",
  "uzers",
- "webpki-roots 0.26.11",
+ "webpki-roots 1.0.0",
  "which",
  "windows 0.60.0",
  "windows-service",
