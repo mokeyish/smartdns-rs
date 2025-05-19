@@ -188,7 +188,7 @@ hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = 
 quinn = { version = "0.11.2", default-features = false }
 
 # ssl
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"]  }
 rustls-pemfile = "2"
 rustls-native-certs = "0.8"
