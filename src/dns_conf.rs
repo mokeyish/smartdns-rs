@@ -441,8 +441,9 @@ impl RuntimeConfig {
     pub fn log_enabled(&self) -> bool {
         self.log_num() > 0
     }
-    pub fn log_level(&self) -> crate::log::Level {
-        self.log.level.unwrap_or(crate::log::Level::ERROR)
+
+    pub fn log_level(&self) -> Option<crate::log::Level> {
+        self.log.level
     }
 
     pub fn log_file(&self) -> PathBuf {
@@ -998,7 +999,7 @@ impl RuntimeConfigBuilder {
         };
 
         for dir in self.dirs.iter() {
-            let p = dir.join(&name);
+            let p = dir.join(name);
             if p.is_file() {
                 return p;
             }
