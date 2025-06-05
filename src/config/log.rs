@@ -32,3 +32,9 @@ pub struct LogConfig {
     /// log filter
     pub filter: Option<String>,
 }
+
+impl LogConfig {
+    pub fn console(&self) -> bool {
+        self.console.unwrap_or(true)
+    }
+}

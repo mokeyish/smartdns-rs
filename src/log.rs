@@ -1,10 +1,7 @@
-use std::{env, fmt, io, path::Path, sync::OnceLock};
+use std::{cell::RefCell, env, fmt, io, path::Path, sync::OnceLock};
 
-use tracing::{
-    Dispatch, Event, Subscriber,
-    dispatcher::{set_default, set_global_default},
-    subscriber::DefaultGuard,
-};
+pub use tracing::dispatcher::set_default;
+use tracing::{Dispatch, Event, Subscriber, subscriber::DefaultGuard};
 use tracing_subscriber::{
     EnvFilter,
     fmt::{
@@ -15,46 +12,58 @@ use tracing_subscriber::{
     registry::LookupSpan,
 };
 
-static CONSOLE_LEVEL: OnceLock<Level> = OnceLock::new();
+static INIT_CONSOLE_LEVEL: OnceLock<Level> = OnceLock::new();
+
+thread_local! {
+    pub static LOG_GUARD: RefCell<Option<DefaultGuard>> = const { RefCell::new(None) };
+}
 
 pub use tracing::*;
 
 type MappedFile = crate::infra::mapped_file::MutexMappedFile;
 
-pub fn init_global_default<P: AsRef<Path>>(
+#[allow(clippy::too_many_arguments)]
+pub fn make_dispatch<P: AsRef<Path>>(
     path: P,
-    level: Level,
+    enabled: bool,
+    level: Option<Level>,
     filter: Option<&str>,
     size: u64,
     num: u64,
     mode: Option<u32>,
     to_console: bool,
-) -> DefaultGuard {
+) -> Dispatch {
+    let level = level
+        .or_else(|| INIT_CONSOLE_LEVEL.get().cloned())
+        .unwrap_or(Level::ERROR);
+
     let file = MappedFile::open(path.as_ref(), size, Some(num as usize), mode);
 
-    let writable = file
-        .0
-        .lock()
-        .unwrap()
-        .touch()
-        .map(|_| true)
-        .unwrap_or_else(|err| {
-            warn!("{:?}, {:?}", path.as_ref(), err);
-            false
-        });
+    let writable = enabled
+        && file
+            .0
+            .lock()
+            .unwrap()
+            .touch()
+            .map(|_| true)
+            .unwrap_or_else(|err| {
+                warn!("{:?}, {:?}", path.as_ref(), err);
+                false
+            });
 
     let console_level = if to_console {
-        level
+        *INIT_CONSOLE_LEVEL.get_or_init(|| level)
     } else {
-        *CONSOLE_LEVEL.get_or_init(|| Level::INFO)
+        Level::ERROR
     };
+
     let console_writer = io::stdout.with_max_level(console_level);
 
     let dispatch = if writable {
         // log hello
         {
             let writer = file.with_max_level(level);
-            let dispatch = make_dispatch(level, filter, writer);
+            let dispatch = internal_make_dispatch(level, filter, writer);
 
             let _guard = set_default(&dispatch);
             crate::hello_starting();
@@ -63,29 +72,31 @@ pub fn init_global_default<P: AsRef<Path>>(
         let file_writer =
             MappedFile::open(path.as_ref(), size, Some(num as usize), mode).with_max_level(level);
 
-        make_dispatch(
-            level.max(console_level),
-            filter,
-            file_writer.and(console_writer),
-        )
+        if to_console {
+            internal_make_dispatch(
+                level.max(console_level),
+                filter,
+                file_writer.and(console_writer),
+            )
+        } else {
+            internal_make_dispatch(level.max(console_level), filter, file_writer)
+        }
+    } else if to_console {
+        internal_make_dispatch(console_level, filter, console_writer)
     } else {
-        make_dispatch(console_level, filter, console_writer)
+        Dispatch::none()
     };
-
-    let guard = set_default(&dispatch);
-
-    set_global_default(dispatch).expect("");
-    guard
+    dispatch
 }
 
-pub fn default(console_level: Level) -> DefaultGuard {
-    CONSOLE_LEVEL.get_or_init(|| console_level);
+pub fn console(console_level: Level) -> DefaultGuard {
+    INIT_CONSOLE_LEVEL.get_or_init(|| console_level);
     let console_writer = io::stdout.with_max_level(console_level);
-    set_default(&make_dispatch(console_level, None, console_writer))
+    set_default(&internal_make_dispatch(console_level, None, console_writer))
 }
 
 #[inline]
-fn make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send + Sync>(
+fn internal_make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send + Sync>(
     level: tracing::Level,
     filter: Option<&str>,
     writer: W,
@@ -94,11 +105,11 @@ fn make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send + Sync>(
         .event_format(TdnsFormatter)
         .with_writer(writer);
 
-    Dispatch::from(
-        tracing_subscriber::registry()
-            .with(layer)
-            .with(make_filter(level, filter)),
-    )
+    let subscriber = tracing_subscriber::registry()
+        .with(layer)
+        .with(make_filter(level, filter));
+
+    Dispatch::new(subscriber)
 }
 
 #[inline]
@@ -187,5 +198,14 @@ impl<'a> MakeWriter<'a> for MappedFile {
     type Writer = &'a MappedFile;
     fn make_writer(&'a self) -> Self::Writer {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_log_level_cmp() {
+        assert_eq!(Level::INFO.max(Level::DEBUG), Level::DEBUG);
     }
 }

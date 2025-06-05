@@ -6,7 +6,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    runtime::{Handle, Runtime},
     sync::{RwLock, Semaphore},
     task::JoinSet,
 };
@@ -28,29 +27,14 @@ pub struct App {
     dns_handle: DnsHandle,
     listener_map: Arc<RwLock<HashMap<crate::config::BindAddrConfig, ServerHandle>>>,
     cache: RwLock<Option<Arc<DnsCache>>>,
-    runtime: Handle,
     guard: AppGuard,
 }
 
 impl App {
-    fn new(conf: Option<PathBuf>) -> (Runtime, IncomingDnsRequest, Self) {
+    fn new(conf: Option<PathBuf>) -> (IncomingDnsRequest, Self) {
         let cfg = RuntimeConfig::load(conf);
 
         let guard = {
-            let log_guard = if cfg.log_enabled() {
-                Some(log::init_global_default(
-                    cfg.log_file(),
-                    cfg.log_level(),
-                    cfg.log_filter(),
-                    cfg.log_size(),
-                    cfg.log_num(),
-                    cfg.audit_file_mode().into(),
-                    cfg.log_config().console.unwrap_or_default(),
-                ))
-            } else {
-                None
-            };
-
             #[cfg(target_os = "linux")]
             let user_guard = {
                 if let Some(user) = cfg.user() {
@@ -66,7 +50,6 @@ impl App {
             };
 
             AppGuard {
-                log_guard,
                 #[cfg(target_os = "linux")]
                 user_guard,
             }
@@ -74,26 +57,16 @@ impl App {
 
         cfg.summary();
 
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(cfg.num_workers())
-            .enable_all()
-            .thread_name("smartdns-runtime")
-            .build()
-            .expect("failed to initialize Tokio Runtime");
-
         let handler = DnsMiddlewareBuilder::new().build(cfg.clone());
 
-        let runtime_handle = runtime.handle().clone();
         let (rx, dns_server_handle) = DnsHandle::new(Default::default());
 
         (
-            runtime,
             rx,
             Self {
                 dns_handle: dns_server_handle,
                 cfg: RwLock::new(cfg),
                 mw_handler: RwLock::new(Arc::new(handler)),
-                runtime: runtime_handle,
                 listener_map: Default::default(),
                 cache: RwLock::const_new(None),
                 guard,
@@ -194,21 +167,47 @@ impl App {
 }
 
 pub fn bootstrap(conf: Option<PathBuf>) {
-    let (runtime, mut incoming_request, app) = App::new(conf);
+    let (mut incoming_request, app) = App::new(conf);
     let app = Arc::new(app);
 
-    let _guarad = runtime.enter();
+    let cfg = app.cfg.blocking_read().clone();
+
+    let log_dispatch = log::make_dispatch(
+        cfg.log_file(),
+        cfg.log_enabled(),
+        cfg.log_level(),
+        cfg.log_filter(),
+        cfg.log_size(),
+        cfg.log_num(),
+        cfg.log_file_mode().into(),
+        cfg.log_config().console(),
+    );
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(cfg.num_workers())
+        .enable_all()
+        .thread_name("smartdns-runtime")
+        .on_thread_start(move || {
+            log::LOG_GUARD.replace(Some(log::set_default(&log_dispatch)));
+        })
+        .on_thread_stop(move || {
+            log::LOG_GUARD.take();
+        })
+        .build()
+        .expect("failed to initialize Tokio Runtime");
+
+    let _guard = runtime.enter();
 
     runtime.block_on(async {
         app.update_middleware_handler().await;
-        register_listeners(&app).await
+        register_listeners(&app).await;
+
+        crate::banner();
+
+        log::info!("awaiting connections...");
+
+        log::info!("server starting up");
     });
-
-    crate::banner();
-
-    log::info!("awaiting connections...");
-
-    log::info!("server starting up");
 
     {
         let app = app.clone();
@@ -327,7 +326,6 @@ async fn serve(
 }
 
 struct AppGuard {
-    log_guard: Option<tracing::dispatcher::DefaultGuard>,
     #[cfg(target_os = "linux")]
     user_guard: Option<crate::run_user::SwitchUserGuard>,
 }
