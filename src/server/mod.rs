@@ -12,6 +12,7 @@ mod udp;
 
 use crate::{
     config::SslConfig,
+    dns_conf::RuntimeConfig,
     libdns::proto::op::{Header, Message, MessageType, ResponseCode},
 };
 use std::{
@@ -33,8 +34,9 @@ use crate::{
     dns::{DnsRequest, SerialMessage},
 };
 
-pub async fn serve(
-    app: &Arc<App>,
+pub fn serve(
+    app: &App,
+    cfg: &RuntimeConfig,
     bind_addr_config: &BindAddrConfig,
     handle: &DnsHandle,
     idle_time: u64,
@@ -133,10 +135,8 @@ pub async fn serve(
 
             let app = app.clone();
 
-            let h3_port = app
-                .cfg()
-                .await
-                .listeners()
+            let h3_port = cfg
+                .binds()
                 .iter()
                 .filter(|c| matches!(c, BindAddrConfig::H3(_)))
                 .map(|c| c.port())
@@ -229,17 +229,17 @@ impl From<CancellationToken> for ServerHandle {
 
 #[derive(Debug, Clone)]
 pub struct DnsHandle {
-    sender: mpsc::Sender<IncomingDnsMessage>,
+    sender: mpsc::UnboundedSender<IncomingDnsMessage>,
     opts: ServerOpts,
 }
 
 pub type IncomingDnsMessage = (SerialMessage, ServerOpts, oneshot::Sender<SerialMessage>);
 
-pub type IncomingDnsRequest = mpsc::Receiver<IncomingDnsMessage>;
+pub type IncomingDnsRequest = mpsc::UnboundedReceiver<IncomingDnsMessage>;
 
 impl DnsHandle {
-    pub fn new(buffer: Option<usize>) -> (IncomingDnsRequest, Self) {
-        let (tx, rx) = mpsc::channel(buffer.unwrap_or(10));
+    pub fn new() -> (IncomingDnsRequest, Self) {
+        let (tx, rx) = mpsc::unbounded_channel();
         (
             rx,
             Self {
@@ -253,7 +253,7 @@ impl DnsHandle {
         let message = message.into();
         let (tx, rx) = oneshot::channel();
 
-        if let Err(err) = self.sender.send((message, self.opts.clone(), tx)).await {
+        if let Err(err) = self.sender.send((message, self.opts.clone(), tx)) {
             let message = err.0.0;
             let addr = message.addr();
             let protocol = message.protocol();

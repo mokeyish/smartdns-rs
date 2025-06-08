@@ -23,7 +23,7 @@ use crate::{
 };
 
 pub fn serve(
-    app: Arc<App>,
+    app: App,
     listener: net::TcpListener,
     dns_handle: DnsHandle,
     server_cert_resolver: Arc<dyn ResolvesServerCert>,

@@ -99,17 +99,8 @@ pub struct Config {
     /// Local domain suffix appended to DHCP names and hosts file entries.
     pub domain: Option<Name>,
 
-    /// Include another configuration options
-    ///
-    /// conf-file [file]
-    /// ```
-    /// example:
-    ///   conf-file blacklist-ip.conf
-    /// ```
-    pub conf_file: Option<PathBuf>,
-
-    /// listeners
-    pub listeners: Vec<BindAddrConfig>,
+    /// List of bind addresses
+    pub binds: Vec<BindAddrConfig>,
 
     /// SSL Certificate file path
     pub bind_cert_file: Option<PathBuf>,

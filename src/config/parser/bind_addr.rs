@@ -141,12 +141,15 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
         warn!("unknown options {:?}", options);
     }
 
+    let enabled = None;
+
     let listener = match proto {
         Protocol::Udp => UdpBindAddrConfig {
             addr,
             port,
             device,
             opts,
+            enabled,
         }
         .into(),
         Protocol::Tcp => TcpBindAddrConfig {
@@ -154,6 +157,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             port,
             device,
             opts,
+            enabled,
         }
         .into(),
         Protocol::Tls => TlsBindAddrConfig {
@@ -162,6 +166,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             device,
             opts,
             ssl_config,
+            enabled,
         }
         .into(),
         Protocol::Https => HttpsBindAddrConfig {
@@ -170,6 +175,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             device,
             opts,
             ssl_config,
+            enabled,
         }
         .into(),
         Protocol::H3 => H3BindAddrConfig {
@@ -178,6 +184,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             device,
             opts,
             ssl_config,
+            enabled,
         }
         .into(),
         Protocol::Quic => QuicBindAddrConfig {
@@ -186,6 +193,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             device,
             opts,
             ssl_config,
+            enabled,
         }
         .into(),
         p => panic!("unexpected proto {}", p),
@@ -269,8 +277,7 @@ mod tests {
                 UdpBindAddrConfig {
                     addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                     port: 5353,
-                    device: None,
-                    opts: Default::default()
+                    ..Default::default()
                 }
             )
         );
@@ -283,7 +290,8 @@ mod tests {
                     addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
-                    opts: Default::default()
+                    opts: Default::default(),
+                    ..Default::default()
                 }
             )
         );
@@ -299,7 +307,8 @@ mod tests {
                     opts: ServerOpts {
                         no_cache: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -315,7 +324,8 @@ mod tests {
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -331,7 +341,8 @@ mod tests {
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -347,7 +358,8 @@ mod tests {
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -362,8 +374,7 @@ mod tests {
                 TcpBindAddrConfig {
                     addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                     port: 5353,
-                    device: None,
-                    opts: Default::default()
+                    ..Default::default()
                 }
             )
         );
@@ -376,7 +387,7 @@ mod tests {
                     addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
-                    opts: Default::default()
+                    ..Default::default()
                 }
             )
         );
@@ -392,7 +403,8 @@ mod tests {
                     opts: ServerOpts {
                         no_cache: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -408,7 +420,8 @@ mod tests {
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -424,7 +437,8 @@ mod tests {
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -444,7 +458,8 @@ mod tests {
                         no_rule_addr: Some(true),
                         force_https_soa: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -459,14 +474,13 @@ mod tests {
                 TlsBindAddrConfig {
                     addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                     port: 4453,
-                    device: None,
-                    opts: Default::default(),
                     ssl_config: SslConfig {
                         server_name: Some("dns.example.com".to_string()), 
                         certificate: Some(Path::new("/etc/nginx/dns.example.com.crt").to_path_buf()), 
                         certificate_key: Some(Path::new("/etc/nginx/dns.example.com.key").to_path_buf()),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
@@ -481,9 +495,7 @@ mod tests {
                 H3BindAddrConfig {
                     addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                     port: 443,
-                    device: None,
-                    opts: Default::default(),
-                    ssl_config: Default::default()
+                    ..Default::default()
                 }
             )
         );
@@ -495,9 +507,7 @@ mod tests {
                 H3BindAddrConfig {
                     addr: BindAddr::V4(Ipv4Addr::UNSPECIFIED),
                     port: 443,
-                    device: None,
-                    opts: Default::default(),
-                    ssl_config: Default::default()
+                    ..Default::default()
                 }
             )
         );

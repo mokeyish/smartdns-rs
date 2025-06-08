@@ -16,7 +16,7 @@ async fn listeners(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
             .app
             .cfg()
             .await
-            .listeners()
+            .binds()
             .to_vec()
             .into_data_list_payload(),
     )

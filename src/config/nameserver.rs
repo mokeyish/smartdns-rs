@@ -1,7 +1,4 @@
-use crate::{
-    dns_url::DnsUrl,
-    third_ext::{serde_opt_str, serde_str},
-};
+use crate::dns_url::DnsUrl;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
@@ -47,8 +44,10 @@ use serde::{Deserialize, Serialize};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NameServerInfo {
+    /// the name of the nameserver
+    pub name: Option<String>,
+
     /// the nameserver url.
-    #[serde(with = "serde_str")]
     pub server: DnsUrl,
 
     /// set server to group, use with nameserver /domain/group.
@@ -57,15 +56,19 @@ pub struct NameServerInfo {
     ///   -g name
     ///   -group name
     /// ```
+    #[serde(default = "Default::default")]
     pub group: Vec<String>,
 
     /// filter result with blacklist ip
+    #[serde(default = "Default::default")]
     pub blacklist_ip: bool,
 
     /// filter result with whitelist ip,  result in whitelist-ip will be accepted.
+    #[serde(default = "Default::default")]
     pub whitelist_ip: bool,
 
     /// result must exist edns RR, or discard result.
+    #[serde(default = "Default::default")]
     pub check_edns: bool,
 
     /// exclude this server from default group.
@@ -74,6 +77,7 @@ pub struct NameServerInfo {
     ///   -e
     ///   -exclude-default-group
     /// ```
+    #[serde(default = "Default::default")]
     pub exclude_default_group: bool,
 
     /// use proxy to connect to server.
@@ -90,6 +94,7 @@ pub struct NameServerInfo {
     ///   -b
     ///   -bootstrap-dns
     /// ```
+    #[serde(default = "Default::default")]
     pub bootstrap_dns: bool,
 
     /// nameserver group for resolving.
@@ -103,7 +108,7 @@ pub struct NameServerInfo {
     ///   -subnet 192.168.1.1/24
     ///   -subnet 8::8/56
     /// ```
-    #[serde(with = "serde_opt_str")]
+    #[serde(default = "Default::default")]
     pub subnet: Option<IpNet>,
 
     /// The value for the SO_MARK option on socket.
@@ -119,23 +124,93 @@ pub struct NameServerInfo {
     /// ```
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<String>,
+
+    /// indicates whether the DNS server is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+impl NameServerInfo {
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
 }
 
 impl From<DnsUrl> for NameServerInfo {
     fn from(url: DnsUrl) -> Self {
         Self {
             server: url,
-            group: vec![],
-            exclude_default_group: false,
-            blacklist_ip: false,
-            whitelist_ip: false,
-            bootstrap_dns: false,
-            check_edns: false,
-            proxy: None,
-            interface: None,
-            so_mark: None,
-            resolve_group: None,
-            subnet: None,
+            name: Default::default(),
+            group: Default::default(),
+            exclude_default_group: Default::default(),
+            blacklist_ip: Default::default(),
+            whitelist_ip: Default::default(),
+            bootstrap_dns: Default::default(),
+            check_edns: Default::default(),
+            proxy: Default::default(),
+            interface: Default::default(),
+            so_mark: Default::default(),
+            resolve_group: Default::default(),
+            subnet: Default::default(),
+            enabled: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[test]
+    fn test_ipnet_json_serde() {
+        #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+        struct Foo1 {
+            subnet: IpNet,
+        }
+
+        let foo = Foo1 {
+            subnet: "192.168.0.0/16".parse().unwrap(),
+        };
+
+        let json_str = serde_json::to_string(&foo).unwrap();
+
+        assert_eq!(json_str, r#"{"subnet":"192.168.0.0/16"}"#);
+
+        assert_eq!(foo, serde_json::from_str(&json_str).unwrap());
+
+        #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+        struct Foo2 {
+            subnet: Option<IpNet>,
+        }
+
+        let foo = Foo2 { subnet: None };
+
+        let json_str = serde_json::to_string(&foo).unwrap();
+
+        assert_eq!(json_str, r#"{"subnet":null}"#);
+
+        assert_eq!(foo, serde_json::from_str(&json_str).unwrap());
+    }
+
+    #[test]
+    fn test_json_deserialize_bind_addr_simple() {
+        let json_str = r#"
+        {
+            "name": "AliDNS",
+            "server": "https://dns.alidns.com/dns-query",
+            "group": ["china"],
+            "enabled": true
+        }
+        "#;
+
+        let name_server: NameServerInfo = serde_json::from_str(json_str).unwrap();
+        assert_eq!(name_server.name, Some("AliDNS".to_string()));
+        assert_eq!(
+            name_server.server,
+            "https://dns.alidns.com/dns-query".parse().unwrap()
+        );
+        assert_eq!(name_server.group, vec!["china".to_string()]);
+        assert_eq!(name_server.enabled, Some(true));
     }
 }

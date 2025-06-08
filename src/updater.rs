@@ -1,7 +1,7 @@
 #[cfg(feature = "self-update")]
 pub fn update(assume_yes: bool, ver: Option<&str>) -> anyhow::Result<()> {
     let bin = env!("CARGO_BIN_NAME");
-    let target = env!("CARGO_BUILD_TARGET");
+    let target = crate::BUILD_TARGET;
     let target_dir = format!("{bin}-{target}");
 
     let mut builder = self_update::backends::github::Update::configure();

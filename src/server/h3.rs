@@ -21,7 +21,7 @@ use crate::{
 };
 
 pub fn serve(
-    app: Arc<App>,
+    app: App,
     socket: net::UdpSocket,
     dns_handle: DnsHandle,
     server_cert_resolver: Arc<dyn ResolvesServerCert>,
