@@ -1,3 +1,7 @@
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+
 pub mod serde_str {
     use serde::{self, Deserialize, Deserializer, Serializer};
     use std::str::FromStr;
@@ -52,6 +56,30 @@ pub mod serde_opt_str {
                     Err(err)
                 }
             })
+    }
+}
+
+pub struct Stringable<T>(T);
+
+impl<'de, T: FromStr> Deserialize<'de> for Stringable<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        T::from_str(&s)
+            .map_err(|_| serde::de::Error::custom(format!("{:?}", s)))
+            .map(Self)
+    }
+}
+
+impl<T: ToString> Serialize for Stringable<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = self.0.to_string();
+        serializer.serialize_str(&s)
     }
 }
 

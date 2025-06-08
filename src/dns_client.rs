@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
     slice::Iter,
     sync::Arc,
+    time::Duration,
 };
 
 use tokio::sync::{Mutex, OwnedSemaphorePermit, RwLock, Semaphore};
@@ -21,6 +22,7 @@ use crate::{
 };
 
 use crate::libdns::{
+    Protocol,
     proto::{
         DnsHandle, ProtoError, ProtoErrorKind,
         op::{Edns, Message, MessageType, OpCode, Query},
@@ -46,6 +48,9 @@ use connection_provider::{
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
 pub const MAX_TTL: u32 = 86400_u32;
+
+static DEFAULT_QUERY: std::sync::LazyLock<Query> =
+    std::sync::LazyLock::new(|| Query::query("example.com.".parse().unwrap(), RecordType::A));
 
 #[derive(Default)]
 pub struct DnsClientBuilder {
@@ -416,7 +421,8 @@ impl GenericResolver for NameServerGroup {
 
 pub struct NameServer {
     max_cocurrency: Arc<Semaphore>,
-    connections: Arc<Mutex<Vec<Connection>>>,
+    datagram_conns: Arc<RwLock<Option<Connection>>>,
+    stream_conns: Arc<Mutex<Vec<Connection>>>,
 
     server: Host,
 
@@ -425,6 +431,7 @@ pub struct NameServer {
     config: RawNameServerConfig,
     options: Arc<NameServerOpts>,
     connection_provider: ConnectionProvider,
+    prefer_protocol: Option<Protocol>,
 
     resolver: Option<Arc<BootstrapResolver>>,
 }
@@ -502,18 +509,26 @@ impl NameServer {
             http_endpoint,
         };
 
+        let prefer_protocol = if url.prefer_h3() {
+            Some(Protocol::H3)
+        } else {
+            None
+        };
+
         Ok(Self {
             max_cocurrency: Arc::new(Semaphore::const_new(cocurrent.unwrap_or(1))),
             server: url.host().to_owned(),
-            connections: Default::default(),
             ip_addrs: url
                 .ip()
                 .map(|ip| RwLock::new(Arc::from([ip])))
                 .unwrap_or_default(),
             config,
+            datagram_conns: Default::default(),
+            stream_conns: Default::default(),
             options: options.into(),
             connection_provider: provider,
             resolver,
+            prefer_protocol,
         })
     }
 
@@ -559,6 +574,12 @@ impl NameServer {
     }
 
     async fn client(&self) -> Result<ClientHandle, ProtoError> {
+        if let Some(conn) = self.datagram_conns.read().await.clone() {
+            return Ok(ClientHandle {
+                connections: self.stream_conns.clone(),
+                connection: Some((conn, None)),
+            });
+        }
         let cocurrent_permit = self
             .max_cocurrency
             .clone()
@@ -566,38 +587,107 @@ impl NameServer {
             .await
             .map_err(|_| ProtoErrorKind::Busy)?;
 
-        let conn = self.connections.lock().await.pop();
+        let conn = self.stream_conns.lock().await.pop();
 
-        let conn = match conn {
-            Some(conn) => conn,
+        let (protocol, conn) = match conn {
+            Some(conn) => (self.config.protocol, conn),
             None => {
                 let config = self.config.clone();
                 let options = self.options.as_ref().deref().clone();
                 let provider = self.connection_provider.clone();
+                let ip_addrs = self.ip_addrs().await?;
 
-                match &self.server {
-                    Host::Domain(_) => {
-                        let configs = self
-                            .ip_addrs()
-                            .await?
+                let mut configs = ip_addrs
+                    .iter()
+                    .map(|ip| {
+                        let mut config = config.clone();
+                        config.socket_addr.set_ip(*ip);
+                        config
+                    })
+                    .collect::<Vec<_>>();
+
+                let alt_protocol = self.prefer_protocol.or_else(|| {
+                    if config.protocol == Protocol::Https {
+                        Some(Protocol::H3)
+                    } else {
+                        None
+                    }
+                });
+
+                if let Some(alt_protocol) = alt_protocol {
+                    configs.extend(
+                        configs
                             .iter()
-                            .map(|ip| {
-                                let mut config = config.clone();
-                                config.socket_addr.set_ip(*ip);
+                            .map(|c| {
+                                let mut config = c.clone();
+                                config.protocol = alt_protocol;
                                 config
                             })
-                            .collect::<Vec<_>>();
+                            .collect::<Vec<_>>(),
+                    );
+                }
 
-                        Connection::from_config(configs.into(), options, provider)
+                if configs.is_empty() {
+                    return Err(ProtoErrorKind::NoConnections.into());
+                }
+
+                if configs.len() == 1 {
+                    (config.protocol, Connection::new(config, options, provider))
+                } else {
+                    let conns = configs
+                        .into_iter()
+                        .map(|c| {
+                            (
+                                c.protocol,
+                                Connection::new(c, options.clone(), provider.clone()),
+                            )
+                        })
+                        .map(|(protocol, conn)| {
+                            let delay = matches!(self.prefer_protocol, Some(p) if p != protocol);
+
+                            Box::pin(async move {
+                                {
+                                    let fut = conn
+                                        .lookup(DEFAULT_QUERY.clone(), Default::default())
+                                        .first_answer();
+
+                                    if delay {
+                                        tokio::time::sleep(Duration::from_millis(100)).await;
+                                    }
+
+                                    match fut.await {
+                                        Ok(_) => Ok((protocol, conn)),
+                                        Err(err) if err.kind.is_no_records_found() => {
+                                            Ok((protocol, conn))
+                                        }
+                                        Err(err) => Err(err),
+                                    }
+                                }
+                            })
+                        });
+
+                    match futures::future::select_ok(conns).await {
+                        Ok((conn, _)) => conn,
+                        Err(err) => {
+                            log::error!(
+                                "Failed to connect to any nameserver: {} {}",
+                                self.server,
+                                err
+                            );
+                            return Err(err);
+                        }
                     }
-                    _ => Connection::from_config(vec![config].into(), options, provider),
                 }
             }
         };
 
+        if protocol.is_datagram() {
+            self.datagram_conns.write().await.replace(conn.clone());
+        }
+
         Ok(ClientHandle {
-            connections: self.connections.clone(),
-            connection: Some((conn, cocurrent_permit)),
+            connections: self.stream_conns.clone(),
+            connection: Some((conn, Some(cocurrent_permit))),
         })
     }
 
@@ -617,10 +707,12 @@ impl From<RawNameServerConfig> for NameServer {
             },
             config,
             ip_addrs: Default::default(),
-            connections: Default::default(),
+            datagram_conns: Default::default(),
+            stream_conns: Default::default(),
             options: Default::default(),
             connection_provider: Default::default(),
             resolver: Default::default(),
+            prefer_protocol: Default::default(),
         }
     }
 }
@@ -669,13 +761,13 @@ impl GenericResolver for NameServer {
             request_options,
         );
 
-        let client = self.client().await?;
-
-        let Some(ns) = client.connection.as_ref().map(|(conn, _)| conn) else {
-            return Err(ProtoErrorKind::NoConnections.into());
+        let res = {
+            let client = self.client().await?;
+            let Some(ns) = client.connection.as_ref().map(|(conn, _)| conn) else {
+                return Err(ProtoErrorKind::NoConnections.into());
+            };
+            ns.send(req).first_answer().await?
         };
-
-        let res = ns.send(req).first_answer().await?;
 
         Ok(From::<Message>::from(res.into()))
     }
@@ -683,7 +775,7 @@ impl GenericResolver for NameServer {
 
 struct ClientHandle {
     connections: Arc<Mutex<Vec<Connection>>>,
-    connection: Option<(Connection, OwnedSemaphorePermit)>,
+    connection: Option<(Connection, Option<OwnedSemaphorePermit>)>,
 }
 
 impl Drop for ClientHandle {
@@ -957,7 +1049,7 @@ mod connection_provider {
     pub type RawNameServer =
         crate::libdns::resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>;
     pub type RawNameServerConfig = crate::libdns::resolver::config::NameServerConfig;
-    pub type Connection = crate::libdns::resolver::name_server::GenericNameServerPool<
+    pub type Connection = crate::libdns::resolver::name_server::GenericNameServer<
         connection_provider::TokioRuntimeProvider,
     >;
     pub type ConnectionProvider = GenericConnector<TokioRuntimeProvider>;

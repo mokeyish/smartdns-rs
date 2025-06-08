@@ -4,7 +4,7 @@
 use cli::*;
 use config::NameServerInfo;
 use dns_url::DnsUrl;
-use std::{path::PathBuf, str::FromStr};
+use std::str::FromStr;
 
 mod api;
 mod app;
@@ -72,13 +72,10 @@ fn banner() {
 /// The app name
 const NAME: &str = "SmartDNS";
 
+include!(concat!(env!("OUT_DIR"), "/build_time_vars.rs"));
+
 /// The default configuration.
 const DEFAULT_CONF: &str = include_str!("../etc/smartdns/smartdns.conf");
-
-/// Returns a version as specified in Cargo.toml
-pub fn version() -> &'static str {
-    concat!(env!("CARGO_PKG_VERSION"), " ", env!("CARGO_BUILD_DATE"))
-}
 
 #[cfg(not(windows))]
 fn main() {
@@ -102,7 +99,12 @@ impl Cli {
         let _guard = self.log_level().map(log::console);
 
         match self.command {
-            Commands::Run { conf, pid, .. } => {
+            Commands::Run {
+                direcory,
+                conf,
+                pid,
+                ..
+            } => {
                 let _guard = pid
                     .map(|pid| {
                         use infra::process_guard;
@@ -118,8 +120,7 @@ impl Cli {
                         }
                     })
                     .unwrap_or_default();
-
-                run_server(conf);
+                app::serve(direcory, conf);
             }
             #[cfg(feature = "service")]
             Commands::Service {
@@ -169,8 +170,8 @@ impl Cli {
             Commands::Service { command: _ } => {
                 warn!("please enable `service` feature")
             }
-            Commands::Test { conf } => {
-                RuntimeConfig::load(conf);
+            Commands::Test { direcory, conf } => {
+                RuntimeConfig::load(direcory, conf);
             }
             #[cfg(feature = "self-update")]
             Commands::Update { yes, version } => {
@@ -208,15 +209,9 @@ impl Cli {
     }
 }
 
-fn run_server(conf: Option<PathBuf>) {
-    hello_starting();
-    app::bootstrap(conf);
-    info!("{} {} shutdown", crate::NAME, crate::version());
-}
-
 #[inline]
 fn hello_starting() {
-    info!("Smart-DNS 🐋 {} starting", version());
+    info!("{} 🐋 {} starting", NAME, BUILD_VERSION);
 }
 
 impl RuntimeConfig {

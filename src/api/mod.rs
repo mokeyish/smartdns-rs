@@ -15,6 +15,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 mod address;
 mod audit;
 mod cache;
+mod config;
 mod forward;
 mod listener;
 mod log;
@@ -22,13 +23,14 @@ mod nameserver;
 mod openapi;
 mod serve_dns;
 mod settings;
+mod system;
 
 use crate::{app::App, server::DnsHandle};
 
 type StatefulRouter = Router<Arc<ServeState>>;
 
 pub struct ServeState {
-    pub app: Arc<App>,
+    pub app: App,
     pub dns_handle: DnsHandle,
 }
 
@@ -40,7 +42,7 @@ pub fn routes() -> axum::Router<Arc<ServeState>> {
         .split_for_parts();
     openapi.info = InfoBuilder::new()
         .title(crate::NAME)
-        .version(crate::version())
+        .version(crate::BUILD_VERSION)
         .build();
 
     let router = {
@@ -80,6 +82,7 @@ fn api_routes() -> StatefulRouter {
     Router::new()
         .route("/version", get(version))
         .merge(cache::routes())
+        .merge(config::routes())
         .merge(nameserver::routes())
         .merge(address::routes())
         .merge(forward::routes())
@@ -87,10 +90,11 @@ fn api_routes() -> StatefulRouter {
         .merge(audit::routes())
         .merge(listener::routes())
         .merge(log::routes())
+        .merge(system::routes())
 }
 
 async fn version() -> Json<&'static str> {
-    Json(crate::version())
+    Json(crate::BUILD_VERSION)
 }
 
 struct ApiError(anyhow::Error);

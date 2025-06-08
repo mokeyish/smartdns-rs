@@ -7,7 +7,6 @@ use crate::libdns::proto::rr::rdata::PTR;
 
 use crate::config::HttpsRecordRule;
 use crate::dns::*;
-use crate::dns_conf::RuntimeConfig;
 use crate::infra::ipset::IpSet;
 use crate::middleware::*;
 
@@ -17,7 +16,7 @@ pub struct DnsZoneMiddleware {
 }
 
 impl DnsZoneMiddleware {
-    pub fn new(_cfg: &RuntimeConfig) -> Self {
+    pub fn new() -> Self {
         let server_net = {
             use local_ip_address::list_afinet_netifas;
             let ips = list_afinet_netifas().unwrap_or_default();
@@ -167,7 +166,7 @@ mod tests {
             .with("srv-record /_vlmcs._tcp/example.com,1688,1,2")
             .build();
 
-        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new(&cfg)).build(cfg);
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
 
         let srv = mock
             .lookup_rdata("_vlmcs._tcp", RecordType::SRV)

@@ -51,6 +51,7 @@ pub struct ServerOpts {
     pub no_serve_expired: Option<bool>,
 
     /// Indicates whether the query task is a background task.
+    #[serde(default)]
     pub is_background: bool,
 }
 

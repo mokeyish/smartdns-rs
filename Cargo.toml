@@ -29,7 +29,7 @@ default = ["common", "self-update" ]
 
 homebrew = [ "common" ]
 
-common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "mdns", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client" ]
+common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "mdns", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client", "serde" ]
 
 nom-recipes-all =["nom-recipes-ip", "nom-recipes-mac"]
 
@@ -77,6 +77,7 @@ nft = ["dep:which", "dep:either"]
 
 dnssec = [ "hickory-proto/dnssec-ring", "rustls/ring"]
 
+serde = [ "dep:serde", "dep:serde_json" ]
 
 swagger-ui-cdn = []
 
@@ -144,9 +145,8 @@ utoipa-axum = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.
 utoipa-swagger-ui = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.1", package = "utoipa-swagger-ui", optional = true, default-features = false, features = ["axum"] }
 
 # serde
-serde = { version = "1.0", features = ["derive"]}
-serde_yaml = "0.9"
-serde_json = "1.0"
+serde = { version = "1.0", optional = true, features = ["derive"]}
+serde_json = { version = "1.0", optional = true }
 
 # async/await
 futures = { version = "0.3.5", default-features = false, features = ["std"] }
@@ -202,7 +202,7 @@ smallvec = "1.13.2"
 csv = "1.1"
 hostname = "0.4"
 byte-unit = { version = "5.0.3", features = ["serde"]}
-ipnet = "2.11"
+ipnet = { version = "2.11", features = ["json"]}
 which = { version = "7.0.1", optional = true }
 glob = "0.3.1"
 

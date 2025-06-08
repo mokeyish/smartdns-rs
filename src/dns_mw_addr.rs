@@ -10,12 +10,6 @@ use crate::libdns::resolver::TtlClip;
 #[derive(Debug)]
 pub struct AddressMiddleware;
 
-impl AddressMiddleware {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 #[async_trait::async_trait]
 impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddleware {
     async fn handle(

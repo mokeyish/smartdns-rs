@@ -1,6 +1,6 @@
 #[cfg(feature = "mdns")]
 use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
-use crate::libdns::proto::xfer::Protocol;
+use crate::libdns::{Protocol, ProtocolDefaultPort};
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::net::SocketAddr;
@@ -41,12 +41,15 @@ impl DnsUrl {
     }
 
     pub fn port(&self) -> u16 {
-        self.port
-            .unwrap_or_else(|| dns_proto_default_port(&self.proto))
+        self.port.unwrap_or_else(|| self.proto.default_port())
     }
 
     pub fn is_default_port(&self) -> bool {
-        self.port() == dns_proto_default_port(&self.proto)
+        self.proto.is_default_port(self.port())
+    }
+
+    pub fn prefer_h3(&self) -> bool {
+        matches!(self.fragment.as_deref(), Some(fragment) if fragment.eq_ignore_ascii_case("h3"))
     }
 
     pub fn path(&self) -> Option<&str> {
@@ -154,10 +157,6 @@ impl FromStr for DnsUrl {
             "h3" => Protocol::H3,
             schema => return Err(DnsUrlParseErr::ProtocolNotSupport(schema.to_string())),
         };
-
-        if matches!(url.fragment(), Some(fragment) if fragment == "h3") {
-            proto = Protocol::H3;
-        }
 
         let host = url.host();
         let port = url.port();
@@ -309,24 +308,6 @@ impl From<&IpAddr> for DnsUrl {
     }
 }
 
-fn dns_proto_default_port(proto: &Protocol) -> u16 {
-    use Protocol::*;
-    match *proto {
-        Udp => 53,
-        Tcp => 53,
-        Tls => 853,
-        #[cfg(feature = "dns-over-https")]
-        Https => 443,
-        #[cfg(feature = "dns-over-h3")]
-        H3 => 443,
-        #[cfg(feature = "dns-over-quic")]
-        Quic => 853,
-        #[cfg(feature = "mdns")]
-        Mdns => 5353,
-        _ => unimplemented!(),
-    }
-}
-
 pub trait DnsUrlParam {
     fn params(&self) -> &BTreeMap<String, String>;
     fn get_param<T: FromStr>(&self, name: &str) -> Option<T>;
@@ -384,6 +365,28 @@ pub trait DnsUrlParamExt: DnsUrlParam {
 }
 
 impl DnsUrlParamExt for DnsUrl {}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for DnsUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        DnsUrl::from_str(&s).map_err(|_| serde::de::Error::custom(format!("{:?}", s)))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for DnsUrl {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = self.to_string();
+        serializer.serialize_str(&s)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -555,11 +558,12 @@ mod tests {
     fn test_parse_h3_2() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
+        assert!(url.prefer_h3());
         assert!(url.ip().is_none());
     }
 
@@ -568,11 +572,12 @@ mod tests {
     fn test_parse_h3_3() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
+        assert!(url.prefer_h3());
         assert!(url.ip().is_none());
     }
 
@@ -581,11 +586,12 @@ mod tests {
     fn test_parse_h3_4() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
+        assert!(url.prefer_h3());
         assert!(url.ip().is_none());
     }
 
@@ -594,11 +600,12 @@ mod tests {
     fn test_parse_h3_5() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/2dns-query#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::H3);
+        assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
         assert_eq!(url.path(), Some("/2dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/2dns-query#h3");
+        assert!(url.prefer_h3());
         assert!(url.ip().is_none());
     }
 

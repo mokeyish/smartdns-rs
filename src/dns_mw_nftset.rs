@@ -5,12 +5,6 @@ use crate::middleware::*;
 
 pub struct DnsNftsetMiddleware;
 
-impl DnsNftsetMiddleware {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
 #[async_trait::async_trait]
 impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsNftsetMiddleware {
     async fn handle(

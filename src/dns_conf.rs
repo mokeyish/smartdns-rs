@@ -23,8 +23,21 @@ use crate::{
 
 const DEFAULT_GROUP: &str = "default";
 
+#[cfg(target_os = "windows")]
+pub const DEFAULT_CONF_DIR: &str = r"C:\ProgramData\smartdns";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+pub const DEFAULT_CONF_DIR: &str = "/usr/local/etc/smartdns";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const DEFAULT_CONF_DIR: &str = "/opt/homebrew/etc/smartdns";
+#[cfg(target_os = "android")]
+pub const DEFAULT_CONF_DIR: &str = "/data/data/com.termux/files/usr/etc/smartdns";
+#[cfg(target_os = "linux")]
+pub const DEFAULT_CONF_DIR: &str = "/etc/smartdns";
+
 #[derive(Default)]
 pub struct RuntimeConfig {
+    conf_dir: PathBuf,
+    conf_file: PathBuf,
     inner: Config,
 
     rule_groups: HashMap<String, RuleGroup>,
@@ -49,13 +62,19 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    pub fn load<P: AsRef<Path>>(path: Option<P>) -> Arc<Self> {
+    pub fn load<P: AsRef<Path>>(conf_dir: Option<PathBuf>, path: Option<P>) -> Arc<Self> {
+        let mut builder = Self::builder();
+
+        if let Some(conf_dir) = conf_dir {
+            builder = builder.with_conf_dir(conf_dir);
+        }
+
         if let Some(ref conf) = path {
             let mut path = Cow::Borrowed(conf.as_ref());
             if path.is_dir() {
                 path = Cow::Owned(path.join(format!("{}.conf", crate::NAME.to_lowercase())));
             }
-            RuntimeConfig::load_from_file(path)
+            builder.with_conf_file(path).build().into()
         } else {
             #[cfg(feature = "service")]
             let conf_path: &str = crate::service::CONF_PATH;
@@ -82,29 +101,29 @@ impl RuntimeConfig {
                 }
             }
 
-            candidate_path
-                .iter()
-                .map(Path::new)
-                .filter(|p| p.exists())
-                .map(RuntimeConfig::load_from_file)
-                .next()
-                .expect("No configuation file found.")
-        }
-    }
+            let candidate_paths = candidate_path.iter().map(Path::new).filter(|p| p.exists());
 
-    fn load_from_file<P: AsRef<Path>>(path: P) -> Arc<Self> {
-        let path = path.as_ref();
+            for p in candidate_paths {
+                builder = builder.with_conf_file(p);
+                match builder.load() {
+                    Ok(_) => return builder.build().into(),
+                    Err(_) => {
+                        warn!("Failed to load configuration from {:?}", p);
+                        continue;
+                    }
+                }
+            }
 
-        let mut builder = Self::builder();
-        if !path.exists() {
-            panic!("configuration file {:?} not exist.", path);
+            panic!("No configuation file found.")
         }
-        builder.load_file(path).expect("load conf file filed");
-        builder.build().into()
     }
 
     pub fn builder() -> RuntimeConfigBuilder {
+        let conf_dir = PathBuf::from(DEFAULT_CONF_DIR);
+        let conf_file = conf_dir.join("smartdns.conf");
         RuntimeConfigBuilder {
+            conf_dir,
+            conf_file,
             config: Default::default(),
             loaded_files: Default::default(),
             rule_groups: Default::default(),
@@ -202,8 +221,8 @@ impl RuntimeConfig {
             .unwrap_or(std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
     }
 
-    pub fn listeners(&self) -> &[BindAddrConfig] {
-        &self.listeners
+    pub fn binds(&self) -> &[BindAddrConfig] {
+        &self.binds
     }
 
     /// SSL Certificate file path
@@ -600,6 +619,18 @@ impl RuntimeConfig {
                 .collect::<Vec<_>>()
         }
     }
+
+    pub fn reload_new(&self) -> anyhow::Result<Arc<RuntimeConfig>> {
+        let mut builder = RuntimeConfigBuilder {
+            conf_dir: self.conf_dir.clone(),
+            conf_file: self.conf_file.clone(),
+            ..Self::builder()
+        };
+
+        builder.load()?;
+
+        Ok(Arc::new(builder.build()))
+    }
 }
 
 impl std::ops::Deref for RuntimeConfig {
@@ -612,6 +643,8 @@ impl std::ops::Deref for RuntimeConfig {
 }
 
 pub struct RuntimeConfigBuilder {
+    conf_dir: PathBuf,
+    conf_file: PathBuf,
     config: Config,
     rule_groups: HashMap<String, RuleGroup>,
     rule_group_stack: Vec<(String, RuleGroup)>,
@@ -621,6 +654,13 @@ pub struct RuntimeConfigBuilder {
 
 impl RuntimeConfigBuilder {
     pub fn build(mut self) -> RuntimeConfig {
+        let loaded = self.loaded_files.contains(&self.conf_file);
+        if !loaded {
+            let _ = self.load();
+        }
+
+        let conf_file = self.conf_file;
+        let conf_dir = self.conf_dir;
         let mut cfg = self.config;
 
         if !self.rule_group_stack.is_empty() {
@@ -629,8 +669,8 @@ impl RuntimeConfigBuilder {
             }
         }
 
-        if cfg.listeners.is_empty() {
-            cfg.listeners.push(UdpBindAddrConfig::default().into())
+        if cfg.binds.is_empty() {
+            cfg.binds.push(UdpBindAddrConfig::default().into())
         }
 
         fn get_ip_set<'a>(ip: &'a IpOrSet, cfg: &'a Config) -> &'a [IpNet] {
@@ -721,11 +761,11 @@ impl RuntimeConfigBuilder {
 
         // find device address
         {
-            if !cfg.listeners.is_empty() {
+            if !cfg.binds.is_empty() {
                 use local_ip_address::list_afinet_netifas;
                 match list_afinet_netifas() {
                     Ok(network_interfaces) => {
-                        for listener in &mut cfg.listeners {
+                        for listener in &mut cfg.binds {
                             let device = match listener.device() {
                                 Some(v) => v,
                                 None => continue,
@@ -769,7 +809,7 @@ impl RuntimeConfigBuilder {
             let mut tcp_addr = HashSet::new();
 
             let mut remove_idx = vec![];
-            for (idx, listener) in cfg.listeners.iter().enumerate().rev() {
+            for (idx, listener) in cfg.binds.iter().enumerate().rev() {
                 let addr = listener.sock_addr();
                 if matches!(listener, BindAddrConfig::Udp(_) | BindAddrConfig::Quic(_)) {
                     if !udp_addr.insert(addr) {
@@ -781,7 +821,7 @@ impl RuntimeConfigBuilder {
             }
 
             for idx in remove_idx {
-                let listener = cfg.listeners.remove(idx);
+                let listener = cfg.binds.remove(idx);
                 warn!("remove duplicated listener {:?}", listener);
             }
         }
@@ -791,6 +831,8 @@ impl RuntimeConfigBuilder {
         std::mem::swap(&mut proxy_servers, &mut cfg.proxy_servers);
 
         RuntimeConfig {
+            conf_dir,
+            conf_file,
             inner: cfg,
             rule_groups: self.rule_groups,
             domain_rule_group_map,
@@ -826,16 +868,26 @@ impl RuntimeConfigBuilder {
         self
     }
 
-    pub fn load_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn with_conf_file<P: AsRef<Path>>(mut self, path: P) -> Self {
+        self.conf_file = path.as_ref().to_path_buf();
+        self
+    }
+
+    pub fn with_conf_dir<P: AsRef<Path>>(mut self, path: P) -> Self {
+        self.conf_dir = path.as_ref().to_path_buf();
+        self
+    }
+
+    pub fn load(&mut self) -> anyhow::Result<()> {
+        self.load_file(self.conf_file.clone())?;
+        Ok(())
+    }
+
+    pub fn load_file<P: AsRef<Path>>(&mut self, path: P) -> anyhow::Result<()> {
         let path = self.resolve_filepath(path);
 
         if path.exists() {
-            if self.conf_file.is_none() {
-                info!("loading configuration from: {:?}", path);
-                self.conf_file = Some(path.clone());
-            } else {
-                debug!("loading extra configuration from {:?}", path);
-            }
+            debug!("loading extra configuration from {:?}", path);
             let file = File::open(path)?;
             let reader = BufReader::new(file);
             for line in reader.lines().map_while(Result::ok) {
@@ -904,7 +956,7 @@ impl RuntimeConfigBuilder {
                 RrTtlMin(v) => self.rr_ttl_min = Some(v),
                 RrTtlMax(v) => self.rr_ttl_max = Some(v),
                 RrTtlReplyMax(v) => self.rr_ttl_reply_max = Some(v),
-                Listener(listener) => self.listeners.push(listener),
+                Listener(listener) => self.binds.push(listener),
                 LocalTtl(v) => self.local_ttl = Some(v),
                 LogConsole(v) => self.log.console = Some(v),
                 LogNum(v) => self.log.num = Some(v),
@@ -954,7 +1006,7 @@ impl RuntimeConfigBuilder {
                 }
                 HostsFile(file) => self.hosts_file = Some(file),
                 IpSetProvider(p) => {
-                    let path = resolve_filepath(&p.file, self.conf_file.as_ref());
+                    let path = resolve_filepath(&p.file, Some(&self.conf_file));
                     match std::fs::read_to_string(path) {
                         Ok(text) => {
                             let net = self.ip_sets.entry(p.name.clone()).or_default();
@@ -989,7 +1041,7 @@ impl RuntimeConfigBuilder {
 
     #[inline]
     fn resolve_filepath<P: AsRef<Path>>(&self, filepath: P) -> PathBuf {
-        let path = resolve_filepath(filepath, self.conf_file.as_ref());
+        let path = resolve_filepath(filepath, Some(&self.conf_file));
 
         if path.exists() {
             return path;
@@ -1088,21 +1140,21 @@ mod tests {
             .build();
 
         assert_eq!(
-            cfg.listeners()
+            cfg.binds()
                 .iter()
                 .filter(|x| matches!(x, BindAddrConfig::Tcp(_)))
                 .count(),
             0
         );
         assert_eq!(
-            cfg.listeners()
+            cfg.binds()
                 .iter()
                 .filter(|x| matches!(x, BindAddrConfig::Tls(_)))
                 .count(),
             1
         );
         assert_eq!(
-            cfg.listeners()
+            cfg.binds()
                 .iter()
                 .filter(|x| matches!(x, BindAddrConfig::Https(_)))
                 .count(),
@@ -1117,9 +1169,9 @@ mod tests {
             .with("bind 0.0.0.0:4453@eth100")
             .build();
 
-        assert_eq!(cfg.listeners().len(), 1);
+        assert_eq!(cfg.binds().len(), 1);
 
-        let bind = cfg.listeners().first().unwrap();
+        let bind = cfg.binds().first().unwrap();
 
         assert_eq!(bind.addr(), BindAddr::V4("0.0.0.0".parse().unwrap()));
         assert_eq!(bind.port(), 4453);
@@ -1133,7 +1185,7 @@ mod tests {
             .with("bind-https 0.0.0.0:443@eth2 -no-rule-addr")
             .build();
 
-        let listener = cfg.listeners().first().unwrap();
+        let listener = cfg.binds().first().unwrap();
 
         assert_eq!(
             listener,
@@ -1145,7 +1197,7 @@ mod tests {
                     no_rule_addr: Some(true),
                     ..Default::default()
                 },
-                ssl_config: Default::default()
+                ..Default::default()
             })
         );
     }
@@ -1160,9 +1212,9 @@ mod tests {
 
         let cfg = cfg.build();
 
-        assert!(!cfg.listeners().is_empty());
+        assert!(!cfg.binds().is_empty());
 
-        let listener = cfg.listeners().first().unwrap();
+        let listener = cfg.binds().first().unwrap();
 
         assert_eq!(
             listener,
@@ -1177,8 +1229,7 @@ mod tests {
                     ),
                     certificate_key_pass: None
                 },
-                device: None,
-                opts: Default::default()
+                ..Default::default()
             })
         );
     }
@@ -1692,7 +1743,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_config_file_b() {
-        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
 
         assert_eq!(cfg.server_name, "SmartDNS123".parse().ok());
         assert_eq!(
@@ -1728,7 +1781,9 @@ mod tests {
     fn test_domain_set() {
         use crate::collections::DomainSet;
 
-        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
 
         assert!(!cfg.domain_set_providers.is_empty());
 
@@ -1763,7 +1818,9 @@ mod tests {
 
     #[test]
     fn test_ip_set() {
-        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
 
         let v4: Vec<_> = include_str!("../tests/test_data/cf-ipv4.txt")
             .lines()
@@ -1783,7 +1840,9 @@ mod tests {
 
     #[test]
     fn test_ip_alias() {
-        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
         let addr = |s: &str| s.parse::<IpAddr>().unwrap();
         let get_alias = |s: &str| &**cfg.ip_alias.get(&addr(s)).unwrap();
 
