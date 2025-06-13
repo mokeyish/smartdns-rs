@@ -300,7 +300,7 @@ async fn lookup_ip(
                 }
             }
 
-            let selected_ip = match fastest_ip {
+            match fastest_ip {
                 Some(ip) => Some(ip),
                 None => {
                     let ip_addr_stats = ok_tasks.iter().flat_map(|r| r.ip_addrs()).fold(
@@ -315,9 +315,7 @@ async fn lookup_ip(
                         .max_by_key(|(_, n)| *n)
                         .map(|(ip, _)| ip)
                 }
-            };
-
-            selected_ip
+            }
         }
         FastestIp => {
             let mut ping_tasks = vec![];

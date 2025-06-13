@@ -30,12 +30,8 @@ pub fn serve(
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
 
-    let tls_config = tls_server_config(b"dot", server_cert_resolver).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("error creating TLS acceptor: {e}"),
-        )
-    })?;
+    let tls_config = tls_server_config(b"dot", server_cert_resolver)
+        .map_err(|e| io::Error::other(format!("error creating TLS acceptor: {e}")))?;
 
     let handler = handler.clone();
 

@@ -1,5 +1,4 @@
 use super::*;
-use crate::dns::Protocol;
 use crate::log::warn;
 use std::convert::{Into, TryInto};
 use std::net::Ipv4Addr;
@@ -94,14 +93,28 @@ impl NomParser for H3BindAddrConfig {
 ///    bind [::]:53
 ///    bind-tcp [::]:53
 fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
+    #[derive(Clone)]
+    enum Protocol {
+        Udp,
+        Tcp,
+        Tls,
+        Http,
+        Https,
+        Quic,
+        H3,
+    }
+
+    use Protocol::*;
+
     let proto = alt((
-        value(Protocol::Tcp, tag_no_case("bind-tcp")),
-        value(Protocol::Tls, tag_no_case("bind-tls")),
-        value(Protocol::Quic, tag_no_case("bind-quic")),
-        value(Protocol::Https, tag_no_case("bind-https")),
-        value(Protocol::H3, tag_no_case("bind-h3")),
-        value(Protocol::Udp, tag_no_case("bind-udp")),
-        value(Protocol::Udp, tag_no_case("bind")),
+        value(Tcp, tag_no_case("bind-tcp")),
+        value(Tls, tag_no_case("bind-tls")),
+        value(Quic, tag_no_case("bind-quic")),
+        value(Https, tag_no_case("bind-https")),
+        value(Http, tag_no_case("bind-http")),
+        value(H3, tag_no_case("bind-h3")),
+        value(Udp, tag_no_case("bind-udp")),
+        value(Udp, tag_no_case("bind")),
     ));
 
     let addr = map(opt(BindAddr::parse), |addr| {
@@ -130,12 +143,11 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
         (Vec::with_capacity(0), Default::default())
     };
 
-    let (options, ssl_config) =
-        if !matches!(&proto, Protocol::Tcp | Protocol::Udp) && !options.is_empty() {
-            parse_ssl_config(&options)
-        } else {
-            (Vec::with_capacity(0), Default::default())
-        };
+    let (options, ssl_config) = if !matches!(&proto, Tcp | Udp | Http) && !options.is_empty() {
+        parse_ssl_config(&options)
+    } else {
+        (Vec::with_capacity(0), Default::default())
+    };
 
     if !options.is_empty() {
         warn!("unknown options {:?}", options);
@@ -144,7 +156,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
     let enabled = None;
 
     let listener = match proto {
-        Protocol::Udp => UdpBindAddrConfig {
+        Udp => UdpBindAddrConfig {
             addr,
             port,
             device,
@@ -152,7 +164,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             enabled,
         }
         .into(),
-        Protocol::Tcp => TcpBindAddrConfig {
+        Tcp => TcpBindAddrConfig {
             addr,
             port,
             device,
@@ -160,16 +172,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             enabled,
         }
         .into(),
-        Protocol::Tls => TlsBindAddrConfig {
-            addr,
-            port,
-            device,
-            opts,
-            ssl_config,
-            enabled,
-        }
-        .into(),
-        Protocol::Https => HttpsBindAddrConfig {
+        Tls => TlsBindAddrConfig {
             addr,
             port,
             device,
@@ -178,7 +181,15 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             enabled,
         }
         .into(),
-        Protocol::H3 => H3BindAddrConfig {
+        Http => HttpBindAddrConfig {
+            addr,
+            port,
+            device,
+            opts,
+            enabled,
+        }
+        .into(),
+        Https => HttpsBindAddrConfig {
             addr,
             port,
             device,
@@ -187,7 +198,7 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             enabled,
         }
         .into(),
-        Protocol::Quic => QuicBindAddrConfig {
+        H3 => H3BindAddrConfig {
             addr,
             port,
             device,
@@ -196,7 +207,15 @@ fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
             enabled,
         }
         .into(),
-        p => panic!("unexpected proto {}", p),
+        Quic => QuicBindAddrConfig {
+            addr,
+            port,
+            device,
+            opts,
+            ssl_config,
+            enabled,
+        }
+        .into(),
     };
 
     Ok((input, listener))

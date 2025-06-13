@@ -55,7 +55,7 @@ pub fn is_systemd() -> bool {
     match which::which(SERVICE_CTL) {
         Ok(_) => Ok(Path::new(SERVICE_RUN_DIR).exists()),
         Err(which::Error::CannotFindBinaryPath) => Ok(false),
-        Err(x) => Err(io::Error::new(io::ErrorKind::Other, x)),
+        Err(x) => Err(io::Error::other(x)),
     }
     .unwrap_or_default()
 }

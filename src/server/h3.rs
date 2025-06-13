@@ -31,12 +31,8 @@ pub fn serve(
 
     log::debug!("registered HTTP/3: {:?}", socket);
 
-    let tls_config = tls_server_config(b"h3", server_cert_resolver).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("error creating TLS acceptor: {e}"),
-        )
-    })?;
+    let tls_config = tls_server_config(b"h3", server_cert_resolver)
+        .map_err(|e| io::Error::other(format!("error creating TLS acceptor: {e}")))?;
 
     let server_config =
         ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls_config).unwrap()));

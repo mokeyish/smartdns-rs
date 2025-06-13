@@ -134,7 +134,7 @@ async fn process(
         };
         (
             APPLICATION_JSON,
-            serde_json::to_vec(&DnsResponse::from(message))?,
+            serde_json::to_vec(&DnsResponse::from(message.as_ref()))?,
         )
     };
 
@@ -218,8 +218,8 @@ struct Answer {
     data: String,
 }
 
-impl From<crate::libdns::proto::op::Message> for DnsResponse {
-    fn from(message: crate::libdns::proto::op::Message) -> Self {
+impl From<&crate::libdns::proto::op::Message> for DnsResponse {
+    fn from(message: &crate::libdns::proto::op::Message) -> Self {
         DnsResponse {
             status: message.response_code().into(),
             TC: message.truncated(),

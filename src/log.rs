@@ -59,7 +59,7 @@ pub fn make_dispatch<P: AsRef<Path>>(
 
     let console_writer = io::stdout.with_max_level(console_level);
 
-    let dispatch = if writable {
+    if writable {
         // log hello
         {
             let writer = file.with_max_level(level);
@@ -85,8 +85,7 @@ pub fn make_dispatch<P: AsRef<Path>>(
         internal_make_dispatch(console_level, filter, console_writer)
     } else {
         Dispatch::none()
-    };
-    dispatch
+    }
 }
 
 pub fn console(console_level: Level) -> DefaultGuard {

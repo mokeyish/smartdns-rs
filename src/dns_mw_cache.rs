@@ -533,7 +533,7 @@ impl DnsCache {
             }
         };
 
-        let lookup = cache.get_mut(query).map(|value| {
+        cache.get_mut(query).map(|value| {
             value.stats.hit();
             if value.is_current(now) {
                 let mut res = value.data.clone();
@@ -544,9 +544,7 @@ impl DnsCache {
                 res.set_max_ttl(self.expired_reply_ttl as u32);
                 (res, CacheStatus::Expired)
             }
-        });
-
-        lookup
+        })
     }
 
     async fn get_expired(

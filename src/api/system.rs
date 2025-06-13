@@ -22,7 +22,7 @@ async fn status(State(s): State<Arc<ServeState>>) -> Json<SystemStatus> {
         build_date: crate::BUILD_DATE.with_timezone(&chrono::Local),
         uptime: format!("{:?}", app.uptime()),
         config_loaded_at: format!("{:?}", app.loaded_at().await),
-        request_count: app.requests(),
+        active_queries: app.active_queries(),
     })
 }
 
@@ -35,5 +35,5 @@ struct SystemStatus {
     build_date: chrono::DateTime<chrono::Local>,
     uptime: String,
     config_loaded_at: String,
-    request_count: usize,
+    active_queries: usize,
 }

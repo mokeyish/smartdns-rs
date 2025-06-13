@@ -1,5 +1,6 @@
 #[cfg(feature = "dns-over-h3")]
 mod h3;
+mod http;
 #[cfg(feature = "dns-over-https")]
 mod https;
 mod net;
@@ -113,6 +114,20 @@ pub fn serve(
                 Duration::from_secs(idle_time),
                 server_cert_resolver,
             )?
+        }
+        BindAddrConfig::Http(bind_addr_config) => {
+            const LISTENER_TYPE: &str = "DNS over HTTP";
+
+            let listener = bind_to(
+                setup_tcp_socket,
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
+                LISTENER_TYPE,
+            );
+
+            let app = app.clone();
+
+            http::serve(app, listener, dns_handle)?
         }
         #[cfg(feature = "dns-over-https")]
         BindAddrConfig::Https(bind_addr_config) => {

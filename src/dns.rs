@@ -124,7 +124,7 @@ mod serial_message {
     use super::{DnsRequest, DnsResponse};
 
     pub enum SerialMessage {
-        Raw(Message, SocketAddr, Protocol),
+        Raw(Box<Message>, SocketAddr, Protocol),
         Bytes(Vec<u8>, SocketAddr, Protocol),
     }
 
@@ -133,7 +133,7 @@ mod serial_message {
             Self::Bytes(bytes, addr, protocol)
         }
         pub fn raw(message: Message, addr: SocketAddr, protocol: Protocol) -> Self {
-            Self::Raw(message, addr, protocol)
+            Self::Raw(message.into(), addr, protocol)
         }
 
         pub fn is_binray(&self) -> bool {
@@ -209,7 +209,7 @@ mod serial_message {
 
         fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
             match value {
-                SerialMessage::Raw(message, _, _) => Ok(message),
+                SerialMessage::Raw(message, _, _) => Ok(message.as_ref().clone()),
                 SerialMessage::Bytes(bytes, _, _) => Message::from_vec(&bytes),
             }
         }
@@ -369,9 +369,11 @@ mod request {
 
         fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
             match value {
-                SerialMessage::Raw(message, src_addr, protocol) => {
-                    Ok(DnsRequest::new(message, src_addr, protocol))
-                }
+                SerialMessage::Raw(message, src_addr, protocol) => Ok(DnsRequest::new(
+                    message.as_ref().clone(),
+                    src_addr,
+                    protocol,
+                )),
                 SerialMessage::Bytes(bytes, src_addr, protocol) => {
                     use crate::libdns::proto::serialize::binary::{BinDecodable, BinDecoder};
                     let mut decoder = BinDecoder::new(&bytes);
