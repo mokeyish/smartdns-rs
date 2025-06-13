@@ -68,7 +68,7 @@ impl App {
                     cache: RwLock::const_new(None),
                     uptime: Instant::now(),
                     loaded_at: RwLock::const_new(Instant::now()),
-                    requests: Default::default(),
+                    active_queries: Default::default(),
                     guard,
                 }
                 .into(),
@@ -106,8 +106,8 @@ impl App {
         now.duration_since(self.uptime)
     }
 
-    pub fn requests(&self) -> usize {
-        self.requests.load(Ordering::SeqCst)
+    pub fn active_queries(&self) -> usize {
+        self.active_queries.load(Ordering::Relaxed)
     }
 
     async fn init(&self) {
@@ -223,7 +223,7 @@ pub struct AppState {
     cache: RwLock<Option<Arc<DnsCache>>>,
     uptime: Instant,
     loaded_at: RwLock<Instant>,
-    requests: AtomicUsize,
+    active_queries: AtomicUsize,
     guard: AppGuard,
 }
 
@@ -297,7 +297,8 @@ pub fn serve(directory: Option<PathBuf>, conf: Option<PathBuf>) {
                     });
                 }
 
-                app.requests.store(inner_join_set.len(), Ordering::SeqCst);
+                app.active_queries
+                    .store(inner_join_set.len(), Ordering::Relaxed);
 
                 reap_tasks(&mut inner_join_set);
             }

@@ -811,7 +811,10 @@ impl RuntimeConfigBuilder {
             let mut remove_idx = vec![];
             for (idx, listener) in cfg.binds.iter().enumerate().rev() {
                 let addr = listener.sock_addr();
-                if matches!(listener, BindAddrConfig::Udp(_) | BindAddrConfig::Quic(_)) {
+                if matches!(
+                    listener,
+                    BindAddrConfig::Udp(_) | BindAddrConfig::Quic(_) | BindAddrConfig::H3(_)
+                ) {
                     if !udp_addr.insert(addr) {
                         remove_idx.push(idx)
                     }

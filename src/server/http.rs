@@ -1,5 +1,4 @@
 use axum::extract::Request;
-use http::{HeaderValue, header};
 use hyper::body::Incoming;
 use hyper_util::{
     rt::{TokioExecutor, TokioIo},
@@ -8,49 +7,25 @@ use hyper_util::{
 use std::{convert::Infallible, io, net::SocketAddr, sync::Arc};
 use tokio::{net, task::JoinSet};
 use tokio_util::sync::CancellationToken;
-use tower::{Service as _, ServiceBuilder, ServiceExt};
-use tower_http::set_header::SetResponseHeaderLayer;
-
-use tokio_rustls::TlsAcceptor;
+use tower::{Service as _, ServiceExt};
 
 use super::{DnsHandle, reap_tasks, sanitize_src_address};
 
-use crate::{
-    api::ServeState,
-    app::App,
-    log,
-    rustls::{ResolvesServerCert, tls_server_config},
-};
+use crate::{api::ServeState, app::App, log};
 
 pub fn serve(
     app: App,
     listener: net::TcpListener,
     dns_handle: DnsHandle,
-    server_cert_resolver: Arc<dyn ResolvesServerCert>,
-    h3_port: Option<u16>,
 ) -> io::Result<CancellationToken> {
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
 
-    log::debug!("registered HTTPS: {:?}", listener);
-
-    let tls_config = tls_server_config(b"h2", server_cert_resolver)
-        .map_err(|e| io::Error::other(format!("error creating TLS acceptor: {e}")))?;
-
-    let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
+    log::debug!("registered HTTP: {:?}", listener);
 
     let state = Arc::new(ServeState { app, dns_handle });
 
-    let service_builder = ServiceBuilder::new().option_layer(h3_port.map(|port| {
-        let alt_svc = format!(r#"h3=":{port}"; h3-29=":{port}"; ma=86400"#);
-        SetResponseHeaderLayer::overriding(
-            header::ALT_SVC,
-            HeaderValue::from_str(alt_svc.as_str()).expect("invalid header value"), // TODO: handle error better?
-        )
-    }));
-
     let make_service = crate::api::routes()
-        .layer(service_builder)
         .with_state(state.clone())
         .into_make_service_with_connect_info::<SocketAddr>();
 
@@ -81,23 +56,13 @@ pub fn serve(
                 continue;
             }
 
-            let tls_acceptor = tls_acceptor.clone();
-
             // kick out to a different task immediately, let them do the TLS handshake
             let mut make_service = make_service.clone();
             inner_join_set.spawn(async move {
-                log::debug!("starting HTTPS request from: {}", src_addr);
+                log::debug!("starting HTTP request from: {}", src_addr);
 
-                // perform the TLS
-                let tls_stream = tls_acceptor.accept(tcp_stream).await;
-                let socket = match tls_stream {
-                    Ok(tls_stream) => tls_stream,
-                    Err(e) => {
-                        log::debug!("https handshake src: {} error: {}", src_addr, e);
-                        return;
-                    }
-                };
-                log::debug!("accepted HTTPS request from: {}", src_addr);
+                let socket = tcp_stream;
+                log::debug!("accepted HTTP request from: {}", src_addr);
 
                 let tower_service = unwrap_infallible(make_service.call(src_addr).await);
 

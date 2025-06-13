@@ -1224,11 +1224,11 @@ mod connection_provider {
                 }
                 UdpSocket::Proxy(s) => {
                     let (len, addr) = ready!(s.poll_recv_from(cx, buf))
-                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+                        .map_err(|err| io::Error::other(err.to_string()))?;
                     let addr = match addr {
                         async_socks5::AddrKind::Ip(addr) => addr,
                         async_socks5::AddrKind::Domain(_, _) => {
-                            Err(io::Error::new(io::ErrorKind::Other, "Expect IP address"))?
+                            Err(io::Error::other("Expect IP address"))?
                         }
                     };
                     Poll::Ready(Ok((len, addr)))
@@ -1246,7 +1246,7 @@ mod connection_provider {
                 UdpSocket::Tokio(s) => tokio::net::UdpSocket::poll_send_to(s, cx, buf, target),
                 UdpSocket::Proxy(s) => {
                     let res = ready!(s.poll_send_to(cx, buf, target))
-                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()));
+                        .map_err(|err| io::Error::other(err.to_string()));
                     Poll::Ready(res)
                 }
             }
@@ -1262,12 +1262,12 @@ mod connection_provider {
                     let (len, addr) = s
                         .recv_from(buf)
                         .await
-                        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+                        .map_err(|err| io::Error::other(err.to_string()))?;
 
                     let addr = match addr {
                         async_socks5::AddrKind::Ip(addr) => addr,
                         async_socks5::AddrKind::Domain(_, _) => {
-                            Err(io::Error::new(io::ErrorKind::Other, "Expect IP address"))?
+                            Err(io::Error::other("Expect IP address"))?
                         }
                     };
                     Ok((len, addr))
@@ -1284,7 +1284,7 @@ mod connection_provider {
                 Proxy(s) => s
                     .send_to(buf, target)
                     .await
-                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string())),
+                    .map_err(|err| io::Error::other(err.to_string())),
             }
         }
     }

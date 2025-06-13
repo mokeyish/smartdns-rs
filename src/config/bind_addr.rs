@@ -17,6 +17,8 @@ pub enum BindAddrConfig {
     Tcp(TcpBindAddrConfig),
     #[serde(rename = "tls")]
     Tls(TlsBindAddrConfig),
+    #[serde(rename = "http")]
+    Http(HttpBindAddrConfig),
     #[serde(rename = "https")]
     Https(HttpsBindAddrConfig),
     #[serde(rename = "h3")]
@@ -160,6 +162,42 @@ impl Default for TlsBindAddrConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct HttpBindAddrConfig {
+    /// addr adress
+    #[serde(with = "serde_str")]
+    pub addr: BindAddr,
+    /// addr port
+    pub port: u16,
+    /// bind network device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    /// the server options
+    #[serde(flatten)]
+    pub opts: ServerOpts,
+    /// indicates whether this bind address is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+impl HttpBindAddrConfig {
+    fn default_port() -> u16 {
+        80
+    }
+}
+
+impl Default for HttpBindAddrConfig {
+    fn default() -> Self {
+        Self {
+            addr: Default::default(),
+            port: Self::default_port(),
+            device: Default::default(),
+            opts: Default::default(),
+            enabled: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct HttpsBindAddrConfig {
     /// addr adress
     #[serde(with = "serde_str")]
@@ -297,6 +335,7 @@ impl_bind_addr!(
     UdpBindAddrConfig,
     TcpBindAddrConfig,
     TlsBindAddrConfig,
+    HttpBindAddrConfig,
     HttpsBindAddrConfig,
     H3BindAddrConfig,
     QuicBindAddrConfig
