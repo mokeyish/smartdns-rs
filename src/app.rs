@@ -265,7 +265,7 @@ pub fn serve(directory: Option<PathBuf>, conf: Option<PathBuf>) {
     {
         let app = app.clone();
         runtime.spawn(async move {
-            use crate::server::reap_tasks;
+            use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 
             // todo:// manage concurrent requests.
 
@@ -275,32 +275,73 @@ pub fn serve(directory: Option<PathBuf>, conf: Option<PathBuf>) {
 
             const MAX_IDLE: Duration = Duration::from_secs(30 * 60); // 30 min
 
-            let background_concurrency = Arc::new(Semaphore::new(1));
+            const BATCH_SIZE: usize = 256;
 
-            while let Some((message, server_opts, sender)) = incoming_request.recv().await {
+            let background_concurrency = Arc::new(Semaphore::new(1));
+            let mut bg_batch = FuturesUnordered::new();
+            let mut requests = Vec::with_capacity(BATCH_SIZE);
+
+            loop {
+                let count = incoming_request.recv_many(&mut requests, BATCH_SIZE).await;
+                if count == 0 {
+                    continue;
+                }
+
+                app.active_queries.fetch_add(count, Ordering::Relaxed);
+
                 let handler = app.mw_handler.read().await.clone();
 
-                if server_opts.is_background {
-                    if Instant::now() - last_activity < MAX_IDLE {
-                        let background_concurrency = background_concurrency.clone();
-                        inner_join_set.spawn(async move {
-                            if let Ok(permit) = background_concurrency.acquire_owned().await {
+                let mut batch = FuturesUnordered::new();
+
+                while let Some((message, server_opts, sender)) = requests.pop() {
+                    let handler = handler.clone();
+                    if server_opts.is_background {
+                        if Instant::now() - last_activity < MAX_IDLE {
+                            bg_batch.push(async move {
                                 let _ = sender.send(process(handler, message, server_opts).await);
-                                drop(permit);
-                            }
+                            });
+                        }
+                    } else {
+                        last_activity = Instant::now();
+                        batch.push(async move {
+                            let _ = sender.send(process(handler, message, server_opts).await);
                         });
                     }
-                } else {
-                    last_activity = Instant::now();
+                }
+
+                if !bg_batch.is_empty() {
+                    if let Ok(permit) = background_concurrency.clone().try_acquire_owned() {
+                        let mut batch = FuturesUnordered::new();
+                        std::mem::swap(&mut batch, &mut bg_batch);
+                        inner_join_set.spawn(async move {
+                            let count = batch.len();
+                            while let Some(_) = batch.next().await {}
+                            drop(permit);
+                            count
+                        });
+                    }
+                }
+
+                if !batch.is_empty() {
                     inner_join_set.spawn(async move {
-                        let _ = sender.send(process(handler, message, server_opts).await);
+                        let count = batch.len();
+                        while let Some(_) = batch.next().await {}
+                        count
                     });
                 }
 
-                app.active_queries
-                    .store(inner_join_set.len(), Ordering::Relaxed);
+                let finished = reap_tasks(&mut inner_join_set);
+                app.active_queries.fetch_sub(finished, Ordering::Relaxed);
+            }
 
-                reap_tasks(&mut inner_join_set);
+            fn reap_tasks(join_set: &mut JoinSet<usize>) -> usize {
+                let mut total = 0;
+                while let Some(count) = join_set.join_next().now_or_never().flatten() {
+                    if let Ok(count) = count {
+                        total += count;
+                    }
+                }
+                total
             }
         });
     }
