@@ -31,6 +31,10 @@ homebrew = [ "common" ]
 
 common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "mdns", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client", "serde" ]
 
+future-diagnostic = [
+  "dep:console-subscriber"
+]
+
 nom-recipes-all =["nom-recipes-ip", "nom-recipes-mac"]
 
 nom-recipes-ip = ["nom-recipes-ipv4", "nom-recipes-ipv6"]
@@ -177,6 +181,8 @@ tracing-subscriber = { version = "0.3", features = [
   "fmt",
   "env-filter",
 ] }
+
+console-subscriber = { version = "0.4.1", optional = true }
 # tracing-appender = "0.2"
 
 # hickory dns

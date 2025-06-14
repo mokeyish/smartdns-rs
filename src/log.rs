@@ -63,7 +63,7 @@ pub fn make_dispatch<P: AsRef<Path>>(
         // log hello
         {
             let writer = file.with_max_level(level);
-            let dispatch = internal_make_dispatch(level, filter, writer);
+            let dispatch = internal_make_dispatch(level, filter, writer, true);
 
             let _guard = set_default(&dispatch);
             crate::hello_starting();
@@ -77,12 +77,13 @@ pub fn make_dispatch<P: AsRef<Path>>(
                 level.max(console_level),
                 filter,
                 file_writer.and(console_writer),
+                true,
             )
         } else {
-            internal_make_dispatch(level.max(console_level), filter, file_writer)
+            internal_make_dispatch(level.max(console_level), filter, file_writer, true)
         }
     } else if to_console {
-        internal_make_dispatch(console_level, filter, console_writer)
+        internal_make_dispatch(console_level, filter, console_writer, true)
     } else {
         Dispatch::none()
     }
@@ -91,7 +92,12 @@ pub fn make_dispatch<P: AsRef<Path>>(
 pub fn console(console_level: Level) -> DefaultGuard {
     INIT_CONSOLE_LEVEL.get_or_init(|| console_level);
     let console_writer = io::stdout.with_max_level(console_level);
-    set_default(&internal_make_dispatch(console_level, None, console_writer))
+    set_default(&internal_make_dispatch(
+        console_level,
+        None,
+        console_writer,
+        false,
+    ))
 }
 
 #[inline]
@@ -99,6 +105,7 @@ fn internal_make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send +
     level: tracing::Level,
     filter: Option<&str>,
     writer: W,
+    diagnostic: bool,
 ) -> Dispatch {
     let layer = tracing_subscriber::fmt::layer()
         .event_format(TdnsFormatter)
@@ -108,7 +115,20 @@ fn internal_make_dispatch<W: for<'writer> MakeWriter<'writer> + 'static + Send +
         .with(layer)
         .with(make_filter(level, filter));
 
-    Dispatch::new(subscriber)
+    if diagnostic {
+        #[cfg(feature = "future-diagnostic")]
+        let subscriber = subscriber.with({
+            // console_subscriber::init();
+            let console_layer = console_subscriber::ConsoleLayer::builder()
+                .with_default_env()
+                .spawn();
+            console_layer
+        });
+
+        Dispatch::new(subscriber)
+    } else {
+        Dispatch::new(subscriber)
+    }
 }
 
 #[inline]
