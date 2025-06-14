@@ -250,7 +250,6 @@ impl RuntimeConfig {
             builder = builder.with_client_subnet(subnet);
         }
         builder = builder.with_proxies(proxies);
-        builder = builder.with_max_cocurrency(self.num_workers());
         builder.build().await
     }
 }

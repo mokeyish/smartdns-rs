@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::sync::{Mutex, OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::sync::RwLock;
 use url::Host;
 
 use crate::{
@@ -59,7 +59,6 @@ pub struct DnsClientBuilder {
     ca_path: Option<PathBuf>,
     proxies: Arc<HashMap<String, ProxyConfig>>,
     client_subnet: Option<ClientSubnet>,
-    max_cocurrency: Option<usize>,
 }
 
 impl DnsClientBuilder {
@@ -93,11 +92,6 @@ impl DnsClientBuilder {
         self
     }
 
-    pub fn with_max_cocurrency(mut self, cocurrent: usize) -> Self {
-        self.max_cocurrency = Some(cocurrent);
-        self
-    }
-
     pub async fn build(self) -> DnsClient {
         let DnsClientBuilder {
             server_infos,
@@ -105,7 +99,6 @@ impl DnsClientBuilder {
             ca_path,
             proxies,
             client_subnet,
-            max_cocurrency,
         } = self;
 
         let tls_client_config = TlsClientConfigBundle::new(ca_path, ca_file);
@@ -169,7 +162,6 @@ impl DnsClientBuilder {
                                     Some(tls_client_config.clone()),
                                     None,
                                     client_subnet,
-                                    max_cocurrency,
                                 ) {
                                     Ok(s) => {
                                         let s = Arc::new(s);
@@ -252,7 +244,6 @@ impl DnsClientBuilder {
                             Some(tls_client_config.clone()),
                             Some(bootstrap.clone()),
                             client_subnet,
-                            max_cocurrency,
                         ) {
                             Ok(s) => {
                                 let s = Arc::new(s);
@@ -420,9 +411,7 @@ impl GenericResolver for NameServerGroup {
 }
 
 pub struct NameServer {
-    max_cocurrency: Arc<Semaphore>,
-    datagram_conns: Arc<RwLock<Option<Connection>>>,
-    stream_conns: Arc<Mutex<Vec<Connection>>>,
+    datagram_conns: Arc<RwLock<Option<Arc<Connection>>>>,
 
     server: Host,
 
@@ -443,7 +432,6 @@ impl NameServer {
         tls_client_config: Option<TlsClientConfigBundle>,
         resolver: Option<Arc<BootstrapResolver>>,
         default_client_subnet: Option<ClientSubnet>,
-        cocurrent: Option<usize>,
     ) -> anyhow::Result<Self> {
         let url = &config.server;
 
@@ -516,7 +504,6 @@ impl NameServer {
         };
 
         Ok(Self {
-            max_cocurrency: Arc::new(Semaphore::const_new(cocurrent.unwrap_or(1))),
             server: url.host().to_owned(),
             ip_addrs: url
                 .ip()
@@ -524,7 +511,6 @@ impl NameServer {
                 .unwrap_or_default(),
             config,
             datagram_conns: Default::default(),
-            stream_conns: Default::default(),
             options: options.into(),
             connection_provider: provider,
             resolver,
@@ -575,120 +561,101 @@ impl NameServer {
 
     async fn client(&self) -> Result<ClientHandle, ProtoError> {
         if let Some(conn) = self.datagram_conns.read().await.clone() {
-            return Ok(ClientHandle {
-                connections: self.stream_conns.clone(),
-                connection: Some((conn, None)),
-            });
+            return Ok(ClientHandle { connection: conn });
         }
-        let cocurrent_permit = self
-            .max_cocurrency
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| ProtoErrorKind::Busy)?;
 
-        let conn = self.stream_conns.lock().await.pop();
+        let conn = {
+            let config = self.config.clone();
+            let options = self.options.as_ref().deref().clone();
+            let provider = self.connection_provider.clone();
+            let ip_addrs = self.ip_addrs().await?;
 
-        let (protocol, conn) = match conn {
-            Some(conn) => (self.config.protocol, conn),
-            None => {
-                let config = self.config.clone();
-                let options = self.options.as_ref().deref().clone();
-                let provider = self.connection_provider.clone();
-                let ip_addrs = self.ip_addrs().await?;
+            let mut configs = ip_addrs
+                .iter()
+                .map(|ip| {
+                    let mut config = config.clone();
+                    config.socket_addr.set_ip(*ip);
+                    config
+                })
+                .collect::<Vec<_>>();
 
-                let mut configs = ip_addrs
-                    .iter()
-                    .map(|ip| {
-                        let mut config = config.clone();
-                        config.socket_addr.set_ip(*ip);
-                        config
-                    })
-                    .collect::<Vec<_>>();
-
-                let alt_protocol = self.prefer_protocol.or_else(|| {
-                    if config.protocol == Protocol::Https {
-                        Some(Protocol::H3)
-                    } else {
-                        None
-                    }
-                });
-
-                if let Some(alt_protocol) = alt_protocol {
-                    configs.extend(
-                        configs
-                            .iter()
-                            .map(|c| {
-                                let mut config = c.clone();
-                                config.protocol = alt_protocol;
-                                config
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-
-                if configs.is_empty() {
-                    return Err(ProtoErrorKind::NoConnections.into());
-                }
-
-                if configs.len() == 1 {
-                    (config.protocol, Connection::new(config, options, provider))
+            let alt_protocol = self.prefer_protocol.or_else(|| {
+                if config.protocol == Protocol::Https {
+                    Some(Protocol::H3)
                 } else {
-                    let conns = configs
-                        .into_iter()
+                    None
+                }
+            });
+
+            if let Some(alt_protocol) = alt_protocol {
+                configs.extend(
+                    configs
+                        .iter()
                         .map(|c| {
-                            (
-                                c.protocol,
-                                Connection::new(c, options.clone(), provider.clone()),
-                            )
+                            let mut config = c.clone();
+                            config.protocol = alt_protocol;
+                            config
                         })
-                        .map(|(protocol, conn)| {
-                            let delay = matches!(self.prefer_protocol, Some(p) if p != protocol);
+                        .collect::<Vec<_>>(),
+                );
+            }
 
-                            Box::pin(async move {
-                                {
-                                    let fut = conn
-                                        .lookup(DEFAULT_QUERY.clone(), Default::default())
-                                        .first_answer();
+            if configs.is_empty() {
+                return Err(ProtoErrorKind::NoConnections.into());
+            }
 
-                                    if delay {
-                                        tokio::time::sleep(Duration::from_millis(100)).await;
-                                    }
+            if configs.len() == 1 {
+                Connection::new(config, options, provider)
+            } else {
+                let conns = configs
+                    .into_iter()
+                    .map(|c| {
+                        (
+                            c.protocol,
+                            Connection::new(c, options.clone(), provider.clone()),
+                        )
+                    })
+                    .map(|(protocol, conn)| {
+                        let delay = matches!(self.prefer_protocol, Some(p) if p != protocol);
 
-                                    match fut.await {
-                                        Ok(_) => Ok((protocol, conn)),
-                                        Err(err) if err.kind.is_no_records_found() => {
-                                            Ok((protocol, conn))
-                                        }
-                                        Err(err) => Err(err),
-                                    }
+                        Box::pin(async move {
+                            {
+                                let fut = conn
+                                    .lookup(DEFAULT_QUERY.clone(), Default::default())
+                                    .first_answer();
+
+                                if delay {
+                                    tokio::time::sleep(Duration::from_millis(100)).await;
                                 }
-                            })
-                        });
 
-                    match futures::future::select_ok(conns).await {
-                        Ok((conn, _)) => conn,
-                        Err(err) => {
-                            log::error!(
-                                "Failed to connect to any nameserver: {} {}",
-                                self.server,
-                                err
-                            );
-                            return Err(err);
-                        }
+                                match fut.await {
+                                    Ok(_) => Ok(conn),
+                                    Err(err) if err.kind.is_no_records_found() => Ok(conn),
+                                    Err(err) => Err(err),
+                                }
+                            }
+                        })
+                    });
+
+                match futures::future::select_ok(conns).await {
+                    Ok((conn, _)) => conn,
+                    Err(err) => {
+                        log::error!(
+                            "Failed to connect to any nameserver: {} {}",
+                            self.server,
+                            err
+                        );
+                        return Err(err);
                     }
                 }
             }
         };
 
-        if protocol.is_datagram() {
-            self.datagram_conns.write().await.replace(conn.clone());
-        }
+        let conn = Arc::new(conn);
 
-        Ok(ClientHandle {
-            connections: self.stream_conns.clone(),
-            connection: Some((conn, Some(cocurrent_permit))),
-        })
+        self.datagram_conns.write().await.replace(conn.clone());
+
+        Ok(ClientHandle { connection: conn })
     }
 
     #[inline]
@@ -700,7 +667,6 @@ impl NameServer {
 impl From<RawNameServerConfig> for NameServer {
     fn from(config: RawNameServerConfig) -> Self {
         Self {
-            max_cocurrency: Arc::new(Semaphore::const_new(1)),
             server: match config.socket_addr.ip() {
                 IpAddr::V4(ipv4_addr) => Host::Ipv4(ipv4_addr),
                 IpAddr::V6(ipv6_addr) => Host::Ipv6(ipv6_addr),
@@ -708,7 +674,6 @@ impl From<RawNameServerConfig> for NameServer {
             config,
             ip_addrs: Default::default(),
             datagram_conns: Default::default(),
-            stream_conns: Default::default(),
             options: Default::default(),
             connection_provider: Default::default(),
             resolver: Default::default(),
@@ -728,7 +693,6 @@ impl GenericResolver for NameServer {
         name: N,
         options: O,
     ) -> Result<DnsResponse, LookupError> {
-        use crate::libdns::proto::ProtoErrorKind;
         let name = name.into_name()?;
         let options: LookupOptions = options.into();
 
@@ -763,9 +727,7 @@ impl GenericResolver for NameServer {
 
         let res = {
             let client = self.client().await?;
-            let Some(ns) = client.connection.as_ref().map(|(conn, _)| conn) else {
-                return Err(ProtoErrorKind::NoConnections.into());
-            };
+            let ns = client.connection;
             ns.send(req).first_answer().await?
         };
 
@@ -774,21 +736,7 @@ impl GenericResolver for NameServer {
 }
 
 struct ClientHandle {
-    connections: Arc<Mutex<Vec<Connection>>>,
-    connection: Option<(Connection, Option<OwnedSemaphorePermit>)>,
-}
-
-impl Drop for ClientHandle {
-    fn drop(&mut self) {
-        let connections = self.connections.clone();
-        let connection = self.connection.take();
-        tokio::spawn(async move {
-            if let Some((connection, permit)) = connection {
-                connections.lock().await.push(connection);
-                drop(permit);
-            }
-        });
-    }
+    connection: Arc<Connection>,
 }
 
 #[derive(Clone)]
