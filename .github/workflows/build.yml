@@ -170,3 +170,23 @@ jobs:
             ${{ env.archive_file }}-sha256sum.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build-docker:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+      -
+        name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push Docker image
+        working-directory: ./contrib/docker
+        run: |
+          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version }} -t ghcr.io/${{ github.actor }}/smartdns-rs:${{ inputs.version }} --push .
