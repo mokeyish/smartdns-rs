@@ -195,4 +195,4 @@ jobs:
       - name: Build and push Docker image
         working-directory: ./contrib/docker
         run: |
-          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version }} -t ghcr.io/mokeyish/smartdns-rs:${{ inputs.version }} --push .
+          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version || github.ref_name}} -t ghcr.io/mokeyish/smartdns-rs:${{ inputs.version || github.ref_name }} --push .
