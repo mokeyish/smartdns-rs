@@ -1,127 +1,86 @@
 use crate::log;
-use std::{
-    io,
-    net::{IpAddr, SocketAddr},
-};
+use socket2::{Domain, Protocol, SockRef, Socket, Type};
+use std::{io, net::SocketAddr};
 use tokio::net::{TcpListener, UdpSocket};
 
-pub fn bind_to<T>(
-    func: impl Fn(SocketAddr, Option<&str>, &str) -> io::Result<T>,
-    sock_addr: SocketAddr,
+pub fn bind_to<T: LocalAddr>(
+    new_socket: impl Fn(SocketAddr, Option<&str>) -> io::Result<T>,
+    bind_addr: SocketAddr,
     bind_device: Option<&str>,
     bind_type: &str,
 ) -> T {
-    func(sock_addr, bind_device, bind_type).unwrap_or_else(|err| {
-        panic!("cound not bind to {bind_type}: {sock_addr}, {err}");
-    })
-}
-
-pub fn setup_tcp_socket(
-    sock_addr: SocketAddr,
-    bind_device: Option<&str>,
-    bind_type: &str,
-) -> io::Result<TcpListener> {
     let device_note = bind_device
         .map(|device| format!("@{device}"))
         .unwrap_or_default();
 
-    log::debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
-    let tcp_listener = std::net::TcpListener::bind(sock_addr)?;
+    log::debug!("binding {} to {:?}{}", bind_type, bind_addr, device_note);
 
-    setup_socket(&tcp_listener, bind_device, sock_addr.ip())?;
+    match new_socket(bind_addr, bind_device) {
+        Ok(socket) => {
+            let local_addr = socket.local_addr().expect("could not lookup local address");
+            log::info!(
+                "listening for {} on {:?}{}",
+                bind_type,
+                local_addr,
+                device_note
+            );
+            socket
+        }
+        Err(err) => panic!("cound not bind to {bind_type}: {bind_addr}, {err}"),
+    }
+}
+
+pub fn setup_tcp_socket(
+    bind_addr: SocketAddr,
+    bind_device: Option<&str>,
+) -> io::Result<TcpListener> {
+    let socket = Socket::new(
+        Domain::for_address(bind_addr),
+        Type::STREAM,
+        Some(Protocol::TCP),
+    )?;
+
+    setup_socket(&socket, bind_device, bind_addr)?;
+
+    socket.listen(128)?;
+
+    let tcp_listener = std::net::TcpListener::from(socket);
 
     let tcp_listener = TcpListener::from_std(tcp_listener)?;
-
-    log::info!(
-        "listening for {} on {:?}{}",
-        bind_type,
-        tcp_listener
-            .local_addr()
-            .expect("could not lookup local address"),
-        device_note
-    );
 
     Ok(tcp_listener)
 }
 
-pub fn setup_udp_socket(
-    sock_addr: SocketAddr,
-    bind_device: Option<&str>,
-    bind_type: &str,
-) -> io::Result<UdpSocket> {
-    let device_note = bind_device
-        .map(|device| format!("@{device}"))
-        .unwrap_or_default();
+pub fn setup_udp_socket(bind_addr: SocketAddr, bind_device: Option<&str>) -> io::Result<UdpSocket> {
+    let socket = Socket::new(
+        Domain::for_address(bind_addr),
+        Type::DGRAM,
+        Some(Protocol::UDP),
+    )?;
 
-    log::debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
-    let udp_socket = std::net::UdpSocket::bind(sock_addr)?;
+    setup_socket(&socket, bind_device, bind_addr)?;
 
-    setup_socket(&udp_socket, bind_device, sock_addr.ip())?;
+    let udp_socket = std::net::UdpSocket::from(socket);
 
-    // set UDP_CONNRESET off to ignore UdpSocket's WSAECONNRESET error
     #[cfg(all(target_os = "windows", target_env = "msvc"))]
-    {
-        // https://github.com/mokeyish/smartdns-rs/issues/391
-        // https://github.com/shadowsocks/shadowsocks-rust/blob/3b47fa67fac6c2bded73616a284f26c6159cbe9a/src/relay/sys/windows/mod.rs#L17
-        use std::ffi::c_void;
-        use std::{mem, os::windows::io::AsRawSocket, ptr};
-        use windows::Win32::Foundation::FALSE;
-        use windows::Win32::Networking::WinSock::{
-            SIO_UDP_CONNRESET, SOCKET, SOCKET_ERROR, WSAGetLastError, WSAIoctl,
-        };
-
-        let handle = SOCKET(udp_socket.as_raw_socket() as usize);
-        let mut bytes_returned: u32 = 0;
-        let enable = FALSE;
-        unsafe {
-            let ret = WSAIoctl(
-                handle,
-                SIO_UDP_CONNRESET,
-                Some(&enable as *const _ as *const c_void),
-                mem::size_of_val(&enable) as u32,
-                Some(ptr::null_mut()),
-                0,
-                &mut bytes_returned,
-                Some(ptr::null_mut()),
-                None,
-            );
-
-            if ret == SOCKET_ERROR {
-                // ignore the error here, just warn and continue
-                let err_code = WSAGetLastError();
-                log::warn!("WSAIoctl failed with error code {:?}", err_code);
-                // return Err(td::io::Error::from_raw_os_error(err_code.0));
-            }
-        };
-    }
+    fix_windows_udp(&udp_socket);
 
     let udp_socket = UdpSocket::from_std(udp_socket)?;
 
-    log::info!(
-        "listening for {} on {:?}{}",
-        bind_type,
-        udp_socket
-            .local_addr()
-            .expect("could not lookup local address"),
-        device_note
-    );
     Ok(udp_socket)
 }
 
 #[allow(unused_variables)]
-fn setup_socket<'a, T: Into<socket2::SockRef<'a>>>(
+fn setup_socket<'a, T: Into<SockRef<'a>>>(
     socket: T,
     bind_device: Option<&str>,
-    bind_addr: IpAddr,
+    bind_addr: SocketAddr,
 ) -> io::Result<()> {
-    use socket2::Type;
-    let sock_ref: socket2::SockRef<'a> = socket.into();
+    let sock_ref: SockRef<'a> = socket.into();
     sock_ref.set_nonblocking(true)?;
     let sock_typ = sock_ref.r#type()?;
-    if bind_addr.is_ipv6()
-        && (bind_addr.is_unspecified() || bind_addr.is_loopback())
-        && sock_ref.only_v6()?
-    {
+
+    if bind_addr.is_ipv6() {
         sock_ref.set_only_v6(false)?;
     }
 
@@ -141,5 +100,62 @@ fn setup_socket<'a, T: Into<socket2::SockRef<'a>>>(
         sock_ref.bind_device(Some(device.as_bytes()))?;
     }
 
+    sock_ref.bind(&bind_addr.into())?;
+
     Ok(())
+}
+
+/// set UDP_CONNRESET off to ignore UdpSocket's WSAECONNRESET error
+#[cfg(all(target_os = "windows", target_env = "msvc"))]
+fn fix_windows_udp<T: std::os::windows::io::AsRawSocket>(udp_socket: &T) {
+    // https://github.com/mokeyish/smartdns-rs/issues/391
+    // https://github.com/shadowsocks/shadowsocks-rust/blob/3b47fa67fac6c2bded73616a284f26c6159cbe9a/src/relay/sys/windows/mod.rs#L17
+    use std::ffi::c_void;
+    use std::{mem, ptr};
+    use windows::Win32::Foundation::FALSE;
+    use windows::Win32::Networking::WinSock::{
+        SIO_UDP_CONNRESET, SOCKET, SOCKET_ERROR, WSAGetLastError, WSAIoctl,
+    };
+
+    let handle = SOCKET(udp_socket.as_raw_socket() as usize);
+    let mut bytes_returned: u32 = 0;
+    let enable = FALSE;
+    unsafe {
+        let ret = WSAIoctl(
+            handle,
+            SIO_UDP_CONNRESET,
+            Some(&enable as *const _ as *const c_void),
+            mem::size_of_val(&enable) as u32,
+            Some(ptr::null_mut()),
+            0,
+            &mut bytes_returned,
+            Some(ptr::null_mut()),
+            None,
+        );
+
+        if ret == SOCKET_ERROR {
+            // ignore the error here, just warn and continue
+            let err_code = WSAGetLastError();
+            log::warn!("WSAIoctl failed with error code {:?}", err_code);
+            // return Err(td::io::Error::from_raw_os_error(err_code.0));
+        }
+    };
+}
+
+pub trait LocalAddr {
+    fn local_addr(&self) -> io::Result<SocketAddr>;
+}
+
+impl LocalAddr for TcpListener {
+    #[inline]
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.local_addr()
+    }
+}
+
+impl LocalAddr for UdpSocket {
+    #[inline]
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.local_addr()
+    }
 }
