@@ -1,5 +1,8 @@
 use crate::log;
-use std::{io, net::SocketAddr};
+use std::{
+    io,
+    net::{IpAddr, SocketAddr},
+};
 use tokio::net::{TcpListener, UdpSocket};
 
 pub fn bind_to<T>(
@@ -25,19 +28,7 @@ pub fn setup_tcp_socket(
     log::debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
     let tcp_listener = std::net::TcpListener::bind(sock_addr)?;
 
-    {
-        let sock_ref = socket2::SockRef::from(&tcp_listener);
-        sock_ref.set_nonblocking(true)?;
-        sock_ref.set_reuse_address(true)?;
-
-        #[cfg(target_os = "macos")]
-        sock_ref.set_reuse_port(true)?;
-
-        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        if let Some(device) = bind_device {
-            sock_ref.bind_device(Some(device.as_bytes()))?;
-        }
-    }
+    setup_socket(&tcp_listener, bind_device, sock_addr.ip())?;
 
     let tcp_listener = TcpListener::from_std(tcp_listener)?;
 
@@ -65,19 +56,7 @@ pub fn setup_udp_socket(
     log::debug!("binding {} to {:?}{}", bind_type, sock_addr, device_note);
     let udp_socket = std::net::UdpSocket::bind(sock_addr)?;
 
-    {
-        let sock_ref = socket2::SockRef::from(&udp_socket);
-        sock_ref.set_nonblocking(true)?;
-        sock_ref.set_reuse_address(true)?;
-
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        sock_ref.set_reuse_port(true)?;
-
-        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
-        if let Some(device) = bind_device {
-            sock_ref.bind_device(Some(device.as_bytes()))?;
-        }
-    }
+    setup_socket(&udp_socket, bind_device, sock_addr.ip())?;
 
     // set UDP_CONNRESET off to ignore UdpSocket's WSAECONNRESET error
     #[cfg(all(target_os = "windows", target_env = "msvc"))]
@@ -127,4 +106,40 @@ pub fn setup_udp_socket(
         device_note
     );
     Ok(udp_socket)
+}
+
+#[allow(unused_variables)]
+fn setup_socket<'a, T: Into<socket2::SockRef<'a>>>(
+    socket: T,
+    bind_device: Option<&str>,
+    bind_addr: IpAddr,
+) -> io::Result<()> {
+    use socket2::Type;
+    let sock_ref: socket2::SockRef<'a> = socket.into();
+    sock_ref.set_nonblocking(true)?;
+    let sock_typ = sock_ref.r#type()?;
+    if bind_addr.is_ipv6()
+        && (bind_addr.is_unspecified() || bind_addr.is_loopback())
+        && sock_ref.only_v6()?
+    {
+        sock_ref.set_only_v6(false)?;
+    }
+
+    // https://github.com/pymumu/smartdns/blob/e26ecf6a52851f88e2937448019f74b753c0e6dc/src/dns_server/server_socket.c#L111
+    if sock_typ == Type::STREAM {
+        sock_ref.set_reuse_address(true)?;
+
+        // enable TCP_FASTOPEN
+        sock_ref.set_nodelay(true)?;
+    }
+
+    #[cfg(target_os = "macos")]
+    sock_ref.set_reuse_port(true)?;
+
+    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    if let Some(device) = bind_device {
+        sock_ref.bind_device(Some(device.as_bytes()))?;
+    }
+
+    Ok(())
 }

@@ -10,7 +10,7 @@
           "build",
           "--bin=smartdns",
           "--package=smartdns",
-          "--features=future-diagnostic"
+          // "--features=future-diagnostic"
         ],
         "filter": {
           "name": "smartdns",
@@ -29,6 +29,7 @@
       "env": {
         "RUSTFLAGS": "--cfg tokio_unstable",
         "RUST_LOG": "tokio=trace,runtime=trace",
+        "RUST_BACKTRACE": "1"
       }
     },
     {

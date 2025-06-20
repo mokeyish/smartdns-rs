@@ -315,7 +315,7 @@ pub fn serve(directory: Option<PathBuf>, conf: Option<PathBuf>) {
                         std::mem::swap(&mut batch, &mut bg_batch);
                         inner_join_set.spawn(async move {
                             let count = batch.len();
-                            while let Some(_) = batch.next().await {}
+                            while (batch.next().await).is_some() {}
                             drop(permit);
                             count
                         });
@@ -325,7 +325,7 @@ pub fn serve(directory: Option<PathBuf>, conf: Option<PathBuf>) {
                 if !batch.is_empty() {
                     inner_join_set.spawn(async move {
                         let count = batch.len();
-                        while let Some(_) = batch.next().await {}
+                        while (batch.next().await).is_some() {}
                         count
                     });
                 }
