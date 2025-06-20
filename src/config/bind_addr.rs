@@ -351,7 +351,7 @@ pub enum BindAddr {
 
 impl Default for BindAddr {
     fn default() -> Self {
-        BindAddr::V4(Ipv4Addr::UNSPECIFIED)
+        BindAddr::V6(Ipv6Addr::UNSPECIFIED)
     }
 }
 
@@ -381,8 +381,8 @@ impl BindAddr {
     /// Returns the ip addr of this [`ListenerAddress`].
     fn ip_addr(self) -> IpAddr {
         match self {
-            BindAddr::Localhost => IpAddr::V4(Ipv4Addr::LOCALHOST),
-            BindAddr::All => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            BindAddr::Localhost => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            BindAddr::All => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             BindAddr::V4(ip) => ip.into(),
             BindAddr::V6(ip) => ip.into(),
         }
