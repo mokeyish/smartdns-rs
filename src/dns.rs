@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 
+use std::borrow::Borrow;
 use std::fmt::Debug;
 
 use std::net::IpAddr;
@@ -14,9 +15,8 @@ use crate::dns_conf::RuntimeConfig;
 pub use crate::dns_rule::DomainRuleGetter;
 
 pub use crate::libdns::proto::{
-    op,
-    rr::{self, rdata::SOA, Name, RData, Record, RecordType},
-    ProtoErrorKind,
+    ProtoErrorKind, op,
+    rr::{self, Name, RData, Record, RecordType, rdata::SOA},
 };
 
 pub use crate::libdns::{
@@ -24,7 +24,6 @@ pub use crate::libdns::{
     resolver::{
         config::{NameServerConfig, NameServerConfigGroup},
         lookup::Lookup,
-        ResolveError, ResolveErrorKind,
     },
 };
 
@@ -40,7 +39,8 @@ pub struct DnsContext {
 
 impl DnsContext {
     pub fn new(name: &Name, cfg: Arc<RuntimeConfig>, server_opts: ServerOpts) -> Self {
-        let domain_rule = cfg.find_domain_rule(name);
+        let group_name = server_opts.rule_group.as_deref().unwrap_or_default();
+        let domain_rule = cfg.find_domain_rule(name, group_name);
 
         let no_cache = domain_rule.get(|n| n.no_cache).unwrap_or_default();
 
@@ -115,8 +115,8 @@ impl Default for LookupFrom {
 mod serial_message {
 
     use crate::dns_error::LookupError;
-    use crate::libdns::proto::{op::Query, ProtoError};
     use crate::libdns::Protocol;
+    use crate::libdns::proto::{ProtoError, op::Query};
     use crate::{config::ServerOpts, libdns::proto::op::Message};
     use bytes::Bytes;
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -124,7 +124,7 @@ mod serial_message {
     use super::{DnsRequest, DnsResponse};
 
     pub enum SerialMessage {
-        Raw(Message, SocketAddr, Protocol),
+        Raw(Box<Message>, SocketAddr, Protocol),
         Bytes(Vec<u8>, SocketAddr, Protocol),
     }
 
@@ -133,7 +133,7 @@ mod serial_message {
             Self::Bytes(bytes, addr, protocol)
         }
         pub fn raw(message: Message, addr: SocketAddr, protocol: Protocol) -> Self {
-            Self::Raw(message, addr, protocol)
+            Self::Raw(message.into(), addr, protocol)
         }
 
         pub fn is_binray(&self) -> bool {
@@ -209,7 +209,7 @@ mod serial_message {
 
         fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
             match value {
-                SerialMessage::Raw(message, _, _) => Ok(message),
+                SerialMessage::Raw(message, _, _) => Ok(message.as_ref().clone()),
                 SerialMessage::Bytes(bytes, _, _) => Message::from_vec(&bytes),
             }
         }
@@ -221,12 +221,12 @@ mod request {
     use std::{fmt::Debug, net::SocketAddr, ops::Deref, sync::Arc};
 
     use crate::libdns::{
+        Protocol,
         proto::{
+            ProtoError,
             op::{LowerQuery, Message, Query},
             rr::{Name, RecordType},
-            ProtoError,
         },
-        Protocol,
     };
 
     use super::{DnsError, SerialMessage};
@@ -321,13 +321,14 @@ mod request {
             let qop_code = self.op_code();
             let qflags = self.flags();
 
-            write!(f,
+            write!(
+                f,
                 "{id} src:{proto}://{addr}#{port} type:{message_type} dnssec:{is_dnssec} {op}:{query}:{qtype}:{class} qflags:{qflags}",
                 id = id,
                 proto = protocol,
                 addr = src_addr.ip(),
                 port = src_addr.port(),
-                message_type= message_type,
+                message_type = message_type,
                 is_dnssec = is_dnssec,
                 op = qop_code,
                 query = query_name,
@@ -368,9 +369,11 @@ mod request {
 
         fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
             match value {
-                SerialMessage::Raw(message, src_addr, protocol) => {
-                    Ok(DnsRequest::new(message, src_addr, protocol))
-                }
+                SerialMessage::Raw(message, src_addr, protocol) => Ok(DnsRequest::new(
+                    message.as_ref().clone(),
+                    src_addr,
+                    protocol,
+                )),
                 SerialMessage::Bytes(bytes, src_addr, protocol) => {
                     use crate::libdns::proto::serialize::binary::{BinDecodable, BinDecoder};
                     let mut decoder = BinDecoder::new(&bytes);
@@ -422,7 +425,7 @@ mod response {
             R: IntoIterator<Item = Record, IntoIter = I>,
             I: Iterator<Item = Record>,
         {
-            use op::message::{update_header_counts, HeaderCounts};
+            use op::message::{HeaderCounts, update_header_counts};
             let mut message = Message::new();
             message.set_message_type(MessageType::Response);
             message.add_query(query.clone());

@@ -2,7 +2,7 @@ use super::*;
 
 impl NomParser for FileMode {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(is_a("0o1234567"), <FileMode as std::str::FromStr>::from_str)(input)
+        map_res(is_a("0o1234567"), <FileMode as std::str::FromStr>::from_str).parse(input)
     }
 }
 

@@ -6,4 +6,4 @@ mod ctl;
 #[path = "launchctl.rs"]
 mod ctl;
 
-pub use ctl::{create_service_definition, CONF_PATH};
+pub use ctl::{CONF_PATH, create_service_definition};

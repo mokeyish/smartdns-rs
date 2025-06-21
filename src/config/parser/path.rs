@@ -3,17 +3,17 @@ use super::*;
 impl NomParser for PathBuf {
     fn parse(input: &str) -> IResult<&str, Self> {
         let delimited_path = delimited(char('"'), is_not("\""), char('"'));
-        let unix_path = recognize(tuple((
+        let unix_path = recognize((
             opt(char('/')),
             separated_list1(char('/'), escaped(is_not("\n \t\\"), '\\', one_of(r#" \"#))),
             opt(char('/')),
-        )));
-        let windows_path = recognize(tuple((
+        ));
+        let windows_path = recognize((
             opt(pair(alpha1, tag(":\\"))),
             separated_list1(char('\\'), is_not("\\")),
             opt(char('\\')),
-        )));
-        map(alt((delimited_path, unix_path, windows_path)), Into::into)(input)
+        ));
+        map(alt((delimited_path, unix_path, windows_path)), Into::into).parse(input)
     }
 }
 

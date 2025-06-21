@@ -1,17 +1,21 @@
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Json,
 };
 use cfg_if::cfg_if;
+use http::{HeaderValue, header};
 use openapi::Router;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tower::ServiceBuilder;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 mod address;
 mod audit;
 mod cache;
+mod config;
 mod forward;
 mod listener;
 mod log;
@@ -19,13 +23,14 @@ mod nameserver;
 mod openapi;
 mod serve_dns;
 mod settings;
+mod system;
 
 use crate::{app::App, server::DnsHandle};
 
 type StatefulRouter = Router<Arc<ServeState>>;
 
 pub struct ServeState {
-    pub app: Arc<App>,
+    pub app: App,
     pub dns_handle: DnsHandle,
 }
 
@@ -37,37 +42,47 @@ pub fn routes() -> axum::Router<Arc<ServeState>> {
         .split_for_parts();
     openapi.info = InfoBuilder::new()
         .title(crate::NAME)
-        .version(crate::version())
+        .version(crate::BUILD_VERSION)
         .build();
 
-    cfg_if! {
-        if #[cfg(feature = "swagger-ui-cdn")]
-        {
-            router.merge(openapi::swagger_cdn("/api/docs", "/api/openapi.json", openapi, None))
+    let router = {
+        cfg_if! {
+            if #[cfg(feature = "swagger-ui-cdn")]
+            {
+                router.merge(openapi::swagger_cdn("/api/docs", "/api/openapi.json", openapi, None))
+            }
+            else if #[cfg(feature = "swagger-ui-embed")]
+            {
+                use utoipa_swagger_ui::{Config, SwaggerUi};
+                router.merge(
+                    SwaggerUi::new("/api/docs")
+                        .config(
+                            Config::default()
+                                .show_extensions(true)
+                                .show_common_extensions(true)
+                                .use_base_layout(),
+                        )
+                        .url("/api/openapi.json", openapi),
+                )
+            } else {
+                router
+            }
         }
-        else if #[cfg(feature = "swagger-ui-embed")]
-        {
-            use utoipa_swagger_ui::{Config, SwaggerUi};
-            router.merge(
-                SwaggerUi::new("/api/docs")
-                    .config(
-                        Config::default()
-                            .show_extensions(true)
-                            .show_common_extensions(true)
-                            .use_base_layout(),
-                    )
-                    .url("/api/openapi.json", openapi),
-            )
-        } else {
-            router
-        }
-    }
+    };
+
+    router.layer(
+        ServiceBuilder::new().layer(SetResponseHeaderLayer::overriding(
+            header::SERVER,
+            HeaderValue::from_static(crate::NAME),
+        )),
+    )
 }
 
 fn api_routes() -> StatefulRouter {
     Router::new()
         .route("/version", get(version))
         .merge(cache::routes())
+        .merge(config::routes())
         .merge(nameserver::routes())
         .merge(address::routes())
         .merge(forward::routes())
@@ -75,10 +90,11 @@ fn api_routes() -> StatefulRouter {
         .merge(audit::routes())
         .merge(listener::routes())
         .merge(log::routes())
+        .merge(system::routes())
 }
 
 async fn version() -> Json<&'static str> {
-    Json(crate::version())
+    Json(crate::BUILD_VERSION)
 }
 
 struct ApiError(anyhow::Error);
@@ -113,6 +129,11 @@ impl IntoResponse for crate::dns::DnsError {
         )
             .into_response()
     }
+}
+
+#[derive(Deserialize, Serialize)]
+struct DataPayload<T> {
+    data: T,
 }
 
 #[derive(Deserialize, Serialize)]

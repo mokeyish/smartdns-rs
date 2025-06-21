@@ -8,7 +8,7 @@ use super::*;
 impl NomParser for DomainSetProvider {
     fn parse(input: &str) -> IResult<&str, Self> {
         use DomainSetProvider::*;
-        alt((map(NomParser::parse, File), map(NomParser::parse, Http)))(input)
+        alt((map(NomParser::parse, File), map(NomParser::parse, Http))).parse(input)
     }
 }
 
@@ -50,7 +50,7 @@ impl NomParser for DomainSetFileProvider {
             ),
         ));
 
-        let (rest_input, _) = separated_list1(space1, one)(input)?;
+        let (rest_input, _) = separated_list1(space1, one).parse(input)?;
 
         if let (Some(name), Some(file)) = (name, file) {
             return Ok((
@@ -115,7 +115,7 @@ impl NomParser for DomainSetHttpProvider {
             ),
         ));
 
-        let (rest_input, _) = separated_list1(space1, one)(input)?;
+        let (rest_input, _) = separated_list1(space1, one).parse(input)?;
 
         if let (Some(name), Some(url)) = (name, url) {
             return Ok((
@@ -139,7 +139,7 @@ impl NomParser for DomainSetHttpProvider {
 impl NomParser for DomainSetContentType {
     fn parse(input: &str) -> IResult<&str, Self> {
         use DomainSetContentType::*;
-        alt((value(List, tag_no_case("list")),))(input)
+        alt((value(List, tag_no_case("list")),)).parse(input)
     }
 }
 

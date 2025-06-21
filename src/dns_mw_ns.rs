@@ -5,7 +5,7 @@ use std::{borrow::Borrow, net::IpAddr, time::Duration};
 
 use crate::dns_client::{LookupOptions, NameServer};
 
-use crate::infra::ipset::IpSet;
+use crate::infra::ipset::{IpMap, IpSet};
 use crate::infra::ping::{PingError, PingOutput};
 use crate::third_ext::FutureTimeoutExt;
 use crate::{
@@ -17,8 +17,8 @@ use crate::{
     middleware::*,
 };
 
-use crate::libdns::proto::op::ResponseCode;
-use crate::libdns::proto::rr::rdata::opt::EdnsCode;
+use crate::libdns::proto::rr::domain::usage::LOCAL;
+use crate::libdns::proto::{AuthorityData, rr::rdata::opt::EdnsCode};
 use futures::FutureExt;
 use rr::rdata::opt::EdnsOption;
 use tokio::time::sleep;
@@ -86,11 +86,24 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
         let group_name = ctx.server_group_name().to_string();
 
-        let name_server = match client.get_server_group(group_name.as_ref()).await {
-            Some(ns) => ns,
-            None => {
-                error!("no available nameserver found for {}", name);
-                return Err(ProtoErrorKind::NoConnections.into());
+        let name_server = {
+            let name_server = if ctx.cfg().mdns_lookup() && LOCAL.zone_of(name) {
+                client.get_server_group("mdns").await
+            } else {
+                None
+            };
+
+            let name_server = match name_server {
+                Some(ns) => Some(ns),
+                None => client.get_server_group(group_name.as_ref()).await,
+            };
+
+            match name_server {
+                Some(ns) => ns,
+                None => {
+                    error!("no available nameserver found for {}", name);
+                    return Err(ProtoErrorKind::NoConnections.into());
+                }
             }
         };
 
@@ -123,6 +136,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     ignore_ip: cfg.ignore_ip().clone(),
                     blacklist_ip: cfg.blacklist_ip().clone(),
                     whitelist_ip: cfg.whitelist_ip().clone(),
+                    ip_alias: cfg.ip_alias().clone(),
                     lookup_options,
                 },
                 None => LookupIpOptions {
@@ -132,6 +146,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     ignore_ip: cfg.ignore_ip().clone(),
                     blacklist_ip: cfg.blacklist_ip().clone(),
                     whitelist_ip: cfg.whitelist_ip().clone(),
+                    ip_alias: cfg.ip_alias().clone(),
                     lookup_options,
                 },
             };
@@ -155,6 +170,7 @@ struct LookupIpOptions {
     ignore_ip: Arc<IpSet>,
     whitelist_ip: Arc<IpSet>,
     blacklist_ip: Arc<IpSet>,
+    ip_alias: Arc<IpMap<Arc<[IpAddr]>>>,
     lookup_options: LookupOptions,
 }
 
@@ -183,8 +199,8 @@ async fn lookup_ip(
     name: Name,
     options: &LookupIpOptions,
 ) -> Result<DnsResponse, LookupError> {
-    use futures_util::future::{select, select_all, Either};
     use ResponseMode::*;
+    use futures_util::future::{Either, select, select_all};
 
     assert!(options.record_type.is_ip_addr());
 
@@ -284,7 +300,7 @@ async fn lookup_ip(
                 }
             }
 
-            let selected_ip = match fastest_ip {
+            match fastest_ip {
                 Some(ip) => Some(ip),
                 None => {
                     let ip_addr_stats = ok_tasks.iter().flat_map(|r| r.ip_addrs()).fold(
@@ -299,9 +315,7 @@ async fn lookup_ip(
                         .max_by_key(|(_, n)| *n)
                         .map(|(ip, _)| ip)
                 }
-            };
-
-            selected_ip
+            }
         }
         FastestIp => {
             let mut ping_tasks = vec![];
@@ -456,7 +470,7 @@ async fn multi_mode_ping_fastest(
     ip_addrs: Vec<IpAddr>,
     modes: Vec<SpeedCheckMode>,
 ) -> Option<IpAddr> {
-    use crate::infra::ping::{ping_fastest, PingOptions};
+    use crate::infra::ping::{PingOptions, ping_fastest};
     let duration = Duration::from_millis(200);
     let ping_ops = PingOptions::default().with_timeout_secs(2);
 
@@ -501,7 +515,7 @@ async fn multi_mode_ping(
     ip_addr: IpAddr,
     modes: Vec<SpeedCheckMode>,
 ) -> Result<PingOutput, PingError> {
-    use crate::infra::ping::{ping, PingOptions};
+    use crate::infra::ping::{PingOptions, ping};
     let duration = Duration::from_millis(200);
     let ping_ops = PingOptions::default().with_timeout_secs(2);
 
@@ -553,11 +567,12 @@ async fn per_nameserver_lookup_ip(
     let LookupIpOptions {
         whitelist_ip,
         blacklist_ip,
+        ip_alias,
         ignore_ip,
         ..
     } = options;
 
-    if !whitelist_on && !blacklist_on && ignore_ip.is_empty() {
+    if !whitelist_on && !blacklist_on && ignore_ip.is_empty() && ip_alias.is_empty() {
         return res;
     }
 
@@ -578,27 +593,33 @@ async fn per_nameserver_lookup_ip(
         Ok(mut lookup) => {
             let query = lookup.query().clone();
 
-            let answers = lookup
-                .answers()
-                .iter()
-                .filter(|record| match record.data().ip_addr() {
-                    Some(ip) => ip_filter(&ip),
-                    _ => false,
-                })
-                .cloned()
-                .collect::<Vec<_>>();
+            let answers = lookup.take_answers();
+            let answers = {
+                let mut new_ans = Vec::new();
+                let mut alias_set = Vec::new(); // dedup
+                for record in answers {
+                    let Some(ip) = record.data().ip_addr().filter(ip_filter) else {
+                        continue;
+                    };
+                    match ip_alias.get(&ip) {
+                        None => new_ans.push(record),
+                        Some(ip) if !alias_set.contains(&ip.as_ptr()) => {
+                            alias_set.push(ip.as_ptr());
+                            new_ans.extend(ip.iter().map(|&ip| {
+                                let mut record = record.clone();
+                                record.set_data(ip.into());
+                                record
+                            }));
+                        }
+                        Some(_) => continue,
+                    }
+                }
+                new_ans
+            };
 
             if answers.is_empty() {
-                return Err(ProtoErrorKind::NoRecordsFound {
-                    query: Box::new(query),
-                    ns: None,
-                    soa: None,
-                    negative_ttl: None,
-                    response_code: ResponseCode::NoError,
-                    trusted: false,
-                    authorities: None,
-                }
-                .into());
+                let no_records = AuthorityData::new(Box::new(query), None, true, true, None);
+                return Err(ProtoErrorKind::NoRecordsFound(no_records.into()).into());
             }
 
             *lookup.answers_mut() = answers;

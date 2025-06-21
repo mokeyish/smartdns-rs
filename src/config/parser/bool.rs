@@ -23,7 +23,7 @@ impl NomParser for bool {
                 tag("0"),
             )),
         );
-        alt((t, f))(input)
+        alt((t, f)).parse(input)
     }
 }
 

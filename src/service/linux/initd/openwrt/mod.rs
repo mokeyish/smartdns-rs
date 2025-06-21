@@ -9,7 +9,7 @@ pub fn is_openwrt() -> bool {
     match which::which(PROCD) {
         Ok(_) => Ok(true),
         Err(which::Error::CannotFindBinaryPath) => Ok(false),
-        Err(x) => Err(io::Error::new(io::ErrorKind::Other, x)),
+        Err(x) => Err(io::Error::other(x)),
     }
     .unwrap_or_default()
         && detect::os_release::get()

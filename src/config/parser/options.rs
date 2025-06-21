@@ -1,8 +1,13 @@
 use super::*;
 
-fn name<'a, O, E: nom::error::ParseError<&'a str>, P: nom::Parser<&'a str, O, E>>(
+fn name<
+    'a,
+    O,
+    E: nom::error::ParseError<&'a str>,
+    P: nom::Parser<&'a str, Output = O, Error = E>,
+>(
     parser: P,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, E> {
+) -> impl Parser<&'a str, Output = O, Error = E> {
     preceded(take_while_m_n(1, 2, |c| c == '-'), parser)
 }
 
@@ -10,7 +15,8 @@ fn any_name(input: &str) -> IResult<&str, &str> {
     name(recognize(pair(
         alpha1,
         take_while(|c: char| c == '-' || c.is_alphanumeric()),
-    )))(input)
+    )))
+    .parse(input)
 }
 
 pub fn parse_value<
@@ -18,25 +24,30 @@ pub fn parse_value<
     ON,
     OV,
     E: nom::error::ParseError<&'a str>,
-    N: nom::Parser<&'a str, ON, E>,
-    V: nom::Parser<&'a str, OV, E>,
+    N: nom::Parser<&'a str, Output = ON, Error = E>,
+    V: nom::Parser<&'a str, Output = OV, Error = E>,
 >(
     name: N,
     value: V,
-) -> impl FnMut(&'a str) -> IResult<&'a str, OV, E> {
+) -> impl Parser<&'a str, Output = OV, Error = E> {
     preceded(
-        tuple((
+        (
             take_while_m_n(1, 2, |c| c == '-'),
             name,
             alt((tag("="), recognize(pair(opt(char(':')), space1)))),
-        )),
+        ),
         value,
     )
 }
 
-pub fn parse_flag<'a, O, E: nom::error::ParseError<&'a str>, N: nom::Parser<&'a str, O, E>>(
+pub fn parse_flag<
+    'a,
+    O,
+    E: nom::error::ParseError<&'a str>,
+    N: nom::Parser<&'a str, Output = O, Error = E>,
+>(
     name: N,
-) -> impl FnMut(&'a str) -> IResult<&'a str, bool, E> {
+) -> impl Parser<&'a str, Output = bool, Error = E> {
     value(true, preceded(take_while_m_n(1, 2, |c| c == '-'), name))
 }
 
@@ -47,17 +58,18 @@ pub fn unkown_value(input: &str) -> IResult<&str, &str> {
             is_not("-_ \t#"),
             take_till(|c: char| c.is_whitespace()),
         )),
-    )(input)
+    )
+    .parse(input)
 }
 
 pub fn unkown_options(input: &str) -> IResult<&str, (&str, Option<&str>)> {
     let key = any_name;
     let value = unkown_value;
-    pair(key, opt(value))(input)
+    pair(key, opt(value)).parse(input)
 }
 
 pub fn parse(input: &str) -> IResult<&str, Options<'_>> {
-    let (input, options) = separated_list0(space1, unkown_options)(input)?;
+    let (input, options) = separated_list0(space1, unkown_options).parse(input)?;
 
     Ok((input, options))
 }

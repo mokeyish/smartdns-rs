@@ -13,7 +13,7 @@ impl NomParser for Level {
             Level::ERROR,
             alt((tag_no_case("error"), tag_no_case("fatal"))),
         );
-        alt((trace, debug, info, warn, error))(input)
+        alt((trace, debug, info, warn, error)).parse(input)
     }
 }
 

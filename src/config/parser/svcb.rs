@@ -1,6 +1,6 @@
 use super::*;
 use crate::libdns::proto::rr::rdata::svcb::{
-    Alpn, EchConfigList, IpHint, SvcParamKey, SvcParamValue, SVCB,
+    Alpn, EchConfigList, IpHint, SVCB, SvcParamKey, SvcParamValue,
 };
 use crate::libdns::proto::rr::rdata::{A, AAAA};
 
@@ -126,7 +126,8 @@ impl NomParser for SVCB {
                 )),
                 space0,
             ),
-        )(input)?;
+        )
+        .parse(input)?;
 
         Ok((input, SVCB::new(svc_priority, target_name, svc_params)))
     }
@@ -134,7 +135,7 @@ impl NomParser for SVCB {
 
 impl NomParser for HTTPS {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map(SVCB::parse, HTTPS)(input)
+        map(SVCB::parse, HTTPS).parse(input)
     }
 }
 

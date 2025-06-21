@@ -1,67 +1,72 @@
 use super::*;
-use crate::dns::Protocol;
 use crate::log::warn;
 use std::convert::{Into, TryInto};
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::str::FromStr;
 
-impl NomParser for ListenerAddress {
+impl NomParser for BindAddr {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Self> {
-        parse_listen_address(input)
+        parse_bind_addr(input)
     }
 }
 
-fn parse_listen_address(input: &str) -> IResult<&str, ListenerAddress> {
+fn parse_bind_addr(input: &str) -> IResult<&str, BindAddr> {
     let ip = alt((
-        value(ListenerAddress::Localhost, tag_no_case("localhost")),
-        map(nom_recipes::ipv4, ListenerAddress::V4),
+        value(BindAddr::Localhost, tag_no_case("localhost")),
+        map(nom_recipes::ipv4, BindAddr::V4),
         map(
             delimited(char('['), nom_recipes::ipv6, char(']')),
-            ListenerAddress::V6,
+            BindAddr::V6,
         ),
     ));
 
-    let any = value(ListenerAddress::All, char('*'));
+    let any = value(BindAddr::All, char('*'));
 
-    alt((ip, any))(input)
+    alt((ip, any)).parse(input)
 }
 
-impl NomParser for ListenerConfig {
+impl NomParser for BindAddrConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
         parse(input)
     }
 }
 
-impl NomParser for UdpListenerConfig {
+impl NomParser for UdpBindAddrConfig {
     #[inline]
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
-impl NomParser for TcpListenerConfig {
+impl NomParser for TcpBindAddrConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
-impl NomParser for TlsListenerConfig {
+impl NomParser for TlsBindAddrConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
-impl NomParser for QuicListenerConfig {
+impl NomParser for QuicBindAddrConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
-impl NomParser for HttpsListenerConfig {
+impl NomParser for HttpsBindAddrConfig {
     fn parse(input: &str) -> IResult<&str, Self> {
-        map_res(parse, TryInto::try_into)(input)
+        map_res(parse, TryInto::try_into).parse(input)
+    }
+}
+
+impl NomParser for H3BindAddrConfig {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        map_res(parse, TryInto::try_into).parse(input)
     }
 }
 
@@ -87,17 +92,33 @@ impl NomParser for HttpsListenerConfig {
 ///  IPV6:
 ///    bind [::]:53
 ///    bind-tcp [::]:53
-fn parse(input: &str) -> IResult<&str, ListenerConfig> {
+fn parse(input: &str) -> IResult<&str, BindAddrConfig> {
+    #[derive(Clone)]
+    enum Protocol {
+        Udp,
+        Tcp,
+        Tls,
+        Http,
+        Https,
+        Quic,
+        H3,
+    }
+
+    use Protocol::*;
+
     let proto = alt((
-        value(Protocol::Tcp, tag_no_case("bind-tcp")),
-        value(Protocol::Tls, tag_no_case("bind-tls")),
-        value(Protocol::Quic, tag_no_case("bind-quic")),
-        value(Protocol::Https, tag_no_case("bind-https")),
-        value(Protocol::Udp, tag_no_case("bind")),
+        value(Tcp, tag_no_case("bind-tcp")),
+        value(Tls, tag_no_case("bind-tls")),
+        value(Quic, tag_no_case("bind-quic")),
+        value(Https, tag_no_case("bind-https")),
+        value(Http, tag_no_case("bind-http")),
+        value(H3, tag_no_case("bind-h3")),
+        value(Udp, tag_no_case("bind-udp")),
+        value(Udp, tag_no_case("bind")),
     ));
 
-    let listen = map(opt(ListenerAddress::parse), |addr| {
-        addr.unwrap_or(ListenerAddress::V4(Ipv4Addr::UNSPECIFIED))
+    let addr = map(opt(BindAddr::parse), |addr| {
+        addr.unwrap_or(BindAddr::V4(Ipv4Addr::UNSPECIFIED))
     });
 
     let port = map_res(digit1, u16::from_str);
@@ -106,14 +127,15 @@ fn parse(input: &str) -> IResult<&str, ListenerConfig> {
         s.to_string()
     });
 
-    let (input, (proto, listen, port, device)) = tuple((
+    let (input, (proto, addr, port, device)) = (
         preceded(space0, proto),
-        preceded(space1, listen),
+        preceded(space1, addr),
         preceded(char(':'), port),
         opt(preceded(char('@'), device)),
-    ))(input)?;
+    )
+        .parse(input)?;
 
-    let (input, options) = opt(preceded(space1, options::parse))(input)?;
+    let (input, options) = opt(preceded(space1, options::parse)).parse(input)?;
 
     let (options, opts) = if let Some(options) = options {
         parse_server_opts(&options)
@@ -121,57 +143,79 @@ fn parse(input: &str) -> IResult<&str, ListenerConfig> {
         (Vec::with_capacity(0), Default::default())
     };
 
-    let (options, ssl_config) =
-        if !matches!(&proto, Protocol::Tcp | Protocol::Udp) && !options.is_empty() {
-            parse_ssl_config(&options)
-        } else {
-            (Vec::with_capacity(0), Default::default())
-        };
+    let (options, ssl_config) = if !matches!(&proto, Tcp | Udp | Http) && !options.is_empty() {
+        parse_ssl_config(&options)
+    } else {
+        (Vec::with_capacity(0), Default::default())
+    };
 
     if !options.is_empty() {
         warn!("unknown options {:?}", options);
     }
 
+    let enabled = None;
+
     let listener = match proto {
-        Protocol::Udp => UdpListenerConfig {
-            listen,
+        Udp => UdpBindAddrConfig {
+            addr,
             port,
             device,
             opts,
+            enabled,
         }
         .into(),
-        Protocol::Tcp => TcpListenerConfig {
-            listen,
+        Tcp => TcpBindAddrConfig {
+            addr,
             port,
             device,
             opts,
+            enabled,
         }
         .into(),
-        Protocol::Tls => TlsListenerConfig {
-            listen,
-            port,
-            device,
-            opts,
-            ssl_config,
-        }
-        .into(),
-        Protocol::Https => HttpsListenerConfig {
-            listen,
+        Tls => TlsBindAddrConfig {
+            addr,
             port,
             device,
             opts,
             ssl_config,
+            enabled,
         }
         .into(),
-        Protocol::Quic => QuicListenerConfig {
-            listen,
+        Http => HttpBindAddrConfig {
+            addr,
+            port,
+            device,
+            opts,
+            enabled,
+        }
+        .into(),
+        Https => HttpsBindAddrConfig {
+            addr,
             port,
             device,
             opts,
             ssl_config,
+            enabled,
         }
         .into(),
-        p => panic!("unexpected proto {}", p),
+        H3 => H3BindAddrConfig {
+            addr,
+            port,
+            device,
+            opts,
+            ssl_config,
+            enabled,
+        }
+        .into(),
+        Quic => QuicBindAddrConfig {
+            addr,
+            port,
+            device,
+            opts,
+            ssl_config,
+            enabled,
+        }
+        .into(),
     };
 
     Ok((input, listener))
@@ -225,234 +269,264 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_listen_address() {
+    fn test_parse_bind_addr() {
+        assert_eq!(parse_bind_addr("*").unwrap(), ("", BindAddr::All));
+
         assert_eq!(
-            parse_listen_address("*").unwrap(),
-            ("", ListenerAddress::All)
+            parse_bind_addr("0.0.0.0").unwrap(),
+            ("", BindAddr::V4(Ipv4Addr::UNSPECIFIED))
         );
 
         assert_eq!(
-            parse_listen_address("0.0.0.0").unwrap(),
-            ("", ListenerAddress::V4(Ipv4Addr::UNSPECIFIED))
-        );
-
-        assert_eq!(
-            parse_listen_address("[::]").unwrap(),
-            ("", ListenerAddress::V6(Ipv6Addr::UNSPECIFIED))
+            parse_bind_addr("[::]").unwrap(),
+            ("", BindAddr::V6(Ipv6Addr::UNSPECIFIED))
         );
         assert_eq!(
-            parse_listen_address("localhost").unwrap(),
-            ("", ListenerAddress::Localhost)
+            parse_bind_addr("localhost").unwrap(),
+            ("", BindAddr::Localhost)
         );
     }
 
     #[test]
-    fn test_parse_udp_listener() {
+    fn test_parse_bind_udp() {
         assert_eq!(
-            UdpListenerConfig::parse("bind 0.0.0.0:5353").unwrap(),
+            UdpBindAddrConfig::parse("bind 0.0.0.0:5353").unwrap(),
             (
                 "",
-                UdpListenerConfig {
-                    listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+                UdpBindAddrConfig {
+                    addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                     port: 5353,
-                    device: None,
-                    opts: Default::default()
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            UdpListenerConfig::parse("bind [::1]:5353@eth0").unwrap(),
+            UdpBindAddrConfig::parse("bind [::1]:5353@eth0").unwrap(),
             (
                 "",
-                UdpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                UdpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
-                    opts: Default::default()
+                    opts: Default::default(),
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            UdpListenerConfig::parse("bind [::1]:5353@eth0 -no-cache").unwrap(),
+            UdpBindAddrConfig::parse("bind [::1]:5353@eth0 -no-cache").unwrap(),
             (
                 "",
-                UdpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                UdpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_cache: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            UdpListenerConfig::parse("bind [::1]:5353@eth0 --no-rule-addr").unwrap(),
+            UdpBindAddrConfig::parse("bind [::1]:5353@eth0 --no-rule-addr").unwrap(),
             (
                 "",
-                UdpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                UdpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            UdpListenerConfig::parse("bind [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
+            UdpBindAddrConfig::parse("bind [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
             (
                 "",
-                UdpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                UdpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            UdpListenerConfig::parse("bind :5353@eth0 -qq --no-rule-addr -w123").unwrap(),
+            UdpBindAddrConfig::parse("bind :5353@eth0 -qq --no-rule-addr -w123").unwrap(),
             (
                 "",
-                UdpListenerConfig {
-                    listen: ListenerAddress::V4(Ipv4Addr::UNSPECIFIED),
+                UdpBindAddrConfig {
+                    addr: BindAddr::V4(Ipv4Addr::UNSPECIFIED),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
     }
 
     #[test]
-    fn test_parse_tcp_listener() {
+    fn test_parse_bind_tcp() {
         assert_eq!(
-            TcpListenerConfig::parse("bind-tcp 0.0.0.0:5353").unwrap(),
+            TcpBindAddrConfig::parse("bind-tcp 0.0.0.0:5353").unwrap(),
             (
                 "",
-                TcpListenerConfig {
-                    listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+                TcpBindAddrConfig {
+                    addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                     port: 5353,
-                    device: None,
-                    opts: Default::default()
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0").unwrap(),
+            TcpBindAddrConfig::parse("bind-tcp [::1]:5353@eth0").unwrap(),
             (
                 "",
-                TcpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                TcpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
-                    opts: Default::default()
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0 -no-cache").unwrap(),
+            TcpBindAddrConfig::parse("bind-tcp [::1]:5353@eth0 -no-cache").unwrap(),
             (
                 "",
-                TcpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                TcpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_cache: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0 --no-rule-addr").unwrap(),
+            TcpBindAddrConfig::parse("bind-tcp [::1]:5353@eth0 --no-rule-addr").unwrap(),
             (
                 "",
-                TcpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                TcpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            TcpListenerConfig::parse("bind-tcp [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
+            TcpBindAddrConfig::parse("bind-tcp [::1]:5353@eth0 -qq --no-rule-addr -w123").unwrap(),
             (
                 "",
-                TcpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                TcpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
 
         assert_eq!(
-            TcpListenerConfig::parse(
+            TcpBindAddrConfig::parse(
                 "bind-tcp [::1]:5353@eth0 -qq --no-rule-addr -w123 -force-https-soa"
             )
             .unwrap(),
             (
                 "",
-                TcpListenerConfig {
-                    listen: ListenerAddress::V6("::1".parse().unwrap()),
+                TcpBindAddrConfig {
+                    addr: BindAddr::V6("::1".parse().unwrap()),
                     port: 5353,
                     device: Some("eth0".to_string()),
                     opts: ServerOpts {
                         no_rule_addr: Some(true),
                         force_https_soa: Some(true),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
                 }
             )
         );
     }
 
     #[test]
-    fn test_parse_tls_listener() {
+    fn test_parse_bind_tls() {
         assert_eq!(
-            TlsListenerConfig::parse("bind-tls 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key").unwrap(),
+            TlsBindAddrConfig::parse("bind-tls 0.0.0.0:4453 -server-name dns.example.com -ssl-certificate /etc/nginx/dns.example.com.crt -ssl-certificate-key /etc/nginx/dns.example.com.key").unwrap(),
             (
                 "", 
-                TlsListenerConfig {
-                    listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+                TlsBindAddrConfig {
+                    addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                     port: 4453,
-                    device: None,
-                    opts: Default::default(),
                     ssl_config: SslConfig {
                         server_name: Some("dns.example.com".to_string()), 
                         certificate: Some(Path::new("/etc/nginx/dns.example.com.crt").to_path_buf()), 
                         certificate_key: Some(Path::new("/etc/nginx/dns.example.com.key").to_path_buf()),
                         ..Default::default()
-                    }
+                    },
+                    ..Default::default()
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_bind_h3() {
+        assert_eq!(
+            H3BindAddrConfig::parse("bind-h3 0.0.0.0:443").unwrap(),
+            (
+                "",
+                H3BindAddrConfig {
+                    addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
+                    port: 443,
+                    ..Default::default()
+                }
+            )
+        );
+
+        assert_eq!(
+            H3BindAddrConfig::parse("bind-h3 :443").unwrap(),
+            (
+                "",
+                H3BindAddrConfig {
+                    addr: BindAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    port: 443,
+                    ..Default::default()
                 }
             )
         );

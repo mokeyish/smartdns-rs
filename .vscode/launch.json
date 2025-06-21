@@ -9,7 +9,8 @@
         "args": [
           "build",
           "--bin=smartdns",
-          "--package=smartdns"
+          "--package=smartdns",
+          // "--features=future-diagnostic"
         ],
         "filter": {
           "name": "smartdns",
@@ -18,12 +19,18 @@
       },
       "args": [
         "run",
+        "-d", "./etc/smartdns",
         // "-c", "etc/smartdns/smartdns.conf",
         "-c", "tests/example/smartdns.conf",
         "-p", "./smartdns.pid",
-        "-v"
+        "-vvvv"
       ],
-      "cwd": "${workspaceFolder}"
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RUSTFLAGS": "--cfg tokio_unstable",
+        "RUST_LOG": "tokio=trace,runtime=trace",
+        "RUST_BACKTRACE": "1"
+      }
     },
     {
       "type": "lldb",

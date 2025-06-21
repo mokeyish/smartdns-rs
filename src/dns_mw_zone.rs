@@ -4,11 +4,9 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 use crate::libdns::proto::rr::rdata::PTR;
-use ipnet::IpNet;
 
 use crate::config::HttpsRecordRule;
 use crate::dns::*;
-use crate::dns_conf::RuntimeConfig;
 use crate::infra::ipset::IpSet;
 use crate::middleware::*;
 
@@ -18,25 +16,11 @@ pub struct DnsZoneMiddleware {
 }
 
 impl DnsZoneMiddleware {
-    pub fn new(_cfg: &RuntimeConfig) -> Self {
+    pub fn new() -> Self {
         let server_net = {
             use local_ip_address::list_afinet_netifas;
-            let mut ips = Vec::<IpAddr>::new();
-
-            if let Ok(network_interfaces) = list_afinet_netifas() {
-                for (_, ip) in network_interfaces.iter() {
-                    ips.push(*ip);
-                }
-            }
-
-            IpSet::new(
-                ips.into_iter()
-                    .map(|ip| match ip {
-                        IpAddr::V4(_) => IpNet::new(ip, 32).unwrap(),
-                        IpAddr::V6(_) => IpNet::new(ip, 128).unwrap(),
-                    })
-                    .collect(),
-            )
+            let ips = list_afinet_netifas().unwrap_or_default();
+            IpSet::new(ips.into_iter().map(|(_, ip)| ip.into()))
         };
 
         let server_names = {
@@ -73,7 +57,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                 if self.server_names.contains(name) {
                     is_current_server = true;
                 } else if let Ok(net) = name.parse_arpa_name() {
-                    is_current_server = self.server_net.iter().any(|ip| net.contains(ip));
+                    is_current_server = self.server_net.overlap(&net);
 
                     if !is_current_server {
                         let is_private_ip = match net.addr() {
@@ -123,7 +107,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                             no_ipv4_hint,
                             no_ipv6_hint,
                         } => {
-                            use crate::libdns::proto::rr::rdata::{svcb::SvcParamKey, SVCB};
+                            use crate::libdns::proto::rr::rdata::{SVCB, svcb::SvcParamKey};
                             let no_ipv4_hint = *no_ipv4_hint;
                             let no_ipv6_hint = *no_ipv6_hint;
                             return match next.run(ctx, req).await {
@@ -157,7 +141,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
                             return Ok(DnsResponse::from_rdata(
                                 req.query().original().to_owned(),
                                 RData::HTTPS(https.clone()),
-                            ))
+                            ));
                         }
                     }
                 }
@@ -182,7 +166,7 @@ mod tests {
             .with("srv-record /_vlmcs._tcp/example.com,1688,1,2")
             .build();
 
-        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new(&cfg)).build(cfg);
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
 
         let srv = mock
             .lookup_rdata("_vlmcs._tcp", RecordType::SRV)
@@ -218,6 +202,6 @@ mod tests {
         let name2: Name = "1.168.192.in-addr.arpa.".parse().unwrap();
         let net2 = name2.parse_arpa_name().unwrap();
 
-        assert!(local_net.iter().any(|net| net2.contains(net)));
+        assert!(local_net.overlap(&net2));
     }
 }

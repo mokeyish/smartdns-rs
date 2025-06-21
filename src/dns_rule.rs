@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use crate::config::WildcardName;
+use std::sync::LazyLock;
 
 use crate::{
     collections::DomainMap,
@@ -10,12 +11,17 @@ use crate::{
     },
 };
 
+static EMPTY: LazyLock<DomainRuleMap> = LazyLock::new(DomainRuleMap::default);
+
 #[derive(Default)]
 pub struct DomainRuleMap {
     rules: DomainMap<Arc<DomainRuleTreeNode>>,
 }
 
 impl DomainRuleMap {
+    pub fn empty() -> &'static Self {
+        &EMPTY
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn create(
         domain_rules: &DomainRules,

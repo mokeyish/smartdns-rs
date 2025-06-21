@@ -7,10 +7,10 @@ use std::{
 };
 
 use crate::{
-    infra::{file_mode::FileMode, ipset::IpSet},
+    infra::file_mode::FileMode,
     libdns::proto::rr::{
-        rdata::{HTTPS, SRV},
         Name, RecordType,
+        rdata::{HTTPS, SRV},
     },
     log::Level,
     proxy::ProxyConfig,
@@ -22,27 +22,33 @@ use ipnet::IpNet;
 use serde::{self, Deserialize, Serialize};
 
 mod audit;
+mod bind_addr;
 mod cache;
+mod client_rule;
 mod domain;
 mod domain_rule;
 mod domain_set;
-mod listener;
+mod ip_set;
 mod log;
 mod nameserver;
 pub mod parser;
 mod response_mode;
+mod rule_group;
 mod server_opts;
 mod speed_mode;
 
 pub use audit::*;
+pub use bind_addr::*;
 pub use cache::*;
+pub use client_rule::*;
 pub use domain::*;
 pub use domain_rule::*;
 pub use domain_set::*;
-pub use listener::*;
+pub use ip_set::*;
 pub use log::*;
 pub use nameserver::*;
 pub use response_mode::*;
+pub use rule_group::*;
 pub use server_opts::*;
 pub use speed_mode::*;
 
@@ -93,17 +99,8 @@ pub struct Config {
     /// Local domain suffix appended to DHCP names and hosts file entries.
     pub domain: Option<Name>,
 
-    /// Include another configuration options
-    ///
-    /// conf-file [file]
-    /// ```
-    /// example:
-    ///   conf-file blacklist-ip.conf
-    /// ```
-    pub conf_file: Option<PathBuf>,
-
-    /// listeners
-    pub listeners: Vec<ListenerConfig>,
+    /// List of bind addresses
+    pub binds: Vec<BindAddrConfig>,
 
     /// SSL Certificate file path
     pub bind_cert_file: Option<PathBuf>,
@@ -120,16 +117,16 @@ pub struct Config {
     pub cache: CacheConfig,
 
     /// List of hosts that supply bogus NX domain results
-    pub bogus_nxdomain: IpSet,
+    pub bogus_nxdomain: Vec<IpOrSet>,
 
     /// List of IPs that will be filtered when nameserver is configured -blacklist-ip parameter
-    pub blacklist_ip: IpSet,
+    pub blacklist_ip: Vec<IpOrSet>,
 
     /// List of IPs that will be accepted when nameserver is configured -whitelist-ip parameter
-    pub whitelist_ip: IpSet,
+    pub whitelist_ip: Vec<IpOrSet>,
 
     /// List of IPs that will be ignored
-    pub ignore_ip: IpSet,
+    pub ignore_ip: Vec<IpOrSet>,
 
     /// speed check mode
     ///
@@ -217,38 +214,6 @@ pub struct Config {
     /// remote dns server list
     pub nameservers: Vec<NameServerInfo>,
 
-    /// specific nameserver to domain
-    ///
-    /// nameserver /domain/[group|-]
-    ///
-    /// ```
-    /// example:
-    ///   nameserver /www.example.com/office, Set the domain name to use the appropriate server group.
-    ///   nameserver /www.example.com/-, ignore this domain
-    /// ```
-    pub forward_rules: Vec<ForwardRule>,
-
-    /// specific address to domain
-    ///
-    /// address /domain/[ip|-|-4|-6|#|#4|#6]
-    ///
-    /// ```
-    /// example:
-    ///   address /www.example.com/1.2.3.4, return ip 1.2.3.4 to client
-    ///   address /www.example.com/-, ignore address, query from upstream, suffix 4, for ipv4, 6 for ipv6, none for all
-    ///   address /www.example.com/#, return SOA to client, suffix 4, for ipv4, 6 for ipv6, none for all
-    /// ```
-    pub address_rules: AddressRules,
-
-    /// set domain rules
-    pub domain_rules: DomainRules,
-
-    pub cnames: CNameRules,
-
-    pub srv_records: SrvRecords,
-
-    pub https_records: HttpsRecords,
-
     /// The proxy server for upstream querying.
     pub proxy_servers: HashMap<String, ProxyConfig>,
 
@@ -256,6 +221,25 @@ pub struct Config {
 
     pub resolv_file: Option<PathBuf>,
     pub domain_set_providers: HashMap<String, Vec<DomainSetProvider>>,
+
+    /// ip set
+    pub ip_sets: HashMap<String, Vec<IpNet>>,
+
+    pub ip_alias: Vec<IpAlias>,
+
+    pub client_rules: Vec<ClientRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IpAlias {
+    pub ip: IpOrSet,
+    pub to: Arc<[IpAddr]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpOrSet {
+    Net(IpNet),
+    Set(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -414,4 +398,4 @@ macro_rules! impl_from_str {
     };
 }
 
-impl_from_str!(AddressRule, Domain, AddressRuleValue, ListenerAddress);
+impl_from_str!(AddressRule, Domain, AddressRuleValue, BindAddr);

@@ -36,9 +36,9 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-          - target: x86_64-pc-windows-gnu
-            os: windows-latest
-            archive: zip
+          # - target: x86_64-pc-windows-gnu
+          #   os: windows-latest
+          #   archive: zip
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             archive: zip
@@ -119,7 +119,7 @@ jobs:
           echo "Build date: $(date)" >> $DIST_DIR/version
           echo "Commit: $(git rev-parse HEAD)" >> $DIST_DIR/version
         shell: bash
-          
+
       - name: Publish archive
         if: ${{ !contains(matrix.target, 'windows') && !contains(matrix.target, 'darwin') }}
         env:
@@ -139,7 +139,7 @@ jobs:
           zip -9r $ARCHIVE_FILE $DIST_DIR
           shasum -a256 $ARCHIVE_FILE > $ARCHIVE_FILE-sha256sum.txt
           echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
-      
+
       - name: Publish zip archive windows
         if: ${{ contains(matrix.target, 'windows') }}
         env:
@@ -150,16 +150,16 @@ jobs:
           echo ${{ hashFiles(env.ARCHIVE_FILE) }} > $ARCHIVE_FILE-sha256sum.txt
           echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
         shell: bash
-    
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: smartdns-${{ matrix.target }}-${{ inputs.version || github.ref_name }}
           retention-days: 30
-          path: ${{ env.archive_file }}  
-      
+          path: ${{ env.archive_file }}
+
       - name: Publish release
-        uses: softprops/action-gh-release@v2.0.6
+        uses: softprops/action-gh-release@v2.2.2
         if: ${{ startsWith(inputs.version, 'v') }}
         with:
           draft: false
@@ -170,3 +170,30 @@ jobs:
             ${{ env.archive_file }}-sha256sum.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build-docker:
+    if: false  # Disabled for now, enable when it is ready to use.
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+      -
+        name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push Docker image
+        working-directory: ./contrib/docker
+        run: |
+          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version }} -t ghcr.io/mokeyish/smartdns-rs:${{ inputs.version }} --push .

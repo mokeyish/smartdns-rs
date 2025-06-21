@@ -159,7 +159,7 @@ impl FromIterator<WildcardName> for DomainSet {
 mod trie {
     use crate::third_ext::AsSlice;
     use std::{
-        collections::{hash_map::RandomState, HashMap},
+        collections::{HashMap, hash_map::RandomState},
         hash::{BuildHasher, Hash},
     };
 
@@ -404,6 +404,7 @@ mod phf {
 }
 
 #[cfg(test)]
+#[cfg(nightly)]
 mod tests {
 
     use super::*;
@@ -468,21 +469,21 @@ mod tests {
 #[cfg(nightly)]
 mod benchmark {
     //! rustup override set nightly
-    //! rustup override unset\
-    extern crate reqwest;
+    //! rustup override unset
     extern crate test;
     use super::*;
+    use crate::infra::http_client::{self, HttpResponse};
     use crate::libdns::proto::rr::Name;
     use std::{collections::HashSet, str::FromStr};
 
     fn get_domain_list() -> Vec<Name> {
         let mut domains = vec![];
-        use reqwest::blocking as http;
 
-        let text = http::get("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts")
-            .unwrap()
-            .text()
-            .unwrap();
+        let text =
+            http_client::get("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts")
+                .unwrap()
+                .text()
+                .unwrap();
 
         for mut line in text.lines() {
             line = line.trim_start();
@@ -555,7 +556,7 @@ mod benchmark {
         for name in domain_list.iter() {
             set.insert(name.clone());
         }
-        let set = phf::create_from_hashmap(set.0 .0);
+        let set = phf::create_from_hashmap(set.0.0);
         let set = &set;
 
         let domain_list = &domain_list;

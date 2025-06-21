@@ -1,10 +1,10 @@
-use std::{io, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
-use crate::rustls::{Certificate, PrivateKey};
+use crate::rustls::ResolvesServerCert;
 use tokio::{net, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use super::{reap_tasks, sanitize_src_address, DnsHandle};
+use super::{DnsHandle, reap_tasks, sanitize_src_address};
 
 use crate::{dns::SerialMessage, libdns::Protocol, log};
 
@@ -12,7 +12,7 @@ pub fn serve(
     socket: net::UdpSocket,
     handler: DnsHandle,
     _timeout: Duration,
-    certificate_and_key: (Vec<Certificate>, PrivateKey),
+    server_cert_resolver: Arc<dyn ResolvesServerCert>,
     _dns_hostname: Option<String>,
 ) -> io::Result<CancellationToken> {
     use crate::libdns::proto::quic::{DoqErrorCode, QuicServer};
@@ -22,7 +22,7 @@ pub fn serve(
     let token = CancellationToken::new();
     let cancellation_token = token.clone();
 
-    let mut server = QuicServer::with_socket(socket, certificate_and_key.0, certificate_and_key.1)?;
+    let mut server = QuicServer::with_socket(socket, server_cert_resolver)?;
 
     tokio::spawn(async move {
         let mut inner_join_set = JoinSet::new();

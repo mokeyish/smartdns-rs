@@ -70,24 +70,12 @@ impl NomParser for NameServerInfo {
                 preceded(space1, dns_url("quic://")),
             ),
             preceded(tag_no_case("server"), preceded(space1, dns_url("udp://"))),
-        ))(input)?;
+        ))
+        .parse(input)?;
 
-        let (input, options) = opt(preceded(space1, options::parse))(input)?;
+        let (input, options) = opt(preceded(space1, options::parse)).parse(input)?;
 
-        let mut nameserver = Self {
-            server: url,
-            group: Default::default(),
-            blacklist_ip: Default::default(),
-            whitelist_ip: Default::default(),
-            check_edns: Default::default(),
-            exclude_default_group: Default::default(),
-            proxy: None,
-            bootstrap_dns: Default::default(),
-            resolve_group: None,
-            subnet: None,
-            so_mark: None,
-            interface: None,
-        };
+        let mut nameserver: NameServerInfo = url.into();
 
         if let Some(options) = options {
             for (k, v) in options {
@@ -116,7 +104,7 @@ impl NomParser for NameServerInfo {
                         nameserver.interface = v.map(|p| p.to_string());
                     }
                     "subnet" => match v {
-                        Some(s) => nameserver.subnet = s.parse().ok(),
+                        Some(s) => nameserver.subnet = IpNet::parse(s).ok().map(|s| s.1),
                         None => {
                             log::warn!("expect suedns client subnetbnet")
                         }
@@ -169,6 +157,10 @@ impl NomParser for NameServerInfo {
 mod tests {
     use super::*;
 
+    fn name_server_default() -> NameServerInfo {
+        DnsUrl::from_str("udp://127.0.0.1:53").unwrap().into()
+    }
+
     #[test]
     fn test_simple() {
         assert_eq!(
@@ -177,17 +169,8 @@ mod tests {
                 "",
                 NameServerInfo {
                     server: DnsUrl::from_str("udp://8.8.8.8:53").unwrap(),
-                    group: Default::default(),
-                    blacklist_ip: Default::default(),
-                    whitelist_ip: Default::default(),
-                    check_edns: Default::default(),
-                    exclude_default_group: Default::default(),
-                    proxy: None,
-                    bootstrap_dns: Default::default(),
-                    resolve_group: None,
-                    subnet: None,
-                    so_mark: None,
                     interface: Some("Net".to_string()),
+                    ..name_server_default()
                 }
             ))
         );
@@ -198,17 +181,19 @@ mod tests {
                 "",
                 NameServerInfo {
                     server: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
-                    group: Default::default(),
-                    blacklist_ip: Default::default(),
-                    whitelist_ip: Default::default(),
-                    check_edns: Default::default(),
-                    exclude_default_group: Default::default(),
-                    proxy: None,
-                    bootstrap_dns: Default::default(),
-                    resolve_group: None,
-                    subnet: None,
-                    so_mark: None,
-                    interface: None,
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        assert_eq!(
+            NameServerInfo::parse("server 8.8.8.8 -subnet 192.168.1.1"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
+                    subnet: Some("192.168.1.1/32".parse().unwrap()),
+                    ..name_server_default()
                 }
             ))
         );
@@ -223,7 +208,8 @@ mod tests {
                     tag_no_case("h3://"),
                 ))),
                 move |p| p.unwrap_or(default_proto),
-            )(input)
+            )
+            .parse(input)
         }
 
         assert_eq!(
@@ -232,17 +218,7 @@ mod tests {
                 "",
                 NameServerInfo {
                     server: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
-                    group: Default::default(),
-                    blacklist_ip: Default::default(),
-                    whitelist_ip: Default::default(),
-                    check_edns: Default::default(),
-                    exclude_default_group: Default::default(),
-                    proxy: None,
-                    bootstrap_dns: Default::default(),
-                    resolve_group: None,
-                    subnet: None,
-                    so_mark: None,
-                    interface: None,
+                    ..name_server_default()
                 }
             ))
         );
@@ -253,17 +229,7 @@ mod tests {
                 "",
                 NameServerInfo {
                     server: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
-                    group: Default::default(),
-                    blacklist_ip: Default::default(),
-                    whitelist_ip: Default::default(),
-                    check_edns: Default::default(),
-                    exclude_default_group: Default::default(),
-                    proxy: None,
-                    bootstrap_dns: Default::default(),
-                    resolve_group: None,
-                    subnet: None,
-                    so_mark: None,
-                    interface: None,
+                    ..name_server_default()
                 }
             ))
         );
@@ -273,18 +239,9 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
+                    name: None,
                     server: DnsUrl::from_str("tls://[2606:4700:4700::1111]").unwrap(),
-                    group: Default::default(),
-                    blacklist_ip: Default::default(),
-                    whitelist_ip: Default::default(),
-                    check_edns: Default::default(),
-                    exclude_default_group: Default::default(),
-                    proxy: None,
-                    bootstrap_dns: Default::default(),
-                    resolve_group: None,
-                    subnet: None,
-                    so_mark: None,
-                    interface: None,
+                    ..name_server_default()
                 }
             ))
         );
@@ -301,16 +258,8 @@ mod tests {
                 NameServerInfo {
                     server: DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap(),
                     group: vec!["bootstrap".to_string()],
-                    blacklist_ip: Default::default(),
-                    whitelist_ip: Default::default(),
-                    check_edns: Default::default(),
                     exclude_default_group: true,
-                    proxy: None,
-                    bootstrap_dns: Default::default(),
-                    resolve_group: None,
-                    subnet: None,
-                    so_mark: None,
-                    interface: None,
+                    ..name_server_default()
                 }
             ))
         );
@@ -327,16 +276,8 @@ mod tests {
                 NameServerInfo {
                     server: DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap(),
                     group: vec!["alidns".to_string()],
-                    blacklist_ip: Default::default(),
-                    whitelist_ip: Default::default(),
-                    check_edns: Default::default(),
                     exclude_default_group: true,
-                    proxy: None,
-                    bootstrap_dns: Default::default(),
-                    resolve_group: None,
-                    subnet: None,
-                    so_mark: None,
-                    interface: None,
+                    ..name_server_default()
                 }
             ))
         );

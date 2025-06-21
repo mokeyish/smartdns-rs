@@ -2,7 +2,9 @@
 // #![feature(test)]
 
 use cli::*;
-use std::path::PathBuf;
+use config::NameServerInfo;
+use dns_url::DnsUrl;
+use std::str::FromStr;
 
 mod api;
 mod app;
@@ -70,13 +72,10 @@ fn banner() {
 /// The app name
 const NAME: &str = "SmartDNS";
 
+include!(concat!(env!("OUT_DIR"), "/build_time_vars.rs"));
+
 /// The default configuration.
 const DEFAULT_CONF: &str = include_str!("../etc/smartdns/smartdns.conf");
-
-/// Returns a version as specified in Cargo.toml
-pub fn version() -> &'static str {
-    concat!(env!("CARGO_PKG_VERSION"), " ", env!("CARGO_BUILD_DATE"))
-}
 
 #[cfg(not(windows))]
 fn main() {
@@ -97,10 +96,15 @@ fn main() -> windows_service::Result<()> {
 impl Cli {
     #[inline]
     pub fn run(self) {
-        let _guard = self.log_level().map(log::default);
+        let _guard = self.log_level().map(log::console);
 
         match self.command {
-            Commands::Run { conf, pid, .. } => {
+            Commands::Run {
+                direcory,
+                conf,
+                pid,
+                ..
+            } => {
                 let _guard = pid
                     .map(|pid| {
                         use infra::process_guard;
@@ -116,8 +120,7 @@ impl Cli {
                         }
                     })
                     .unwrap_or_default();
-
-                run_server(conf);
+                app::serve(direcory, conf);
             }
             #[cfg(feature = "service")]
             Commands::Service {
@@ -167,8 +170,8 @@ impl Cli {
             Commands::Service { command: _ } => {
                 warn!("please enable `service` feature")
             }
-            Commands::Test { conf } => {
-                RuntimeConfig::load(conf);
+            Commands::Test { direcory, conf } => {
+                RuntimeConfig::load(direcory, conf);
             }
             #[cfg(feature = "self-update")]
             Commands::Update { yes, version } => {
@@ -206,15 +209,9 @@ impl Cli {
     }
 }
 
-fn run_server(conf: Option<PathBuf>) {
-    hello_starting();
-    app::bootstrap(conf);
-    info!("{} {} shutdown", crate::NAME, crate::version());
-}
-
 #[inline]
 fn hello_starting() {
-    info!("Smart-DNS 🐋 {} starting", version());
+    info!("{} 🐋 {} starting", NAME, BUILD_VERSION);
 }
 
 impl RuntimeConfig {
@@ -225,6 +222,23 @@ impl RuntimeConfig {
         let proxies = self.proxies().clone();
 
         let mut builder = DnsClient::builder();
+
+        #[cfg(feature = "mdns")]
+        if self.mdns_lookup() {
+            use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
+            let mdns_servers = [*MDNS_IPV4, *MDNS_IPV6]
+                .into_iter()
+                .map(|ip| format!("mdns://{}", ip))
+                .flat_map(|s| DnsUrl::from_str(&s).ok())
+                .map(|url| {
+                    let mut config = NameServerInfo::from(url);
+                    config.group = vec!["mdns".to_string()];
+                    config.exclude_default_group = true;
+                    config
+                })
+                .collect::<Vec<_>>();
+            builder = builder.add_servers(mdns_servers.to_vec());
+        }
         builder = builder.add_servers(servers.to_vec());
         if let Some(path) = ca_path {
             builder = builder.with_ca_path(path.to_owned());
@@ -236,7 +250,6 @@ impl RuntimeConfig {
             builder = builder.with_client_subnet(subnet);
         }
         builder = builder.with_proxies(proxies);
-        builder = builder.with_max_cocurrency(self.num_workers());
         builder.build().await
     }
 }
@@ -251,7 +264,7 @@ mod signal {
 
         #[cfg(unix)]
         {
-            use tokio::signal::unix::{signal, SignalKind};
+            use tokio::signal::unix::{SignalKind, signal};
             match signal(SignalKind::terminate()) {
                 Ok(mut terminate) => tokio::select! {
                     _ = terminate.recv() => SignalKind::terminate(),
@@ -311,12 +324,11 @@ mod run_user {
             (Some(user), Some(group)) => switch_user_group(user.uid(), group.gid()),
             _ => Err(io::ErrorKind::Other.into()),
         }
-        .map(|guard| {
+        .inspect(|_guard| {
             if let Some(caps) = caps {
                 caps::set(None, CapSet::Effective, caps).unwrap();
                 caps::set(None, CapSet::Permitted, caps).unwrap();
             }
-            guard
         })
     }
 }

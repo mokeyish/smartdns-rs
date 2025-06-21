@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{Json, extract::State, response::IntoResponse};
 
-use super::openapi::{http::get, routes, IntoRouter};
+use super::openapi::{IntoRouter, http::get, routes};
 use super::{IntoDataListPayload, ServeState, StatefulRouter};
 
 pub fn routes() -> StatefulRouter {
@@ -16,7 +16,7 @@ async fn listeners(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
             .app
             .cfg()
             .await
-            .listeners()
+            .binds()
             .to_vec()
             .into_data_list_payload(),
     )

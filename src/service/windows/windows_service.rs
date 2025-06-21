@@ -4,10 +4,10 @@ use std::{ffi::OsString, time::Duration};
 
 use windows_service::service::{ServiceControlAccept, ServiceExitCode, ServiceState, ServiceType};
 use windows_service::{
-    define_windows_service,
+    Result, define_windows_service,
     service::{ServiceControl, ServiceStatus},
     service_control_handler::{self, ServiceControlHandlerResult},
-    service_dispatcher, Result,
+    service_dispatcher,
 };
 
 define_windows_service!(ffi_service_main, service_main);

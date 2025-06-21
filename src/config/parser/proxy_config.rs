@@ -22,7 +22,7 @@ impl NomParser for NamedProxyConfig {
             }),
         ));
 
-        let (rest_input, _) = separated_list1(space1, one)(input)?;
+        let (rest_input, _) = separated_list1(space1, one).parse(input)?;
 
         if let (Some(name), Some(config)) = (name, proxy) {
             return Ok((rest_input, NamedProxyConfig { name, config }));

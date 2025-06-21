@@ -21,6 +21,9 @@ version:
 build *args: patch
   {{cargo}} build {{args}}
 
+# Build diagnostic
+build-diagnostic *args: patch
+  RUSTFLAGS="--cfg tokio_unstable" {{cargo}} build  --features "future-diagnostic" {{args}}
 
 # Install
 install *args: patch

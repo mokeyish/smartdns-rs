@@ -1,9 +1,9 @@
 [package]
 name = "smartdns"
-version = "0.9.2-alpha.1"
+version = "0.12.0"
 authors = ["YISH <mokeyish@hotmail.com>"]
-edition = "2021"
-rust-version = "1.75.0"
+edition = "2024"
+rust-version = "1.85.0"
 
 keywords = ["DNS", "BIND", "dig", "SmartDNS", "Dnsmasq"]
 categories = ["network-programming"]
@@ -29,15 +29,20 @@ default = ["common", "self-update" ]
 
 homebrew = [ "common" ]
 
-common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn" ]
+common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "mdns", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client", "serde" ]
 
-nom-recipes-all =["nom-recipes-ip"]
+future-diagnostic = [
+  "dep:console-subscriber"
+]
+
+nom-recipes-all =["nom-recipes-ip", "nom-recipes-mac"]
 
 nom-recipes-ip = ["nom-recipes-ipv4", "nom-recipes-ipv6"]
 nom-recipes-ipv4 = []
 nom-recipes-ipv6 = [
   "nom-recipes-ipv4" # support IPv4-mapped IPv6 addresses
-] 
+]
+nom-recipes-mac = []
 
 failed_tests = []
 disable_icmp_ping = []
@@ -45,28 +50,27 @@ self-update = ["dep:self_update"]
 
 resolve-cli = ["dep:console"]
 
-dns-over-tls = []
-dns-over-https = ["dns-over-https-rustls"]
+dns-over-tls = [
+  "hickory-proto/tls-ring",
+  "hickory-resolver/tls-ring",
+]
+dns-over-https = [
+  "hickory-proto/https-ring",
+  "hickory-resolver/https-ring"
+]
 dns-over-quic = [
-  "dns-over-rustls",
-  "hickory-proto/dns-over-quic",
-  "hickory-resolver/dns-over-quic",
+  "hickory-proto/quic-ring",
+  "hickory-resolver/quic-ring",
 ]
 dns-over-h3 = [
-  "dns-over-rustls",
-  "hickory-proto/dns-over-h3",
-  "hickory-resolver/dns-over-h3"
+  "hickory-proto/h3-ring",
+  "hickory-resolver/h3-ring"
 ]
 
-dns-over-https-rustls = [
-  "dns-over-rustls",
-  "hickory-proto/dns-over-https-rustls",
-  "hickory-resolver/dns-over-https-rustls",
+mdns = [
+  "hickory-proto/mdns",
+  "hickory-resolver/mdns",
 ]
-
-dns-over-rustls = []
-
-mdns = []
 
 service = [
   "dep:which",
@@ -77,6 +81,7 @@ nft = ["dep:which", "dep:either"]
 
 dnssec = [ "hickory-proto/dnssec-ring", "rustls/ring"]
 
+serde = [ "dep:serde", "dep:serde_json" ]
 
 swagger-ui-cdn = []
 
@@ -84,12 +89,25 @@ swagger-ui-embed = [
   "dep:utoipa-swagger-ui"
 ]
 
+
+http_client = [
+  "ureq"
+]
+
+ureq = [
+  "dep:ureq",
+  "self_update?/ureq", "self_update?/rustls"
+]
+
+reqwest = ["dep:reqwest", "self_update?/reqwest"]
+
 experimental = ["experimental-trie", "experimental-phf"]
 
 experimental-trie = []
 experimental-phf = [
   "dep:boomphf"
 ]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -99,11 +117,11 @@ experimental-phf = [
 # hickory-server = { path = "./target/patch/hickory-server-0.24.0" }
 # hickory-proto = { path = "./target/patch/hickory-proto-0.24.0" }
 # rustls-native-certs = { git = "https://github.com/mokeyish/rustls-native-certs.git" }
-hostname = { git = "https://github.com/mokeyish/hostname.git", branch = "dev" }
 # enum_dispatch = { git = "https://gitlab.com/mokeyish/enum_dispatch.git", branch = "master"}
 # axum = { git = "https://github.com/tokio-rs/axum.git", rev = "8854e66" }
 # boomphf ={ path = "./target/patch/boomphf-0.6.0"}
-rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1.10.1.smartdns.1" }
+rustls-pki-types = { git = "https://github.com/mokeyish/pki-types.git", rev = "1.12.0.smartdns.1" }
+self_update = { git = "https://github.com/mokeyish/self_update.git", rev = "0.42.0.smartdns.1"}
 
 [dependencies]
 cfg-if = "1"
@@ -112,7 +130,7 @@ clap-verbosity-flag = "3.0.2"
 thiserror = "2.0"
 anyhow = "1.0"
 once_cell = "1.16.0"
-nom = "7.1.3"
+nom = "8.0.0"
 enum_dispatch = "0.3.13"
 bytes = "1.6.0"
 either = { version = "1.12.0", optional = true }
@@ -120,24 +138,26 @@ either = { version = "1.12.0", optional = true }
 
 # webapi
 axum = { version = "0.8.1" }
+axum-h3 = "0.0.3"
+h3-util = { version = "0.0.3", default-features = false, features = ["quinn"]}
 hyper = { version = "1.1.0", default-features = false }
-hyper-util = { version = "0.1.3", features = ["http2"]}
+hyper-util = { version = "0.1.14", features = ["http2"]}
 tower = { version = "0.5.2", default-features = false }
+tower-http = { version = "0.6.5", default-features = false, features = ["set-header"]}
 utoipa = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.1", package = "utoipa", features = ["axum_extras"] }
 utoipa-axum = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.1", package = "utoipa-axum", features = []}
 utoipa-swagger-ui = { git = "https://github.com/mokeyish/utoipa.git", rev = "smartdns.1", package = "utoipa-swagger-ui", optional = true, default-features = false, features = ["axum"] }
 
 # serde
-serde = { version = "1.0", features = ["derive"]}
-serde_yaml = "0.9"
-serde_json = "1.0"
+serde = { version = "1.0", optional = true, features = ["derive"]}
+serde_json = { version = "1.0", optional = true }
 
 # async/await
 futures = { version = "0.3.5", default-features = false, features = ["std"] }
 futures-intrusive = "0.5"
 futures-util = { version = "0.3.5", default-features = false, features = ["std"] }
 async-trait = "0.1.80"
-tokio = { version = "1.41", features = [
+tokio = { version = "1.45", features = [
   "time",
   "rt",
   "signal",
@@ -147,10 +167,12 @@ tokio = { version = "1.41", features = [
 tokio-rustls = { version = "0.26.0", default-features = false }
 tokio-util = "0.7.12"
 socket2 = { version = "0.5", features = ["all"] }
-reqwest = { version = "0.12", default-features = false, features = [
+http = "1"
+reqwest = { version = "0.12", optional = true, default-features = false, features = [
   "blocking",
   "rustls-tls",
 ] }
+ureq = { version = "3.0.9", optional = true, default-features = false, features = ["gzip", "json", "socks-proxy", "rustls"]}
 
 # log
 tracing = "0.1"
@@ -159,38 +181,39 @@ tracing-subscriber = { version = "0.3", features = [
   "fmt",
   "env-filter",
 ] }
+
+console-subscriber = { version = "0.4.1", optional = true }
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.6", version = "0.25.0-alpha.4", features = ["serde"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.6", version = "0.25.0-alpha.4", features = [
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.3", features = ["serde"]}
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.3", features = [
   "serde",
   "system-config",
 ] }
-# hickory-server = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.25.0-smartdns.5", version = "0.25.0-alpha.2", features = ["resolver"], optional = true }
 quinn = { version = "0.11.2", default-features = false }
 
 # ssl
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"]  }
 rustls-pemfile = "2"
 rustls-native-certs = "0.8"
 
-lru = { version = "0.12", default-features = false }
+lru = { version = "0.14", default-features = false }
 # time = "0.3"
-chrono = { version = "0.4.38", features = ["serde"]}
+chrono = { version = "0.4.38", default-features = false, features = ["serde", "clock"]}
 surge-ping = "0.8.1"
-rand = "0.8.5"
+rand = "0.9.1"
 smallvec = "1.13.2"
 csv = "1.1"
-hostname = "0.3"
+hostname = "0.4"
 byte-unit = { version = "5.0.3", features = ["serde"]}
-ipnet = "2.7"
+ipnet = { version = "2.11", features = ["json"]}
 which = { version = "7.0.1", optional = true }
 glob = "0.3.1"
 
 # process
-sysinfo = { version = "0.32", default-features = false, features = ["system"]}
+sysinfo = { version = "0.35", default-features = false, features = ["system"]}
 
 # proxy
 async-socks5 = { version = "0.6.0", git = "https://github.com/mokeyish/async-socks5.git", rev = "f78eec5" }
@@ -206,27 +229,28 @@ url = "2.5.4"
 boomphf = { version = "0.6.0", optional = true }
 local-ip-address = "0.6.1"
 console = { version = "0.15.8", optional = true }
+rangemap = "1.5.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 uzers = { version = "0.12", default-features = false }
 caps = "0.5.5"
-self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
-self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2", "rustls"], optional = true }
+self_update = { version = "0.42.0", default-features = false, features=["archive-tar", "compression-flate2"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-self_update = { version = "0.41.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
+self_update = { version = "0.42.0", default-features = false, features=["archive-zip", "compression-zip-deflate"], optional = true }
 
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = [
+windows = { version = "0.60", features = [
   "Win32_System_Console",
   "Win32_Foundation",
   "Win32_Networking", "Win32_Networking_WinSock", "Win32_System_IO", # set UDP_CONNRESET off
 ] }
-windows-service = "0.7.0"
-self_update = { version = "0.41.0", default-features = false, features=["archive-zip", "compression-zip-deflate", "rustls"], optional = true }
+windows-service = "0.8.0"
+self_update = { version = "0.42.0", default-features = false, features=["archive-zip", "compression-zip-deflate"], optional = true }
 self-replace = { version = "1.3.7", optional = true }
 same-file = { version = "1", optional = true }
 
@@ -243,15 +267,15 @@ anyhow = "1.0"
 
 [target.'cfg(target_os = "linux")'.build-dependencies]
 cc = "1.2"
-bindgen = "0.70"
+bindgen = "0.71"
 
 
 # Dev-dependencies are not used when compiling a package for building, but are used for compiling tests, examples, and benchmarks.
 [dev-dependencies]
-reqwest = { version = "0.12", default-features = false, features = [
-  "blocking",
-  "rustls-tls",
-] }
+# reqwest = { version = "0.12", default-features = false, features = [
+#   "blocking",
+#   "rustls-tls",
+# ] }
 
 
 [profile.release]

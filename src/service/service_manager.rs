@@ -179,7 +179,7 @@ impl ServiceCommand {
                 })
                 .unwrap_or_else(|| "Failed".to_string());
             error!("{:?}, {}", self.program, msg);
-            Err(io::Error::new(io::ErrorKind::Other, msg))
+            Err(io::Error::other(msg))
         }
     }
 

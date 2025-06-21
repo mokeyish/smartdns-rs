@@ -1,8 +1,8 @@
 [target.x86_64-apple-darwin]
-image = "ghcr.io/cross-rs/x86_64-apple-darwin-cross"
+image = "ghcr.io/cross-rs/x86_64-apple-darwin-cross:main"
 
 [target.aarch64-apple-darwin]
-image = "ghcr.io/cross-rs/aarch64-apple-darwin-cross"
+image = "ghcr.io/cross-rs/aarch64-apple-darwin-cross:main"
 
 [target.aarch64-linux-android]
 image = "ghcr.io/cross-rs/aarch64-linux-android:main"

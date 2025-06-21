@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 pub use crate::config::*;
 use crate::dns::DomainRuleGetter;
+use crate::infra::ipset::IpMap;
 use crate::log;
 use crate::{
     dns_rule::{DomainRuleMap, DomainRuleTreeNode},
@@ -22,11 +23,26 @@ use crate::{
 
 const DEFAULT_GROUP: &str = "default";
 
+#[cfg(target_os = "windows")]
+pub const DEFAULT_CONF_DIR: &str = r"C:\ProgramData\smartdns";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+pub const DEFAULT_CONF_DIR: &str = "/usr/local/etc/smartdns";
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const DEFAULT_CONF_DIR: &str = "/opt/homebrew/etc/smartdns";
+#[cfg(target_os = "android")]
+pub const DEFAULT_CONF_DIR: &str = "/data/data/com.termux/files/usr/etc/smartdns";
+#[cfg(target_os = "linux")]
+pub const DEFAULT_CONF_DIR: &str = "/etc/smartdns";
+
 #[derive(Default)]
 pub struct RuntimeConfig {
+    conf_dir: PathBuf,
+    conf_file: PathBuf,
     inner: Config,
 
-    domain_rule_map: DomainRuleMap,
+    rule_groups: HashMap<String, RuleGroup>,
+
+    domain_rule_group_map: HashMap<String, DomainRuleMap>,
 
     proxy_servers: Arc<HashMap<String, ProxyConfig>>,
 
@@ -41,16 +57,24 @@ pub struct RuntimeConfig {
 
     /// List of IPs that will be ignored
     ignore_ip: Arc<IpSet>,
+
+    ip_alias: Arc<IpMap<Arc<[IpAddr]>>>,
 }
 
 impl RuntimeConfig {
-    pub fn load<P: AsRef<Path>>(path: Option<P>) -> Arc<Self> {
+    pub fn load<P: AsRef<Path>>(conf_dir: Option<PathBuf>, path: Option<P>) -> Arc<Self> {
+        let mut builder = Self::builder();
+
+        if let Some(conf_dir) = conf_dir {
+            builder = builder.with_conf_dir(conf_dir);
+        }
+
         if let Some(ref conf) = path {
             let mut path = Cow::Borrowed(conf.as_ref());
             if path.is_dir() {
                 path = Cow::Owned(path.join(format!("{}.conf", crate::NAME.to_lowercase())));
             }
-            RuntimeConfig::load_from_file(path)
+            builder.with_conf_file(path).build().into()
         } else {
             #[cfg(feature = "service")]
             let conf_path: &str = crate::service::CONF_PATH;
@@ -77,31 +101,34 @@ impl RuntimeConfig {
                 }
             }
 
-            candidate_path
-                .iter()
-                .map(Path::new)
-                .filter(|p| p.exists())
-                .map(RuntimeConfig::load_from_file)
-                .next()
-                .expect("No configuation file found.")
-        }
-    }
+            let candidate_paths = candidate_path.iter().map(Path::new).filter(|p| p.exists());
 
-    fn load_from_file<P: AsRef<Path>>(path: P) -> Arc<Self> {
-        let path = path.as_ref();
+            for p in candidate_paths {
+                builder = builder.with_conf_file(p);
+                match builder.load() {
+                    Ok(_) => return builder.build().into(),
+                    Err(_) => {
+                        warn!("Failed to load configuration from {:?}", p);
+                        continue;
+                    }
+                }
+            }
 
-        let mut builder = Self::builder();
-        if !path.exists() {
-            panic!("configuration file {:?} not exist.", path);
+            panic!("No configuation file found.")
         }
-        builder.load_file(path).expect("load conf file filed");
-        builder.build().into()
     }
 
     pub fn builder() -> RuntimeConfigBuilder {
+        let conf_dir = PathBuf::from(DEFAULT_CONF_DIR);
+        let conf_file = conf_dir.join("smartdns.conf");
         RuntimeConfigBuilder {
+            conf_dir,
+            conf_file,
             config: Default::default(),
             loaded_files: Default::default(),
+            rule_groups: Default::default(),
+            rule_group_stack: Default::default(),
+            dirs: Default::default(),
         }
     }
 }
@@ -194,8 +221,8 @@ impl RuntimeConfig {
             .unwrap_or(std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
     }
 
-    pub fn listeners(&self) -> &[ListenerConfig] {
-        &self.listeners
+    pub fn binds(&self) -> &[BindAddrConfig] {
+        &self.binds
     }
 
     /// SSL Certificate file path
@@ -337,6 +364,10 @@ impl RuntimeConfig {
         &self.ignore_ip
     }
 
+    pub fn ip_alias(&self) -> &Arc<IpMap<Arc<[IpAddr]>>> {
+        &self.ip_alias
+    }
+
     /// speed check mode
     #[inline]
     pub fn speed_check_mode(&self) -> Option<&SpeedCheckModeList> {
@@ -429,8 +460,9 @@ impl RuntimeConfig {
     pub fn log_enabled(&self) -> bool {
         self.log_num() > 0
     }
-    pub fn log_level(&self) -> crate::log::Level {
-        self.log.level.unwrap_or(crate::log::Level::ERROR)
+
+    pub fn log_level(&self) -> Option<crate::log::Level> {
+        self.log.level
     }
 
     pub fn log_file(&self) -> PathBuf {
@@ -526,22 +558,6 @@ impl RuntimeConfig {
         &self.nameservers
     }
 
-    /// specific nameserver to domain
-    #[inline]
-    pub fn forward_rules(&self) -> &ForwardRules {
-        &self.forward_rules
-    }
-
-    #[inline]
-    pub fn address_rules(&self) -> &AddressRules {
-        &self.address_rules
-    }
-
-    #[inline]
-    pub fn domain_rules(&self) -> &DomainRules {
-        &self.domain_rules
-    }
-
     #[inline]
     pub fn proxies(&self) -> &Arc<HashMap<String, ProxyConfig>> {
         &self.proxy_servers
@@ -550,11 +566,6 @@ impl RuntimeConfig {
     #[inline]
     pub fn resolv_file(&self) -> Option<&Path> {
         self.resolv_file.as_deref()
-    }
-
-    #[inline]
-    pub fn cnames(&self) -> &CNameRules {
-        &self.cnames
     }
 
     pub fn valid_nftsets(&self) -> Vec<&ConfigForIP<NFTsetConfig>> {
@@ -567,9 +578,32 @@ impl RuntimeConfig {
             .collect()
     }
 
+    pub fn rule_groups(&self) -> &HashMap<String, RuleGroup> {
+        &self.rule_groups
+    }
+
+    pub fn rule_group(&self, name: &str) -> &RuleGroup {
+        self.rule_groups.get(name).unwrap_or(RuleGroup::empty())
+    }
+
+    pub fn client_rules(&self) -> &[ClientRule] {
+        &self.client_rules
+    }
+
     #[inline]
-    pub fn find_domain_rule(&self, domain: &Name) -> Option<Arc<DomainRuleTreeNode>> {
-        self.domain_rule_map.find(domain).cloned()
+    pub fn domain_rule_group(&self, name: &str) -> &DomainRuleMap {
+        let name = if name.is_empty() { DEFAULT_GROUP } else { name };
+        self.domain_rule_group_map
+            .get(name)
+            .unwrap_or(DomainRuleMap::empty())
+    }
+
+    #[inline]
+    pub fn find_domain_rule(&self, domain: &Name, group: &str) -> Option<Arc<DomainRuleTreeNode>> {
+        self.domain_rule_group(group)
+            .find(domain)
+            .or_else(|| self.domain_rule_group(DEFAULT_GROUP).find(domain))
+            .cloned()
     }
 
     fn get_server_group(&self, group: &str) -> Vec<&NameServerInfo> {
@@ -585,6 +619,18 @@ impl RuntimeConfig {
                 .collect::<Vec<_>>()
         }
     }
+
+    pub fn reload_new(&self) -> anyhow::Result<Arc<RuntimeConfig>> {
+        let mut builder = RuntimeConfigBuilder {
+            conf_dir: self.conf_dir.clone(),
+            conf_file: self.conf_file.clone(),
+            ..Self::builder()
+        };
+
+        builder.load()?;
+
+        Ok(Arc::new(builder.build()))
+    }
 }
 
 impl std::ops::Deref for RuntimeConfig {
@@ -597,25 +643,69 @@ impl std::ops::Deref for RuntimeConfig {
 }
 
 pub struct RuntimeConfigBuilder {
+    conf_dir: PathBuf,
+    conf_file: PathBuf,
     config: Config,
+    rule_groups: HashMap<String, RuleGroup>,
+    rule_group_stack: Vec<(String, RuleGroup)>,
     loaded_files: HashSet<PathBuf>,
+    dirs: HashSet<PathBuf>,
 }
 
 impl RuntimeConfigBuilder {
-    pub fn build(self) -> RuntimeConfig {
-        let mut cfg = self.config;
-
-        if cfg.listeners.is_empty() {
-            cfg.listeners.push(UdpListenerConfig::default().into())
+    pub fn build(mut self) -> RuntimeConfig {
+        let loaded = self.loaded_files.contains(&self.conf_file);
+        if !loaded {
+            let _ = self.load();
         }
 
-        let bogus_nxdomain: Arc<IpSet> = cfg.bogus_nxdomain.compact().into();
-        let blacklist_ip: Arc<IpSet> = cfg.blacklist_ip.compact().into();
-        let whitelist_ip: Arc<IpSet> = cfg.whitelist_ip.compact().into();
-        let ignore_ip: Arc<IpSet> = cfg.ignore_ip.compact().into();
+        let conf_file = self.conf_file;
+        let conf_dir = self.conf_dir;
+        let mut cfg = self.config;
 
-        if !cfg.cnames.is_empty() {
-            cfg.cnames.dedup_by(|a, b| a.domain == b.domain);
+        if !self.rule_group_stack.is_empty() {
+            while let Some((name, group)) = self.rule_group_stack.pop() {
+                self.rule_groups.entry(name).or_default().merge(group);
+            }
+        }
+
+        if cfg.binds.is_empty() {
+            cfg.binds.push(UdpBindAddrConfig::default().into())
+        }
+
+        fn get_ip_set<'a>(ip: &'a IpOrSet, cfg: &'a Config) -> &'a [IpNet] {
+            match ip {
+                IpOrSet::Net(net) => std::slice::from_ref(net),
+                IpOrSet::Set(name) => match cfg.ip_sets.get(name) {
+                    Some(net) => net,
+                    None => {
+                        warn!("unknown ip-set:{name}");
+                        &[]
+                    }
+                },
+            }
+        }
+
+        let make_ip_set = |set: &[IpOrSet]| {
+            let iter = set.iter().flat_map(|ip| get_ip_set(ip, &cfg));
+            Arc::new(IpSet::new(iter.copied()))
+        };
+
+        let bogus_nxdomain = make_ip_set(&cfg.bogus_nxdomain);
+        let blacklist_ip = make_ip_set(&cfg.blacklist_ip);
+        let whitelist_ip = make_ip_set(&cfg.whitelist_ip);
+        let ignore_ip = make_ip_set(&cfg.ignore_ip);
+
+        let ip_alias = cfg.ip_alias.iter().flat_map(|alias| {
+            let to = std::iter::repeat(alias.to.clone());
+            get_ip_set(&alias.ip, &cfg).iter().copied().zip(to)
+        });
+        let ip_alias = Arc::new(IpMap::from_iter(ip_alias));
+
+        for (_, rule) in self.rule_groups.iter_mut() {
+            if !rule.cnames.is_empty() {
+                rule.cnames.dedup_by(|a, b| a.domain == b.domain);
+            }
         }
 
         let mut domain_sets: HashMap<String, HashSet<WildcardName>> = HashMap::new();
@@ -635,16 +725,25 @@ impl RuntimeConfigBuilder {
             }
         }
 
-        let domain_rule_map = DomainRuleMap::create(
-            &cfg.domain_rules,
-            &cfg.address_rules,
-            &cfg.forward_rules,
-            &domain_sets,
-            &cfg.cnames,
-            &cfg.srv_records,
-            &cfg.https_records,
-            &cfg.nftsets,
-        );
+        let mut domain_rule_group_map = HashMap::new();
+
+        for (group_name, rule_group) in &self.rule_groups {
+            let domain_rule_map = DomainRuleMap::create(
+                &rule_group.domain_rules,
+                &rule_group.address_rules,
+                &rule_group.forward_rules,
+                &domain_sets,
+                &rule_group.cnames,
+                &rule_group.srv_records,
+                &rule_group.https_records,
+                &cfg.nftsets,
+            );
+            domain_rule_group_map.insert(group_name.to_string(), domain_rule_map);
+        }
+
+        let domain_rule_map = domain_rule_group_map
+            .get(DEFAULT_GROUP)
+            .unwrap_or(DomainRuleMap::empty());
 
         // set nameserver group for bootstraping
         for server in cfg.nameservers.iter_mut() {
@@ -662,11 +761,11 @@ impl RuntimeConfigBuilder {
 
         // find device address
         {
-            if !cfg.listeners.is_empty() {
+            if !cfg.binds.is_empty() {
                 use local_ip_address::list_afinet_netifas;
                 match list_afinet_netifas() {
                     Ok(network_interfaces) => {
-                        for listener in &mut cfg.listeners {
+                        for listener in &mut cfg.binds {
                             let device = match listener.device() {
                                 Some(v) => v,
                                 None => continue,
@@ -682,15 +781,15 @@ impl RuntimeConfigBuilder {
                                 warn!("network device {} not found.", device);
                             }
 
-                            let ip = ips.into_iter().find(|ip| match listener.listen() {
-                                ListenerAddress::Localhost => true,
-                                ListenerAddress::All => true,
-                                ListenerAddress::V4(_) => ip.is_ipv4(),
-                                ListenerAddress::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
+                            let ip = ips.into_iter().find(|ip| match listener.addr() {
+                                BindAddr::Localhost => true,
+                                BindAddr::All => true,
+                                BindAddr::V4(_) => ip.is_ipv4(),
+                                BindAddr::V6(_) => ip.is_ipv6() && !matches!(ip, IpAddr::V6(ipv6) if (ipv6.segments()[0] & 0xffc0) == 0xfe80),
                             });
 
                             match ip {
-                                Some(ip) => *listener.mut_listen() = ip.into(),
+                                Some(ip) => *listener.mut_addr() = ip.into(),
                                 None => {
                                     warn!("no ip address on device {}", device)
                                 }
@@ -710,9 +809,12 @@ impl RuntimeConfigBuilder {
             let mut tcp_addr = HashSet::new();
 
             let mut remove_idx = vec![];
-            for (idx, listener) in cfg.listeners.iter().enumerate().rev() {
+            for (idx, listener) in cfg.binds.iter().enumerate().rev() {
                 let addr = listener.sock_addr();
-                if matches!(listener, ListenerConfig::Udp(_) | ListenerConfig::Quic(_)) {
+                if matches!(
+                    listener,
+                    BindAddrConfig::Udp(_) | BindAddrConfig::Quic(_) | BindAddrConfig::H3(_)
+                ) {
                     if !udp_addr.insert(addr) {
                         remove_idx.push(idx)
                     }
@@ -722,7 +824,7 @@ impl RuntimeConfigBuilder {
             }
 
             for idx in remove_idx {
-                let listener = cfg.listeners.remove(idx);
+                let listener = cfg.binds.remove(idx);
                 warn!("remove duplicated listener {:?}", listener);
             }
         }
@@ -732,12 +834,16 @@ impl RuntimeConfigBuilder {
         std::mem::swap(&mut proxy_servers, &mut cfg.proxy_servers);
 
         RuntimeConfig {
+            conf_dir,
+            conf_file,
             inner: cfg,
-            domain_rule_map,
+            rule_groups: self.rule_groups,
+            domain_rule_group_map,
             bogus_nxdomain,
             blacklist_ip,
             whitelist_ip,
             ignore_ip,
+            ip_alias,
             proxy_servers: Arc::new(proxy_servers),
         }
     }
@@ -765,16 +871,26 @@ impl RuntimeConfigBuilder {
         self
     }
 
-    pub fn load_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn std::error::Error>> {
-        let path = resolve_filepath(path, self.conf_file.as_ref());
+    pub fn with_conf_file<P: AsRef<Path>>(mut self, path: P) -> Self {
+        self.conf_file = path.as_ref().to_path_buf();
+        self
+    }
+
+    pub fn with_conf_dir<P: AsRef<Path>>(mut self, path: P) -> Self {
+        self.conf_dir = path.as_ref().to_path_buf();
+        self
+    }
+
+    pub fn load(&mut self) -> anyhow::Result<()> {
+        self.load_file(self.conf_file.clone())?;
+        Ok(())
+    }
+
+    pub fn load_file<P: AsRef<Path>>(&mut self, path: P) -> anyhow::Result<()> {
+        let path = self.resolve_filepath(path);
 
         if path.exists() {
-            if self.conf_file.is_none() {
-                info!("loading configuration from: {:?}", path);
-                self.conf_file = Some(path.clone());
-            } else {
-                debug!("loading extra configuration from {:?}", path);
-            }
+            debug!("loading extra configuration from {:?}", path);
             let file = File::open(path)?;
             let reader = BufReader::new(file);
             for line in reader.lines().map_while(Result::ok) {
@@ -793,6 +909,15 @@ impl RuntimeConfigBuilder {
             return;
         }
         use crate::config::parser::OneConfig::*;
+        let rule_group = match self.rule_group_stack.last_mut() {
+            Some((_, rule_group)) => rule_group,
+            None => {
+                self.rule_group_stack
+                    .push((DEFAULT_GROUP.to_string(), RuleGroup::default()));
+                &mut self.rule_group_stack.last_mut().unwrap().1
+            }
+        };
+
         match parser::parse_config(line) {
             Ok((_, config_item)) => match config_item {
                 AuditEnable(v) => self.audit.enable = Some(v),
@@ -800,16 +925,16 @@ impl RuntimeConfigBuilder {
                 AuditFileMode(v) => self.audit.file_mode = Some(v),
                 AuditNum(v) => self.audit.num = Some(v),
                 AuditSize(v) => self.audit.size = Some(v),
-                BindCertFile(v) => self.bind_cert_file = Some(v),
-                BindCertKeyFile(v) => self.bind_cert_key_file = Some(v),
+                BindCertFile(v) => self.bind_cert_file = Some(self.resolve_filepath(v)),
+                BindCertKeyFile(v) => self.bind_cert_key_file = Some(self.resolve_filepath(v)),
                 BindCertKeyPass(v) => self.bind_cert_key_pass = Some(v),
                 CacheFile(v) => self.cache.file = Some(v),
                 CachePersist(v) => self.cache.persist = Some(v),
                 CacheCheckpointTime(v) => self.cache.checkpoint_time = Some(v),
-                CNAME(v) => self.cnames.push(v),
+                CNAME(v) => rule_group.cnames.push(v),
                 ExpandPtrFromAddress(v) => self.expand_ptr_from_address = Some(v),
                 NftSet(v) => self.nftsets.push(v),
-                HttpsRecord(v) => self.https_records.push(v),
+                HttpsRecord(v) => rule_group.https_records.push(v),
                 Server(server) => self.nameservers.push(server),
                 ResponseMode(mode) => self.response_mode = Some(mode),
                 ResolvHostname(v) => self.resolv_hostname = Some(v),
@@ -834,7 +959,7 @@ impl RuntimeConfigBuilder {
                 RrTtlMin(v) => self.rr_ttl_min = Some(v),
                 RrTtlMax(v) => self.rr_ttl_max = Some(v),
                 RrTtlReplyMax(v) => self.rr_ttl_reply_max = Some(v),
-                Listener(listener) => self.listeners.push(listener),
+                Listener(listener) => self.binds.push(listener),
                 LocalTtl(v) => self.local_ttl = Some(v),
                 LogConsole(v) => self.log.console = Some(v),
                 LogNum(v) => self.log.num = Some(v),
@@ -844,31 +969,35 @@ impl RuntimeConfigBuilder {
                 LogFilter(v) => self.log.filter = Some(v),
                 LogSize(v) => self.log.size = Some(v),
                 MaxReplyIpNum(v) => self.max_reply_ip_num = Some(v),
-                BlacklistIp(v) => self.blacklist_ip += v,
-                BogusNxDomain(v) => self.bogus_nxdomain += v,
-                WhitelistIp(v) => self.whitelist_ip += v,
-                IgnoreIp(v) => self.ignore_ip += v,
+                BlacklistIp(v) => self.blacklist_ip.push(v),
+                BogusNxDomain(v) => self.bogus_nxdomain.push(v),
+                WhitelistIp(v) => self.whitelist_ip.push(v),
+                IgnoreIp(v) => self.ignore_ip.push(v),
                 CaFile(v) => self.ca_file = Some(v),
                 CaPath(v) => self.ca_path = Some(v),
                 ConfFile(v) => {
                     if !self.loaded_files.contains(&v) {
                         self.load_file(v.clone()).expect("load_file failed");
+                        if let Some(dir) = v.parent() {
+                            self.dirs.insert(dir.to_path_buf());
+                        }
+
                         self.loaded_files.insert(v);
                     }
                 }
                 DnsmasqLeaseFile(v) => self.dnsmasq_lease_file = Some(v),
                 ResolvFile(v) => self.resolv_file = Some(v),
-                SrvRecord(v) => self.srv_records.push(v),
-                DomainRule(v) => self.domain_rules.push(v),
-                ForwardRule(v) => self.forward_rules.push(v),
+                SrvRecord(v) => rule_group.srv_records.push(v),
+                DomainRule(v) => rule_group.domain_rules.push(v),
+                ForwardRule(v) => rule_group.forward_rules.push(v),
                 User(v) => self.user = Some(v),
                 TcpIdleTime(v) => self.tcp_idle_time = Some(v),
                 EdnsClientSubnet(v) => self.edns_client_subnet = Some(v),
-                Address(v) => self.address_rules.push(v),
+                Address(v) => rule_group.address_rules.push(v),
                 DomainSetProvider(mut v) => {
                     use crate::config::DomainSetProvider;
                     if let DomainSetProvider::File(provider) = &mut v {
-                        provider.file = resolve_filepath(&provider.file, self.conf_file.as_ref());
+                        provider.file = self.resolve_filepath(&provider.file);
                     }
                     self.domain_set_providers
                         .entry(v.name().to_string())
@@ -879,14 +1008,58 @@ impl RuntimeConfigBuilder {
                     self.proxy_servers.insert(v.name.clone(), v.config);
                 }
                 HostsFile(file) => self.hosts_file = Some(file),
+                IpSetProvider(p) => {
+                    let path = resolve_filepath(&p.file, Some(&self.conf_file));
+                    match std::fs::read_to_string(path) {
+                        Ok(text) => {
+                            let net = self.ip_sets.entry(p.name.clone()).or_default();
+                            let len = net.len();
+                            net.extend(parse_ip_set_file(&text));
+                            log::info!("IpSet load {} records into {}", net.len() - len, p.name);
+                        }
+                        Err(err) => {
+                            log::error!("IpSet load failed {} {}", p.name, err);
+                        }
+                    }
+                }
                 MdnsLookup(enable) => self.mdns_lookup = Some(enable),
-                // #[allow(unreachable_patterns)]
-                // c => log::warn!("unhandled config {:?}", c),
+                IpAlias(alias) => self.ip_alias.push(alias),
+                GroupBegin(v) => {
+                    self.rule_group_stack
+                        .push((v.clone(), RuleGroup::default()));
+                }
+                GroupEnd => {
+                    if let Some((name, rule_group)) = self.rule_group_stack.pop() {
+                        let group = self.rule_groups.entry(name).or_default();
+                        group.merge(rule_group);
+                    }
+                }
+                ClientRule(client_rule) => self.client_rules.push(client_rule),
             },
             Err(err) => {
                 warn!("unknown conf: {}, {:?}", line, err);
             }
         }
+    }
+
+    #[inline]
+    fn resolve_filepath<P: AsRef<Path>>(&self, filepath: P) -> PathBuf {
+        let path = resolve_filepath(filepath, Some(&self.conf_file));
+
+        if path.exists() {
+            return path;
+        }
+        let Some(name) = path.file_name() else {
+            return path;
+        };
+
+        for dir in self.dirs.iter() {
+            let p = dir.join(name);
+            if p.is_file() {
+                return p;
+            }
+        }
+        path
     }
 }
 
@@ -957,7 +1130,7 @@ mod tests {
     use crate::{dns::DomainRuleGetter, libdns::Protocol};
     use byte_unit::Byte;
 
-    use crate::config::{HttpsListenerConfig, ListenerAddress, ServerOpts, SslConfig};
+    use crate::config::{BindAddr, HttpsBindAddrConfig, ServerOpts, SslConfig};
 
     use super::*;
 
@@ -970,23 +1143,23 @@ mod tests {
             .build();
 
         assert_eq!(
-            cfg.listeners()
+            cfg.binds()
                 .iter()
-                .filter(|x| matches!(x, ListenerConfig::Tcp(_)))
+                .filter(|x| matches!(x, BindAddrConfig::Tcp(_)))
                 .count(),
             0
         );
         assert_eq!(
-            cfg.listeners()
+            cfg.binds()
                 .iter()
-                .filter(|x| matches!(x, ListenerConfig::Tls(_)))
+                .filter(|x| matches!(x, BindAddrConfig::Tls(_)))
                 .count(),
             1
         );
         assert_eq!(
-            cfg.listeners()
+            cfg.binds()
                 .iter()
-                .filter(|x| matches!(x, ListenerConfig::Https(_)))
+                .filter(|x| matches!(x, BindAddrConfig::Https(_)))
                 .count(),
             1
         );
@@ -999,14 +1172,11 @@ mod tests {
             .with("bind 0.0.0.0:4453@eth100")
             .build();
 
-        assert_eq!(cfg.listeners().len(), 1);
+        assert_eq!(cfg.binds().len(), 1);
 
-        let bind = cfg.listeners().first().unwrap();
+        let bind = cfg.binds().first().unwrap();
 
-        assert_eq!(
-            bind.listen(),
-            ListenerAddress::V4("0.0.0.0".parse().unwrap())
-        );
+        assert_eq!(bind.addr(), BindAddr::V4("0.0.0.0".parse().unwrap()));
         assert_eq!(bind.port(), 4453);
 
         assert_eq!(bind.device(), Some("eth100"));
@@ -1018,19 +1188,19 @@ mod tests {
             .with("bind-https 0.0.0.0:443@eth2 -no-rule-addr")
             .build();
 
-        let listener = cfg.listeners().first().unwrap();
+        let listener = cfg.binds().first().unwrap();
 
         assert_eq!(
             listener,
-            &ListenerConfig::Https(HttpsListenerConfig {
-                listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+            &BindAddrConfig::Https(HttpsBindAddrConfig {
+                addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                 port: 443,
                 device: Some("eth2".to_string()),
                 opts: ServerOpts {
                     no_rule_addr: Some(true),
                     ..Default::default()
                 },
-                ssl_config: Default::default()
+                ..Default::default()
             })
         );
     }
@@ -1045,14 +1215,14 @@ mod tests {
 
         let cfg = cfg.build();
 
-        assert!(!cfg.listeners().is_empty());
+        assert!(!cfg.binds().is_empty());
 
-        let listener = cfg.listeners().first().unwrap();
+        let listener = cfg.binds().first().unwrap();
 
         assert_eq!(
             listener,
-            &ListenerConfig::Https(HttpsListenerConfig {
-                listen: ListenerAddress::V4("0.0.0.0".parse().unwrap()),
+            &BindAddrConfig::Https(HttpsBindAddrConfig {
+                addr: BindAddr::V4("0.0.0.0".parse().unwrap()),
                 port: 4453,
                 ssl_config: SslConfig {
                     server_name: Some("dns.example.com".to_string()),
@@ -1062,8 +1232,7 @@ mod tests {
                     ),
                     certificate_key_pass: None
                 },
-                device: None,
-                opts: Default::default()
+                ..Default::default()
             })
         );
     }
@@ -1178,11 +1347,19 @@ mod tests {
 
     #[test]
     fn test_config_address_soa() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("address /test.example.com/#");
+        builder.config("address /test.example.com/#");
 
-        let domain_addr_rule = cfg.address_rules.last().unwrap();
+        let cfg = builder.build();
+
+        let domain_addr_rule = cfg
+            .rule_groups
+            .get(DEFAULT_GROUP)
+            .unwrap()
+            .address_rules
+            .last()
+            .unwrap();
 
         assert_eq!(
             domain_addr_rule.domain,
@@ -1194,19 +1371,30 @@ mod tests {
 
     #[test]
     fn test_config_domain_rules_without_args() {
-        let mut cfg = RuntimeConfig::builder();
-        cfg.config("domain-set -name domain-forwarding-list -file tests/test_data/block-list.txt");
-        cfg.config("domain-rules /domain-set:domain-forwarding-list/");
-        assert!(cfg.address_rules.last().is_none());
+        let mut builder = RuntimeConfig::builder();
+        builder
+            .config("domain-set -name domain-forwarding-list -file tests/test_data/block-list.txt");
+        builder.config("domain-rules /domain-set:domain-forwarding-list/");
+        let cfg = builder.build();
+        assert!(
+            cfg.rule_groups
+                .get(DEFAULT_GROUP)
+                .unwrap()
+                .address_rules
+                .last()
+                .is_none()
+        );
     }
 
     #[test]
     fn test_config_address_soa_v4() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("address /test.example.com/#4");
+        builder.config("address /test.example.com/#4");
 
-        let domain_addr_rule = cfg.address_rules.last().unwrap();
+        let cfg = builder.build();
+
+        let domain_addr_rule = cfg.rule_group(DEFAULT_GROUP).address_rules.last().unwrap();
 
         assert_eq!(
             domain_addr_rule.domain,
@@ -1218,11 +1406,13 @@ mod tests {
 
     #[test]
     fn test_config_address_soa_v6() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("address /test.example.com/#6");
+        builder.config("address /test.example.com/#6");
 
-        let domain_addr_rule = cfg.address_rules.last().unwrap();
+        let cfg = builder.build();
+
+        let domain_addr_rule = cfg.rule_group(DEFAULT_GROUP).address_rules.last().unwrap();
 
         assert_eq!(
             domain_addr_rule.domain,
@@ -1234,11 +1424,12 @@ mod tests {
 
     #[test]
     fn test_config_address_ignore() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("address /test.example.com/-");
+        builder.config("address /test.example.com/-");
 
-        let domain_addr_rule = cfg.address_rules.last().unwrap();
+        let cfg = builder.build();
+        let domain_addr_rule = cfg.rule_group(DEFAULT_GROUP).address_rules.last().unwrap();
 
         assert_eq!(
             domain_addr_rule.domain,
@@ -1250,11 +1441,12 @@ mod tests {
 
     #[test]
     fn test_config_address_ignore_v4() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("address /test.example.com/-4");
+        builder.config("address /test.example.com/-4");
 
-        let domain_addr_rule = cfg.address_rules.last().unwrap();
+        let cfg = builder.build();
+        let domain_addr_rule = cfg.rule_group(DEFAULT_GROUP).address_rules.last().unwrap();
 
         assert_eq!(
             domain_addr_rule.domain,
@@ -1266,11 +1458,12 @@ mod tests {
 
     #[test]
     fn test_config_address_ignore_v6() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("address /test.example.com/-6");
+        builder.config("address /test.example.com/-6");
 
-        let domain_addr_rule = cfg.address_rules.first().unwrap();
+        let cfg = builder.build();
+        let domain_addr_rule = cfg.rule_group(DEFAULT_GROUP).address_rules.first().unwrap();
 
         assert_eq!(
             domain_addr_rule.domain,
@@ -1288,13 +1481,17 @@ mod tests {
             .build();
 
         assert_eq!(
-            cfg.find_domain_rule(&"cloudflare.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"cloudflare.com".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             Some(AddressRuleValue::SOA)
         );
 
         assert_eq!(
-            cfg.find_domain_rule(&"google.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"google.com".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             Some(AddressRuleValue::IGN)
         );
@@ -1306,13 +1503,17 @@ mod tests {
             .with("address /-.example.com/#")
             .build();
         assert_eq!(
-            cfg.find_domain_rule(&"example.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"example.com".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             Some(AddressRuleValue::SOA)
         );
 
         assert_eq!(
-            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"aa.example.com".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             None
         );
@@ -1322,13 +1523,17 @@ mod tests {
     fn test_config_address_wildcard_2() {
         let cfg = RuntimeConfig::builder().with("address /*/#").build();
         assert_eq!(
-            cfg.find_domain_rule(&"localhost".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"localhost".parse().unwrap())
+                .cloned()
                 .get_ref(|n| n.address.as_ref()),
             Some(&AddressRuleValue::SOA)
         );
 
         assert_eq!(
-            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"aa.example.com".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             None
         );
@@ -1338,13 +1543,17 @@ mod tests {
     fn test_config_address_wildcard_3() {
         let cfg = RuntimeConfig::builder().with("address /+/#").build();
         assert_eq!(
-            cfg.find_domain_rule(&"localhost".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"localhost".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             Some(AddressRuleValue::SOA)
         );
 
         assert_eq!(
-            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"aa.example.com".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             Some(AddressRuleValue::SOA)
         );
@@ -1354,13 +1563,17 @@ mod tests {
     fn test_config_address_wildcard_4() {
         let cfg = RuntimeConfig::builder().with("address /./#").build();
         assert_eq!(
-            cfg.find_domain_rule(&"localhost".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"localhost".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             Some(AddressRuleValue::SOA)
         );
 
         assert_eq!(
-            cfg.find_domain_rule(&"aa.example.com".parse().unwrap())
+            cfg.domain_rule_group("default")
+                .find(&"aa.example.com".parse().unwrap())
+                .cloned()
                 .get(|n| n.address.clone()),
             Some(AddressRuleValue::SOA)
         );
@@ -1368,11 +1581,18 @@ mod tests {
 
     #[test]
     fn test_config_nameserver() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("nameserver /doh.pub/bootstrap");
+        builder.config("nameserver /doh.pub/bootstrap");
 
-        let nameserver_rule = cfg.forward_rules.first().unwrap();
+        let cfg = builder.build();
+        let nameserver_rule = cfg
+            .rule_groups
+            .get(DEFAULT_GROUP)
+            .unwrap()
+            .forward_rules
+            .first()
+            .unwrap();
 
         assert_eq!(
             nameserver_rule.domain,
@@ -1384,11 +1604,12 @@ mod tests {
 
     #[test]
     fn test_config_domain_rule() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("domain-rule /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
+        builder.config("domain-rule /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
-        let domain_rule = cfg.domain_rules.first().unwrap();
+        let cfg = builder.build();
+        let domain_rule = cfg.rule_group(DEFAULT_GROUP).domain_rules.first().unwrap();
 
         assert_eq!(domain_rule.domain, Domain::Name("doh.pub".parse().unwrap()));
         assert_eq!(
@@ -1408,11 +1629,12 @@ mod tests {
 
     #[test]
     fn test_config_domain_rule_2() {
-        let mut cfg = RuntimeConfig::builder();
+        let mut builder = RuntimeConfig::builder();
 
-        cfg.config("domain-rules /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
+        builder.config("domain-rules /doh.pub/ -c ping -a 127.0.0.1 -n test -d yes");
 
-        let domain_rule = cfg.domain_rules.first().unwrap();
+        let cfg = builder.build();
+        let domain_rule = cfg.rule_group(DEFAULT_GROUP).domain_rules.first().unwrap();
 
         assert_eq!(domain_rule.domain, Domain::Name("doh.pub".parse().unwrap()));
         assert_eq!(
@@ -1436,7 +1658,11 @@ mod tests {
             .with("domain-rules /doh.pub/ -c ping -a # -n test -d yes")
             .build();
 
-        let domain_rule = cfg.find_domain_rule(&"doh.pub".parse().unwrap()).unwrap();
+        let domain_rule = cfg
+            .domain_rule_group("default")
+            .find(&"doh.pub".parse().unwrap())
+            .cloned()
+            .unwrap();
 
         assert_eq!(domain_rule.name(), &"doh.pub".parse().unwrap());
         assert_eq!(domain_rule.address, Some(AddressRuleValue::SOA));
@@ -1520,14 +1746,27 @@ mod tests {
 
     #[test]
     fn test_parse_load_config_file_b() {
-        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
 
         assert_eq!(cfg.server_name, "SmartDNS123".parse().ok());
         assert_eq!(
-            cfg.forward_rules.first().unwrap().domain,
+            cfg.rule_group(DEFAULT_GROUP)
+                .forward_rules
+                .first()
+                .unwrap()
+                .domain,
             Domain::Name("doh.pub".parse().unwrap())
         );
-        assert_eq!(cfg.forward_rules.first().unwrap().nameserver, "bootstrap");
+        assert_eq!(
+            cfg.rule_group(DEFAULT_GROUP)
+                .forward_rules
+                .first()
+                .unwrap()
+                .nameserver,
+            "bootstrap"
+        );
     }
 
     #[test]
@@ -1545,7 +1784,9 @@ mod tests {
     fn test_domain_set() {
         use crate::collections::DomainSet;
 
-        let cfg = RuntimeConfig::load_from_file("tests/test_data/b_main.conf");
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
 
         assert!(!cfg.domain_set_providers.is_empty());
 
@@ -1571,7 +1812,83 @@ mod tests {
     #[test]
     fn test_parse_https_record() {
         let cfg = RuntimeConfig::builder().with("https-record #").build();
-        assert_eq!(cfg.https_records.len(), 1);
-        assert_eq!(cfg.https_records[0].config, HttpsRecordRule::SOA);
+        assert_eq!(cfg.rule_group(DEFAULT_GROUP).https_records.len(), 1);
+        assert_eq!(
+            cfg.rule_group(DEFAULT_GROUP).https_records[0].config,
+            HttpsRecordRule::SOA
+        );
+    }
+
+    #[test]
+    fn test_ip_set() {
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
+
+        let v4: Vec<_> = include_str!("../tests/test_data/cf-ipv4.txt")
+            .lines()
+            .map(|line| line.parse().unwrap())
+            .collect();
+        let v6: Vec<_> = include_str!("../tests/test_data/cf-ipv6.txt")
+            .lines()
+            .map(|line| line.parse().unwrap())
+            .collect();
+        let all: [&[_]; 3] = [&["1.1.1.1/32".parse().unwrap()], &v4, &v6];
+        let all = IpSet::new(all.into_iter().flatten().copied());
+
+        assert_eq!(cfg.ip_sets["cf-ipv4"], v4);
+        assert_eq!(cfg.ip_sets["cf-ipv6"], v6);
+        assert_eq!(*cfg.whitelist_ip, all);
+    }
+
+    #[test]
+    fn test_ip_alias() {
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build();
+        let addr = |s: &str| s.parse::<IpAddr>().unwrap();
+        let get_alias = |s: &str| &**cfg.ip_alias.get(&addr(s)).unwrap();
+
+        assert_eq!(get_alias("104.16.0.0"), [addr("1.2.3.4"), addr("::5678")]);
+        assert_eq!(get_alias("2400:cb00::"), [addr("::1234"), addr("5.6.7.8")]);
+        assert_eq!(get_alias("172.64.0.0"), [addr("90AB::CDEF")]);
+    }
+
+    #[test]
+    fn test_rule_group() {
+        let cfg = RuntimeConfig::builder()
+            .with("address /example.com/1.2.3.4")
+            .with("group-begin a")
+            .with("address /example.com/1.2.3.5")
+            .with("group-end")
+            .with("group-begin b")
+            .with("address /example.com/1.2.3.6")
+            .build();
+
+        let g0 = cfg.rule_group("default");
+        let g1 = cfg.rule_group("a");
+        let g2 = cfg.rule_group("b");
+
+        assert_eq!(
+            g0.address_rules.first().unwrap().address,
+            AddressRuleValue::Addr {
+                v4: Some(vec!["1.2.3.4".parse().unwrap()].into()),
+                v6: None
+            }
+        );
+        assert_eq!(
+            g1.address_rules.first().unwrap().address,
+            AddressRuleValue::Addr {
+                v4: Some(vec!["1.2.3.5".parse().unwrap()].into()),
+                v6: None
+            }
+        );
+        assert_eq!(
+            g2.address_rules.first().unwrap().address,
+            AddressRuleValue::Addr {
+                v4: Some(vec!["1.2.3.6".parse().unwrap()].into()),
+                v6: None
+            }
+        );
     }
 }

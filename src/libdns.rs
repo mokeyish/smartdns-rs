@@ -35,3 +35,30 @@ pub mod resolver {
 }
 
 pub use proto::xfer::Protocol;
+
+pub trait ProtocolDefaultPort {
+    fn default_port(&self) -> u16;
+    fn is_default_port(&self, port: u16) -> bool {
+        self.default_port() == port
+    }
+}
+
+impl ProtocolDefaultPort for Protocol {
+    fn default_port(&self) -> u16 {
+        use Protocol::*;
+        match *self {
+            Udp => 53,
+            Tcp => 53,
+            Tls => 853,
+            #[cfg(feature = "dns-over-https")]
+            Https => 443,
+            #[cfg(feature = "dns-over-h3")]
+            H3 => 443,
+            #[cfg(feature = "dns-over-quic")]
+            Quic => 853,
+            #[cfg(feature = "mdns")]
+            Mdns => 5353,
+            _ => unimplemented!(),
+        }
+    }
+}

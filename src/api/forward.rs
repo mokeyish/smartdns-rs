@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{Json, extract::State, response::IntoResponse};
+use byte_unit::rust_decimal::str;
 
-use super::openapi::{http::get, routes, IntoRouter};
+use crate::config::ForwardRule;
+use serde::{Deserialize, Serialize};
+
+use super::openapi::{IntoRouter, http::get, routes};
 use super::{IntoDataListPayload, ServeState, StatefulRouter};
 
 pub fn routes() -> StatefulRouter {
@@ -16,8 +20,21 @@ async fn forwards(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
             .app
             .cfg()
             .await
-            .forward_rules()
-            .clone()
+            .rule_groups()
+            .iter()
+            .map(|(n, rules)| ForwardRuleGroup {
+                name: n.clone(),
+                count: rules.forward_rules.len(),
+                forwards: rules.forward_rules.clone(),
+            })
+            .collect::<Vec<_>>()
             .into_data_list_payload(),
     )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ForwardRuleGroup {
+    name: String,
+    count: usize,
+    forwards: Vec<ForwardRule>,
 }

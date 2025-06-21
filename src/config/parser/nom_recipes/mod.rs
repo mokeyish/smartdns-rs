@@ -1,3 +1,8 @@
+#[cfg(feature = "nom-recipes-mac")]
+mod mac_addr;
+#[cfg(feature = "nom-recipes-mac")]
+pub use mac_addr::mac_addr;
+
 #[cfg(feature = "nom-recipes-ipv4")]
 mod ipv4;
 #[cfg(feature = "nom-recipes-ipv4")]

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::Query;
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{
     body::Bytes,
@@ -12,8 +12,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::openapi::{
+    IntoParams, IntoRouter, ToSchema,
     http::{get, post},
-    routes, IntoParams, IntoRouter, ToSchema,
+    routes,
 };
 use super::{ServeState, StatefulRouter};
 use crate::{dns::SerialMessage, libdns::Protocol, log};
@@ -133,7 +134,7 @@ async fn process(
         };
         (
             APPLICATION_JSON,
-            serde_json::to_vec(&DnsResponse::from(message))?,
+            serde_json::to_vec(&DnsResponse::from(message.as_ref()))?,
         )
     };
 
@@ -217,8 +218,8 @@ struct Answer {
     data: String,
 }
 
-impl From<crate::libdns::proto::op::Message> for DnsResponse {
-    fn from(message: crate::libdns::proto::op::Message) -> Self {
+impl From<&crate::libdns::proto::op::Message> for DnsResponse {
+    fn from(message: &crate::libdns::proto::op::Message) -> Self {
         DnsResponse {
             status: message.response_code().into(),
             TC: message.truncated(),

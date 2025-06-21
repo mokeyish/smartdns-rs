@@ -1,3 +1,6 @@
+#[cfg(feature = "dns-over-h3")]
+mod h3;
+mod http;
 #[cfg(feature = "dns-over-https")]
 mod https;
 mod net;
@@ -8,7 +11,11 @@ mod tcp;
 mod tls;
 mod udp;
 
-use crate::libdns::proto::op::{Header, Message, MessageType, ResponseCode};
+use crate::{
+    config::SslConfig,
+    dns_conf::RuntimeConfig,
+    libdns::proto::op::{Header, Message, MessageType, ResponseCode},
+};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::Path,
@@ -24,133 +31,196 @@ use tokio::{
 
 use crate::{
     app::App,
-    config::{IListenerConfig as _, ListenerConfig, ServerOpts},
+    config::{BindAddrConfig, IBindConfig as _, ServerOpts},
     dns::{DnsRequest, SerialMessage},
 };
 
-pub async fn serve(
-    app: &Arc<App>,
-    listener_config: &ListenerConfig,
+pub fn serve(
+    app: &App,
+    cfg: &RuntimeConfig,
+    bind_addr_config: &BindAddrConfig,
     handle: &DnsHandle,
     idle_time: u64,
     certificate_file: Option<&Path>,
     certificate_key_file: Option<&Path>,
 ) -> Result<ServerHandle, crate::Error> {
-    use crate::rustls::load_certificate_and_key;
+    use crate::rustls::TlsServerCertResolver;
     use net::{bind_to, setup_tcp_socket, setup_udp_socket};
     use std::time::Duration;
 
-    let dns_handle = handle.with_new_opt(listener_config.server_opts().clone());
+    let dns_handle = handle.with_new_opt(bind_addr_config.server_opts().clone());
 
-    let token = match listener_config {
-        ListenerConfig::Udp(listener) => {
-            let udp_socket = bind_to(
+    fn create_cert_resolver(
+        ssl_config: &SslConfig,
+        certificate_file: Option<&Path>,
+        certificate_key_file: Option<&Path>,
+        typ: &'static str,
+    ) -> Result<Arc<TlsServerCertResolver>, crate::Error> {
+        let certificate_file = ssl_config
+            .certificate
+            .as_deref()
+            .or(certificate_file)
+            .ok_or(crate::Error::CertificatePathNotDefined(typ))?;
+        let certificate_key_file = ssl_config
+            .certificate_key
+            .as_deref()
+            .or(certificate_key_file)
+            .ok_or(crate::Error::CertificateKeyPathNotDefined(typ))?;
+        let resolver = TlsServerCertResolver::new(certificate_file, certificate_key_file)?;
+        Ok(Arc::new(resolver))
+    }
+
+    let token = match bind_addr_config {
+        BindAddrConfig::Udp(bind_addr_config) => {
+            let socket = bind_to(
                 setup_udp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 "UDP",
             );
-            udp::serve(udp_socket, dns_handle)
+            udp::serve(socket, dns_handle)
         }
-        ListenerConfig::Tcp(listener) => {
-            let tcp_listener = bind_to(
+        BindAddrConfig::Tcp(bind_addr_config) => {
+            let listener = bind_to(
                 setup_tcp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 "TCP",
             );
-            tcp::serve(tcp_listener, dns_handle, Duration::from_secs(idle_time))
+            tcp::serve(listener, dns_handle, Duration::from_secs(idle_time))
         }
         #[cfg(feature = "dns-over-tls")]
-        ListenerConfig::Tls(listener) => {
+        BindAddrConfig::Tls(bind_addr_config) => {
             const LISTENER_TYPE: &str = "DNS over TLS";
-            let ssl_config = &listener.ssl_config;
+            let ssl_config = &bind_addr_config.ssl_config;
 
-            let (certificate, certificate_key) = load_certificate_and_key(
+            let server_cert_resolver = create_cert_resolver(
                 ssl_config,
                 certificate_file,
                 certificate_key_file,
                 LISTENER_TYPE,
             )?;
 
-            let tls_listener = bind_to(
+            let listener = bind_to(
                 setup_tcp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 LISTENER_TYPE,
             );
 
             tls::serve(
-                tls_listener,
+                listener,
                 dns_handle,
                 Duration::from_secs(idle_time),
-                (certificate.clone(), certificate_key.clone_key()),
+                server_cert_resolver,
             )?
         }
-        #[cfg(feature = "dns-over-https")]
-        ListenerConfig::Https(listener) => {
-            const LISTENER_TYPE: &str = "DNS over HTTPS";
-            let ssl_config = &listener.ssl_config;
+        BindAddrConfig::Http(bind_addr_config) => {
+            const LISTENER_TYPE: &str = "DNS over HTTP";
 
-            let (certificate, certificate_key) = load_certificate_and_key(
-                ssl_config,
-                certificate_file,
-                certificate_key_file,
-                LISTENER_TYPE,
-            )?;
-
-            let https_listener = bind_to(
+            let listener = bind_to(
                 setup_tcp_socket,
-                listener.sock_addr(),
-                listener.device(),
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
                 LISTENER_TYPE,
             );
 
             let app = app.clone();
-            https::serve(
-                app,
-                https_listener,
-                dns_handle,
-                (certificate.clone(), certificate_key.clone_key()),
-            )?
-        }
-        #[cfg(feature = "dns-over-quic")]
-        ListenerConfig::Quic(listener) => {
-            const LISTENER_TYPE: &str = "DNS over QUIC";
-            let ssl_config = &listener.ssl_config;
 
-            let (certificate, certificate_key) = load_certificate_and_key(
+            http::serve(app, listener, dns_handle)?
+        }
+        #[cfg(feature = "dns-over-https")]
+        BindAddrConfig::Https(bind_addr_config) => {
+            const LISTENER_TYPE: &str = "DNS over HTTPS";
+            let ssl_config = &bind_addr_config.ssl_config;
+
+            let server_cert_resolver = create_cert_resolver(
                 ssl_config,
                 certificate_file,
                 certificate_key_file,
                 LISTENER_TYPE,
             )?;
 
-            let quic_listener = bind_to(
+            let listener = bind_to(
+                setup_tcp_socket,
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
+                LISTENER_TYPE,
+            );
+
+            let app = app.clone();
+
+            let h3_port = cfg
+                .binds()
+                .iter()
+                .filter(|c| matches!(c, BindAddrConfig::H3(_)))
+                .map(|c| c.port())
+                .next();
+            https::serve(app, listener, dns_handle, server_cert_resolver, h3_port)?
+        }
+        #[cfg(feature = "dns-over-h3")]
+        BindAddrConfig::H3(bind_addr_config) => {
+            const LISTENER_TYPE: &str = "DNS over H3";
+            let ssl_config = &bind_addr_config.ssl_config;
+
+            let server_cert_resolver = create_cert_resolver(
+                ssl_config,
+                certificate_file,
+                certificate_key_file,
+                LISTENER_TYPE,
+            )?;
+
+            let listener = bind_to(
                 setup_udp_socket,
-                listener.sock_addr(),
-                listener.device(),
-                "QUIC",
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
+                LISTENER_TYPE,
+            );
+
+            let app = app.clone();
+            h3::serve(app, listener, dns_handle, server_cert_resolver)?
+        }
+        #[cfg(feature = "dns-over-quic")]
+        BindAddrConfig::Quic(bind_addr_config) => {
+            const LISTENER_TYPE: &str = "DNS over QUIC";
+            let ssl_config = &bind_addr_config.ssl_config;
+
+            let server_cert_resolver = create_cert_resolver(
+                ssl_config,
+                certificate_file,
+                certificate_key_file,
+                LISTENER_TYPE,
+            )?;
+
+            let listener = bind_to(
+                setup_udp_socket,
+                bind_addr_config.sock_addr(),
+                bind_addr_config.device(),
+                LISTENER_TYPE,
             );
 
             quic::serve(
-                quic_listener,
+                listener,
                 dns_handle,
                 Duration::from_secs(idle_time),
-                (certificate, certificate_key),
+                server_cert_resolver,
                 ssl_config.server_name.clone(),
             )?
         }
         #[cfg(not(feature = "dns-over-tls"))]
-        ListenerConfig::Tls(listener) => {
+        BindAddrConfig::Tls(_) => {
             warn!("Bind DoT not enabled")
         }
         #[cfg(not(feature = "dns-over-https"))]
-        ListenerConfig::Https(listener) => {
+        BindAddrConfig::Https(_) => {
             warn!("Bind DoH not enabled")
         }
+        #[cfg(not(feature = "dns-over-h3"))]
+        BindAddrConfig::H3(_) => {
+            warn!("Bind DoH3 not enabled")
+        }
         #[cfg(not(feature = "dns-over-quic"))]
-        ListenerConfig::Quic(listener) => {
+        BindAddrConfig::Quic(_) => {
             warn!("Bind DoQ not enabled")
         }
     };
@@ -174,17 +244,17 @@ impl From<CancellationToken> for ServerHandle {
 
 #[derive(Debug, Clone)]
 pub struct DnsHandle {
-    sender: mpsc::Sender<IncomingDnsMessage>,
+    sender: mpsc::UnboundedSender<IncomingDnsMessage>,
     opts: ServerOpts,
 }
 
 pub type IncomingDnsMessage = (SerialMessage, ServerOpts, oneshot::Sender<SerialMessage>);
 
-pub type IncomingDnsRequest = mpsc::Receiver<IncomingDnsMessage>;
+pub type IncomingDnsRequest = mpsc::UnboundedReceiver<IncomingDnsMessage>;
 
 impl DnsHandle {
-    pub fn new(buffer: Option<usize>) -> (IncomingDnsRequest, Self) {
-        let (tx, rx) = mpsc::channel(buffer.unwrap_or(10));
+    pub fn new() -> (IncomingDnsRequest, Self) {
+        let (tx, rx) = mpsc::unbounded_channel();
         (
             rx,
             Self {
@@ -198,8 +268,8 @@ impl DnsHandle {
         let message = message.into();
         let (tx, rx) = oneshot::channel();
 
-        if let Err(err) = self.sender.send((message, self.opts.clone(), tx)).await {
-            let message = err.0 .0;
+        if let Err(err) = self.sender.send((message, self.opts.clone(), tx)) {
+            let message = err.0.0;
             let addr = message.addr();
             let protocol = message.protocol();
             let request_header = DnsRequest::try_from(message)
