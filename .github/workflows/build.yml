@@ -109,46 +109,8 @@ jobs:
         env:
           USE_CROSS: ${{ matrix.os == 'ubuntu-latest' }}
 
-      - name: Prepare package
-        run: |
-          mkdir $DIST_DIR
-          cp LICENSE $DIST_DIR
-          cp README*.md $DIST_DIR
-          cp etc/smartdns/smartdns.conf $DIST_DIR
-          echo "Version: ${{ inputs.version }}" > $DIST_DIR/version
-          echo "Build date: $(date)" >> $DIST_DIR/version
-          echo "Commit: $(git rev-parse HEAD)" >> $DIST_DIR/version
-        shell: bash
-
-      - name: Publish archive
-        if: ${{ !contains(matrix.target, 'windows') && !contains(matrix.target, 'darwin') }}
-        env:
-          ARCHIVE_FILE: smartdns-${{ matrix.target }}-${{inputs.version}}.tar.gz
-        run: |
-          cp target/${{ matrix.target }}/release/smartdns $DIST_DIR
-          tar -zcvf $ARCHIVE_FILE $DIST_DIR
-          shasum -a256 $ARCHIVE_FILE > $ARCHIVE_FILE-sha256sum.txt
-          echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
-
-      - name: Publish zip archive macos
-        if: ${{ contains(matrix.target, 'darwin') }}
-        env:
-          ARCHIVE_FILE: smartdns-${{ matrix.target }}-${{inputs.version}}.zip
-        run: |
-          cp target/${{ matrix.target }}/release/smartdns $DIST_DIR
-          zip -9r $ARCHIVE_FILE $DIST_DIR
-          shasum -a256 $ARCHIVE_FILE > $ARCHIVE_FILE-sha256sum.txt
-          echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
-
-      - name: Publish zip archive windows
-        if: ${{ contains(matrix.target, 'windows') }}
-        env:
-          ARCHIVE_FILE: smartdns-${{ matrix.target }}-${{inputs.version}}.zip
-        run: |
-          cp target/${{ matrix.target }}/release/smartdns.exe $DIST_DIR
-          7z a -tzip $ARCHIVE_FILE $DIST_DIR
-          echo ${{ hashFiles(env.ARCHIVE_FILE) }} > $ARCHIVE_FILE-sha256sum.txt
-          echo "archive_file=$ARCHIVE_FILE" >> $GITHUB_ENV
+      - name: Package
+        run: just target=${{ matrix.target }} pack
         shell: bash
 
       - name: Upload artifact
@@ -156,7 +118,12 @@ jobs:
         with:
           name: smartdns-${{ matrix.target }}-${{ inputs.version || github.ref_name }}
           retention-days: 30
-          path: ${{ env.archive_file }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.msi
+            dist/*.exe
+            dist/*.sha256sum.txt
 
       - name: Publish release
         uses: softprops/action-gh-release@v2.2.2
@@ -166,8 +133,11 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
           tag_name: ${{ inputs.version }}
           files: |
-            ${{ env.archive_file }} 
-            ${{ env.archive_file }}-sha256sum.txt
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.msi
+            dist/*.exe
+            dist/*.sha256sum.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-docker:
