@@ -52,31 +52,13 @@ build *args: patch
 
 # Build Windows installer
 [windows]
-wix *args:
+wix: && wix-sha256sum
   #!/usr/bin/env sh
   # set -euxo pipefail
 
   wix --version >/dev/null 2>&1 || { echo "wix not installed"; exit 1; } # check if wix is installed
 
-  eval "args=({{args}})"
-
-  CONFIG="debug"
-
-  while true; do
-    case "${args[0]}"  in
-    -t | --target ) TARGET="${args[1]}"; args=("${args[@]:2}");;
-    -r | --release) CONFIG="release"; args=("${args[@]:1}");;
-    -- ) args=("${args[@]:1}"); break ;;
-    * ) args=("${args[@]:1}"); break ;;
-    esac
-  done
-
-  if [ -z "${TARGET}" ]; then
-    TARGET=$(rustc -vV | grep host | cut -d ' ' -f2)
-    SOURCE_DIR="./target/$CONFIG"
-  else
-    SOURCE_DIR="./target/$TARGET/$CONFIG"
-  fi
+  TARGET="{{target}}"
 
   if [[ "$TARGET" != *windows* ]]; then
     exit 0
@@ -94,15 +76,16 @@ wix *args:
     ;;
   esac
 
-  VERSION="$(just version)"
+  VERSION="{{version}}"
+  SOURCE_DIR="{{dist_dir}}/{{dist_name}}"
+  OUTPUT="{{dist_dir}}/{{dist_name}}-v{{version}}.msi"
 
   echo "Building Windows installer for $ARCH..."
   # echo "TARGET=$TARGET"
   # echo "ARCH=$ARCH"
-  # echo "CONFIG=$CONFIG"
   # echo "VERSION=$VERSION"
-  VERSION="$VERSION" TARGET="$TARGET" SOURCE_DIR="$SOURCE_DIR" wix build -arch $ARCH ./wix.wxs -o $SOURCE_DIR/smartdns-$ARCH-$VERSION.msi
-  echo "Saved to: $SOURCE_DIR/smartdns-$TARGET-v$VERSION.msi"
+  VERSION="$VERSION" TARGET="$TARGET" SOURCE_DIR="$SOURCE_DIR" wix build -arch $ARCH ./wix.wxs -o $OUTPUT
+  echo "Saved to: $OUTPUT"
 
 
 # Publish to Crates.io
@@ -110,7 +93,14 @@ publish *args: patch
   {{cargo}} publish --no-verify
 
 # Package the binary for distribution
+[unix]
 package: patch package-clean package-prepare && zip package-list
+  cp target/{{target}}/release/{{bin_name}}  {{dist_dir}}/{{dist_name}}
+
+
+# Package the binary for distribution
+[windows]
+package: patch package-clean package-prepare && zip wix package-list
   cp target/{{target}}/release/{{bin_name}}  {{dist_dir}}/{{dist_name}}
 
 [private]
@@ -149,6 +139,11 @@ zip: && zip-sha256sum
 [private]
 zip-sha256sum:
   echo {{sha256_file(dist_dir + "/" + dist_zip)}} > {{dist_dir}}/{{dist_zip}}-sha256sum.txt
+
+[private]
+[windows]
+wix-sha256sum:
+  echo {{sha256_file(dist_dir + "/" + dist_name + "-v" + version + ".msi" )}} > {{dist_dir}}/{{dist_name}}-v{{version}}.msi-sha256sum.txt
 
 # cleanup the workspace
 clean:
