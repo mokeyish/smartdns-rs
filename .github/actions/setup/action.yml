@@ -15,9 +15,14 @@ runs:
 
     - name: Install cross
       uses: taiki-e/install-action@v2
-      if: ${{ matrix.os == 'ubuntu-latest' }}
+      if: ${{ startsWith(matrix.os, 'ubuntu') }}
       with:
         tool: cross
+
+    - name: Install Wix Toolset 🛠
+      if: ${{ startsWith(matrix.os, 'windows') }}
+      shell: pwsh
+      run: dotnet tool install --global wix
 
     - name: Install cargo-edit
       uses: baptiste0928/cargo-install@v3

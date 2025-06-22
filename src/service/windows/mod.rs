@@ -14,7 +14,7 @@ use super::{
 mod shell_escape;
 mod windows_service;
 
-pub const BIN_PATH: &str = "C:\\Windows\\System32\\smartdns.exe";
+pub const BIN_PATH: &str = "C:\\Program Files\\SmartDNS\\smartdns.exe";
 pub const CONF_DIR: &str = "C:\\ProgramData\\smartdns";
 pub const CONF_PATH: &str = "C:\\ProgramData\\smartdns\\smartdns.conf";
 

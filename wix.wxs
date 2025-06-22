@@ -1,0 +1,85 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+	<?define ProductName = "SmartDNS" ?>
+	<?define ProductVersion = "$(env.VERSION)" ?>
+	<?define ProductDescription = "Rule-based DNS server for fast IP resolution, DoT/DoQ/DoH/DoH3 supported" ?>
+	<?define ProductURL = "https://github.com/mokeyish/smartdns-rs" ?>
+	<?define ApplicationFolderName = "SmartDNS" ?>
+	<?define Manufacturer = "YISH" ?>
+	<?define BinName = "smartdns.exe" ?>
+
+
+	<?define SourceDir = "$(env.SOURCE_DIR)" ?>
+
+	<Package Id="$(var.ProductName)" Name="$(var.ProductName)" Version="$(var.ProductVersion)" Manufacturer="$(var.Manufacturer)" Scope="perMachine">
+
+		<SummaryInformation Comments="$(var.ProductDescription)"/>
+
+		<MediaTemplate EmbedCab="yes" />
+
+		<Icon Id="icon.ico" SourceFile="./icon/icon.ico" />
+		<Property Id="ARPPRODUCTICON" Value="icon.ico" />
+		<Property Id='ARPHELPLINK' Value="$(var.ProductURL)" />
+		<Property Id="INSTALLER" Value="manual" />
+
+
+		<StandardDirectory Id="ProgramFiles6432Folder">
+			<Directory Id="InstallDir" Name="$(var.ProductName)" />
+		</StandardDirectory>
+
+		<StandardDirectory Id="CommonAppDataFolder">
+			<Directory Id="ConfDir" Name="$(var.ProductName)" />
+		</StandardDirectory>
+
+		<CustomAction Id="CreateSymlink" Directory="InstallDir" ExeCommand="cmd.exe /c mklink resolve.exe $(var.BinName)" Execute="deferred" Impersonate="no" Return="ignore" />
+
+		<CustomAction Id="RemoveSymlink" Directory="InstallDir" ExeCommand="cmd.exe /c del resolve.exe" Execute="deferred" Impersonate="no" Return="ignore" />
+
+
+
+		<Feature Id="MainFeature" AllowAbsent="no" Title="Main">
+			<Files Directory="InstallDir" Include="$(var.SourceDir)/**">
+				<Exclude Files="$(var.SourceDir)/$(var.BinName)" />
+				<Exclude Files="$(var.SourceDir)/smartdns.conf" />
+			</Files>
+			<ComponentRef Id="Config" />
+			<ComponentRef Id="Service" />
+			<ComponentRef Id="UpdatePathComponent" />
+		</Feature>
+
+		<InstallExecuteSequence>
+			<RemoveExistingProducts After="InstallValidate" />
+			<InstallFiles/>
+			<Custom Action="CreateSymlink" After="InstallFiles" Condition="(NOT Installed) AND (NOT UPGRADINGPRODUCTCODE) AND (NOT WIX_UPGRADE_DETECTED)" />
+			<Custom Action="RemoveSymlink" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
+			<RemoveFiles/>
+		</InstallExecuteSequence>
+
+	</Package>
+	<Fragment>
+
+
+
+		<Component Id="Config" Directory="ConfDir" Permanent="yes">
+			<File Source="$(var.SourceDir)/smartdns.conf" />
+		</Component>
+
+		<Component Id="Service" Directory="InstallDir" Guid="C32A1DA4-368D-48DC-A01B-B85BB9CA226A">
+
+			<File Source="$(var.SourceDir)/$(var.BinName)" KeyPath="yes" Vital="yes"/>
+
+			<ServiceInstall Id="ServiceInstaller" Name="$(var.ProductName)" DisplayName="$(var.ProductName)@$(var.ProductVersion)" Description="$(var.ProductName) $(var.ProductDescription)" Arguments="run -c &quot;[CommonAppDataFolder]$(var.ProductName)\smartdns.conf&quot; --ws7642ea814a90496daaa54f2820254f12" Type="ownProcess" Start="auto" Account="LocalSystem" ErrorControl="normal" Vital="yes" />
+
+			<ServiceControl Id="StartService" Name="$(var.ProductName)" Start="install" Wait="no" />
+			<ServiceControl Id="StopService" Name="$(var.ProductName)" Stop="uninstall" Remove="uninstall" Wait="yes" />
+
+		</Component>
+
+		<Component Id="UpdatePathComponent" Directory="InstallDir" Guid="143E6BDF-5FDD-4A2E-9780-4893E40AC6D2">
+
+			<Environment Id="AppendPath" Name="Path" Value="[InstallDir]" Action="set" Part="last" Permanent="no" System="yes" />
+
+		</Component>
+
+	</Fragment>
+</Wix>
