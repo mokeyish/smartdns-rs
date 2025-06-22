@@ -123,7 +123,7 @@ jobs:
             dist/*.tar.gz
             dist/*.msi
             dist/*.exe
-            dist/*.sha256sum.txt
+            dist/*sha256sum.txt
 
       - name: Publish release
         uses: softprops/action-gh-release@v2.2.2
@@ -137,7 +137,7 @@ jobs:
             dist/*.tar.gz
             dist/*.msi
             dist/*.exe
-            dist/*.sha256sum.txt
+            dist/*sha256sum.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   build-docker:
