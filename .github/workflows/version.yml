@@ -65,6 +65,7 @@ jobs:
         uses: ./.github/actions/setup
 
       - name: Publish to crates.io
+        continue-on-error: true
         run: just publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
