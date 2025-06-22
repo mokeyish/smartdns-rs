@@ -11,7 +11,7 @@ runs:
         target: ${{ matrix.target }}
 
     - name: Install just
-      uses: extractions/setup-just@v2
+      uses: extractions/setup-just@v3
 
     - name: Install cross
       uses: taiki-e/install-action@v2
