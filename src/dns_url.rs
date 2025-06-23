@@ -1,6 +1,9 @@
 #[cfg(feature = "mdns")]
 use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
-use crate::libdns::{Protocol, ProtocolDefaultPort};
+use crate::libdns::{
+    Protocol::{self, *},
+    ProtocolDefaultPort,
+};
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::net::SocketAddr;
@@ -146,15 +149,17 @@ impl FromStr for DnsUrl {
         let url = Url::parse(url.as_str())?;
 
         let mut proto = match url.scheme() {
-            "udp" => Protocol::Udp,
-            "tcp" => Protocol::Tcp,
-            "tls" => Protocol::Tls,
+            "udp" => Udp,
+            "tcp" => Tcp,
+            "tls" => Tls,
             #[cfg(feature = "dns-over-https")]
-            "https" => Protocol::Https,
+            "https" => Https,
             #[cfg(feature = "dns-over-quic")]
-            "quic" => Protocol::Quic,
+            "quic" => Quic,
             #[cfg(feature = "dns-over-h3")]
-            "h3" => Protocol::H3,
+            "h3" => H3,
+            #[cfg(feature = "mdns")]
+            "mdns" => Mdns,
             schema => return Err(DnsUrlParseErr::ProtocolNotSupport(schema.to_string())),
         };
 
@@ -169,35 +174,27 @@ impl FromStr for DnsUrl {
 
         if let Host::Domain(ref domain) = host {
             if let Ok(ip) = IpAddr::from_str(domain) {
-                #[cfg(feature = "mdns")]
-                {
-                    host = match ip {
-                        IpAddr::V4(ip) => {
-                            if MDNS_IPV4.ip().eq(&ip)
-                                && matches!(port, Some(port) if port == MDNS_IPV4.port())
-                            {
-                                proto = Protocol::Mdns;
-                            }
-                            Host::Ipv4(ip)
-                        }
-                        IpAddr::V6(ip) => {
-                            if MDNS_IPV6.ip().eq(&ip)
-                                && matches!(port, Some(port) if port == MDNS_IPV6.port())
-                            {
-                                proto = Protocol::Mdns;
-                            }
-                            Host::Ipv6(ip)
-                        }
-                    };
-                }
-                #[cfg(not(feature = "mdns"))]
-                {
-                    host = match ip {
-                        IpAddr::V4(ip) => Host::Ipv4(ip),
-                        IpAddr::V6(ip) => Host::Ipv6(ip),
-                    };
-                }
+                host = match ip {
+                    IpAddr::V4(ip) => Host::Ipv4(ip),
+                    IpAddr::V6(ip) => Host::Ipv6(ip),
+                };
             }
+        }
+
+        #[cfg(feature = "mdns")]
+        if proto != Mdns
+            && match port {
+                Some(port) if port == Mdns.default_port() => true,
+                None => true,
+                _ => false,
+            }
+            && match &host {
+                Host::Ipv4(ip) if MDNS_IPV4.ip().eq(ip) => true,
+                Host::Ipv6(ip) if MDNS_IPV6.ip().eq(ip) => true,
+                _ => false,
+            }
+        {
+            proto = Mdns
         }
 
         let params = url
@@ -224,29 +221,8 @@ impl FromStr for DnsUrl {
 
 impl std::fmt::Display for DnsUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Protocol::*;
         // schema
-        let proto = match self.proto {
-            Udp => "udp://",
-            Tcp => "tcp://",
-            Tls => "tls://",
-            #[cfg(feature = "dns-over-https")]
-            Https => "https://",
-            #[cfg(feature = "dns-over-quic")]
-            Quic => "quic://",
-            #[cfg(feature = "dns-over-h3")]
-            H3 => {
-                if matches!(&self.fragment, Some(fragment) if fragment == "h3") {
-                    "https://"
-                } else {
-                    "h3://"
-                }
-            }
-            #[cfg(feature = "mdns")]
-            Mdns => "mdns://",
-            _ => unimplemented!(),
-        };
-        write!(f, "{}", proto)?;
+        write!(f, "{}://", self.proto)?;
 
         // host
         write!(f, "{}", self.host())?;
@@ -615,6 +591,30 @@ mod tests {
         let url1 = DnsUrl::from_str("https://dns.adguard-dns.com?a=1&b=2&c=3").unwrap();
         let url2 = DnsUrl::from_str("https://dns.adguard-dns.com?b=2&a=1&c=3").unwrap();
         assert_eq!(url1, url2);
+    }
+
+    #[test]
+    #[cfg(feature = "mdns")]
+    fn test_parse_mdns() {
+        let url = DnsUrl::from_str("mdns://127.0.0.1").unwrap();
+        assert_eq!(url.proto, Protocol::Mdns);
+        assert_eq!(url.host.to_string(), "127.0.0.1");
+        assert_eq!(url.port(), 5353);
+        assert_eq!(url.path(), None);
+        assert_eq!(url.to_string(), "mdns://127.0.0.1");
+        assert!(url.ip().is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "mdns")]
+    fn test_parse_mdns1() {
+        let url = DnsUrl::from_str("224.0.0.251").unwrap();
+        assert_eq!(url.proto, Protocol::Mdns);
+        assert_eq!(url.host.to_string(), "224.0.0.251");
+        assert_eq!(url.port(), 5353);
+        assert_eq!(url.path(), None);
+        assert_eq!(url.to_string(), "mdns://224.0.0.251");
+        assert!(url.ip().is_some());
     }
 
     #[test]
