@@ -187,7 +187,7 @@ console-subscriber = { version = "0.4.1", optional = true }
 
 # hickory dns
 hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.3", features = ["serde"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.3", features = [
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.4", features = [
   "serde",
   "system-config",
 ] }
