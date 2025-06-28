@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
-    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -29,30 +28,7 @@ use crate::{
 pub struct App(Arc<AppState>);
 
 impl App {
-    fn new(directory: Option<PathBuf>, conf: Option<PathBuf>) -> (IncomingDnsRequest, Self) {
-        let cfg = RuntimeConfig::load(directory, conf);
-
-        let guard = {
-            #[cfg(target_os = "linux")]
-            let user_guard = {
-                if let Some(user) = cfg.user() {
-                    use crate::run_user;
-                    run_user::with(user, None)
-                        .unwrap_or_else(|err| {
-                            panic!("run with user {} failed. {}", user, err);
-                        })
-                        .into()
-                } else {
-                    None
-                }
-            };
-
-            AppGuard {
-                #[cfg(target_os = "linux")]
-                user_guard,
-            }
-        };
-
+    fn new(cfg: Arc<RuntimeConfig>) -> (IncomingDnsRequest, Self) {
         let handler = DnsMiddlewareBuilder::new().build(cfg.clone());
 
         let (rx, dns_handle) = DnsHandle::new();
@@ -69,7 +45,7 @@ impl App {
                     uptime: Instant::now(),
                     loaded_at: RwLock::const_new(Instant::now()),
                     active_queries: Default::default(),
-                    guard,
+                    guard: AppGuard,
                 }
                 .into(),
             ),
@@ -111,7 +87,6 @@ impl App {
     }
 
     async fn init(&self) {
-        self.cfg().await.summary();
         self.update_middleware_handler().await;
         self.update_listeners().await;
         crate::banner();
@@ -227,12 +202,9 @@ pub struct AppState {
     guard: AppGuard,
 }
 
-pub fn serve(directory: Option<PathBuf>, conf: Option<PathBuf>) {
-    crate::hello_starting();
-    let (mut incoming_request, app) = App::new(directory, conf);
+pub fn serve(cfg: Arc<RuntimeConfig>) {
+    let (mut incoming_request, app) = App::new(cfg.clone());
     let app = Arc::new(app);
-
-    let cfg = app.cfg.blocking_read().clone();
 
     let log_dispatch = log::make_dispatch(
         cfg.log_file(),
@@ -365,14 +337,9 @@ pub fn serve(directory: Option<PathBuf>, conf: Option<PathBuf>) {
     });
 
     runtime.shutdown_timeout(shutdown_timeout);
-
-    log::info!("{} {} shutdown", crate::NAME, crate::BUILD_VERSION);
 }
 
-struct AppGuard {
-    #[cfg(target_os = "linux")]
-    user_guard: Option<crate::run_user::SwitchUserGuard>,
-}
+struct AppGuard;
 
 async fn process(
     handler: Arc<DnsMiddlewareHandler>,

@@ -89,7 +89,7 @@ pub enum Commands {
 
         /// Configuration directory, default to `/etc/smartdns``
         #[arg(short = 'd', long)]
-        direcory: Option<std::path::PathBuf>,
+        directory: Option<std::path::PathBuf>,
 
         /// Pid file
         #[arg(short = 'p', long)]
@@ -208,7 +208,7 @@ impl From<CompatibleCli> for Cli {
             command: Commands::Run {
                 conf,
                 pid,
-                direcory: None,
+                directory: None,
             },
             verbose: verbose0,
         }
@@ -249,7 +249,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
 
@@ -259,7 +259,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
     }
@@ -287,7 +287,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
 
@@ -324,7 +324,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
 
@@ -334,7 +334,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
     }
@@ -347,7 +347,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
 
@@ -359,7 +359,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
     }
@@ -372,7 +372,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
 
@@ -387,7 +387,7 @@ mod tests {
             Commands::Run {
                 conf: Some(_),
                 pid: None,
-                direcory: None
+                directory: None
             }
         ));
 

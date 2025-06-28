@@ -100,7 +100,7 @@ impl Cli {
 
         match self.command {
             Commands::Run {
-                direcory,
+                directory,
                 conf,
                 pid,
                 ..
@@ -120,7 +120,18 @@ impl Cli {
                         }
                     })
                     .unwrap_or_default();
-                app::serve(direcory, conf);
+                hello_starting();
+                let cfg = RuntimeConfig::load(directory, conf);
+
+                cfg.summary();
+
+                #[cfg(target_os = "linux")]
+                match cfg.user() {
+                    Some(user) => run_user::with(user, None).expect("switch user failed"),
+                    None => run_user::try_drop_privs(),
+                }
+                app::serve(cfg);
+                good_bye();
             }
             #[cfg(feature = "service")]
             Commands::Service {
@@ -214,6 +225,11 @@ fn hello_starting() {
     info!("{} 🐋 {} starting", NAME, BUILD_VERSION);
 }
 
+#[inline]
+fn good_bye() {
+    info!("{} {} shutdown", crate::NAME, crate::BUILD_VERSION);
+}
+
 impl RuntimeConfig {
     pub async fn create_dns_client(&self) -> DnsClient {
         let servers = self.servers();
@@ -295,40 +311,110 @@ mod signal {
 mod run_user {
     use std::{collections::HashSet, io};
 
-    use caps::{CapSet, Capability};
+    use crate::log;
+    use caps::{
+        CapSet::{Effective, Permitted},
+        Capability::{self, CAP_NET_ADMIN, CAP_NET_BIND_SERVICE, CAP_NET_BROADCAST, CAP_NET_RAW},
+        securebits::set_keepcaps,
+    };
+    use users::{
+        get_current_gid, get_current_uid, get_effective_gid, get_effective_uid, get_group_by_name,
+        get_user_by_name,
+        switch::{set_current_gid, set_current_uid},
+    };
     use uzers as users;
-    pub use uzers::switch::SwitchUserGuard;
 
-    pub fn with(username: &str, groupname: Option<&str>) -> io::Result<SwitchUserGuard> {
+    pub static DEFAULT_USER: &str = "nobody";
+    pub static DEFAULT_GROUP: &str = "nobody";
+
+    pub fn with(username: &str, groupname: Option<&str>) -> io::Result<()> {
         let mut caps = HashSet::new();
-        caps.insert(Capability::CAP_NET_ADMIN);
-        caps.insert(Capability::CAP_NET_BIND_SERVICE);
-        caps.insert(Capability::CAP_NET_RAW);
-        switch_user(username, groupname, Some(&caps))
+        caps.insert(CAP_NET_ADMIN); // nftset
+        caps.insert(CAP_NET_BIND_SERVICE); // bind
+        caps.insert(CAP_NET_BROADCAST); // mdns
+        caps.insert(CAP_NET_RAW); // ping
+        switch_user(username, groupname, &caps)
+    }
+
+    pub fn try_drop_privs() {
+        if let Err(err) = with(DEFAULT_USER, Some(DEFAULT_GROUP)) {
+            log::error!("failed to drop privs: {}", err);
+        }
     }
 
     #[inline]
     fn switch_user(
         username: &str,
         groupname: Option<&str>,
-        caps: Option<&HashSet<Capability>>,
-    ) -> io::Result<SwitchUserGuard> {
-        use users::{get_group_by_name, get_user_by_name, switch::switch_user_group};
+        caps: &HashSet<Capability>,
+    ) -> io::Result<()> {
+        let (uid, gid, euid, egid) = (
+            get_current_uid(),
+            get_current_gid(),
+            get_effective_uid(),
+            get_effective_gid(),
+        );
+
+        if uid == 0 || euid == 0 {
+            log::info!(
+                "running as root: {uid}, gid: {gid} (euid: {euid}, egid: {egid})...dropping privileges."
+            );
+        } else {
+            return Ok(()); // already running as non-root, nothing to do.
+        }
 
         let user = get_user_by_name(username);
+        let Some(user) = user else {
+            return Err(io::Error::other(format!("User {} not found", username)));
+        };
 
         let group = groupname.map(get_group_by_name).unwrap_or_default();
 
-        match (user, group) {
-            (Some(user), None) => switch_user_group(user.uid(), user.primary_group_id()),
-            (Some(user), Some(group)) => switch_user_group(user.uid(), group.gid()),
-            _ => Err(io::ErrorKind::Other.into()),
-        }
-        .inspect(|_guard| {
-            if let Some(caps) = caps {
-                caps::set(None, CapSet::Effective, caps).unwrap();
-                caps::set(None, CapSet::Permitted, caps).unwrap();
-            }
-        })
+        let uid = user.uid();
+        let gid = group
+            .map(|g| g.gid())
+            .unwrap_or_else(|| user.primary_group_id());
+
+        keepcaps()?;
+        set_gid(gid)?;
+        set_uid(uid)?;
+
+        let (uid, gid, euid, egid) = (
+            get_current_uid(),
+            get_current_gid(),
+            get_effective_uid(),
+            get_effective_gid(),
+        );
+
+        set_caps(caps)?;
+
+        log::info!("now running as uid: {uid}, gid: {gid} (euid: {euid}, egid: {egid})");
+
+        Ok(())
+    }
+
+    #[inline]
+    fn set_gid(gid: u32) -> io::Result<()> {
+        set_current_gid(gid)
+            .map_err(|err| io::Error::other(format!("Failed to set gid: {gid}, {}", err)))
+    }
+
+    #[inline]
+    fn set_uid(uid: u32) -> io::Result<()> {
+        set_current_uid(uid)
+            .map_err(|err| io::Error::other(format!("Failed to set uid: {uid}, {}", err)))
+    }
+
+    #[inline]
+    fn set_caps(caps: &caps::CapsHashSet) -> io::Result<()> {
+        caps::set(None, Effective, caps)
+            .and(caps::set(None, Permitted, caps))
+            .map_err(|err| io::Error::other(format!("Failed to set capabilities: {}", err)))
+    }
+
+    #[inline]
+    fn keepcaps() -> io::Result<()> {
+        set_keepcaps(true)
+            .map_err(|err| io::Error::other(format!("Failed to set keepcaps: {}", err)))
     }
 }
