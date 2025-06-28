@@ -1,13 +1,14 @@
 [Unit]
 Description=SmartDNS Server
 After=network.target
+Before=network-online.target
+Before=nss-lookup.target
+Wants=nss-lookup.target
 StartLimitBurst=0
 StartLimitIntervalSec=60
 
 [Service]
 Type=simple
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 PIDFile=/var/run/smartdns.pid
 ExecStart=/usr/sbin/smartdns run -p /var/run/smartdns.pid
 Restart=always
