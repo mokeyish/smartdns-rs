@@ -209,7 +209,7 @@ csv = "1.1"
 hostname = "0.4"
 byte-unit = { version = "5.0.3", features = ["serde"]}
 ipnet = { version = "2.11", features = ["json"]}
-which = { version = "7.0.1", optional = true }
+which = { version = "8.0.0", optional = true }
 glob = "0.3.1"
 
 # process
