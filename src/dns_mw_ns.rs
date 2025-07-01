@@ -605,11 +605,16 @@ async fn per_nameserver_lookup_ip(
                         None => new_ans.push(record),
                         Some(ip) if !alias_set.contains(&ip.as_ptr()) => {
                             alias_set.push(ip.as_ptr());
-                            new_ans.extend(ip.iter().map(|&ip| {
-                                let mut record = record.clone();
-                                record.set_data(ip.into());
-                                record
-                            }));
+                            let want_ipv4 = options.record_type == RecordType::A;
+                            new_ans.extend(
+                                ip.iter()
+                                    .filter(|&&ip| (ip.is_ipv4() == want_ipv4))
+                                    .map(|&ip| {
+                                        let mut record = record.clone();
+                                        record.set_data(ip.into());
+                                        record
+                                    }),
+                            );
                         }
                         Some(_) => continue,
                     }
