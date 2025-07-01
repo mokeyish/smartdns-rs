@@ -606,15 +606,16 @@ async fn per_nameserver_lookup_ip(
                         Some(ip) if !alias_set.contains(&ip.as_ptr()) => {
                             alias_set.push(ip.as_ptr());
                             let want_ipv4 = options.record_type == RecordType::A;
-                            new_ans.extend(
-                                ip.iter()
-                                    .filter(|&&ip| (ip.is_ipv4() == want_ipv4))
-                                    .map(|&ip| {
-                                        let mut record = record.clone();
-                                        record.set_data(ip.into());
-                                        record
-                                    }),
-                            );
+                            new_ans.extend(ip.iter().filter_map(|&ip| {
+                                let mut record = record.clone();
+                                record.set_data(ip.into());
+                                if ip.is_ipv4() == want_ipv4 {
+                                    Some(record)
+                                } else {
+                                    lookup.add_additional(record);
+                                    None
+                                }
+                            }));
                         }
                         Some(_) => continue,
                     }
