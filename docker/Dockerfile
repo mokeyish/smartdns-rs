@@ -1,8 +1,5 @@
-ARG VERSION=0.6.1
-
 FROM debian:stable AS downloader
 
-ARG VERSION
 
 RUN apt-get update && apt-get install -y curl
 RUN mkdir -p /app/x86 /app/arm64 /app/armv7 /app/extracted/x86 /app/extracted/arm64 /app/extracted/armv7
