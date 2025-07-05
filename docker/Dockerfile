@@ -18,7 +18,7 @@ FROM alpine AS base
 
 WORKDIR /app
 RUN apk add bash
-COPY ./contrib/docker/docker-entrypoint.sh /app/entrypoint.sh
+COPY ./docker/docker-entrypoint.sh /app/entrypoint.sh
 FROM base AS amd64
 
 COPY --from=downloader /app/extracted/x86/* /app/
