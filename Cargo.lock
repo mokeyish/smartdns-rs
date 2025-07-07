@@ -1328,6 +1328,41 @@ version = "0.26.0-alpha.1"
 source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.3#6e036072b0324a845e2dca02fc5b9417267cc6cb"
 dependencies = [
  "async-trait",
+ "bytes",
+ "cfg-if",
+ "data-encoding",
+ "enum-as-inner",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "h2",
+ "h3 0.0.7",
+ "h3-quinn 0.0.9",
+ "http",
+ "idna",
+ "ipnet",
+ "once_cell",
+ "pin-project-lite",
+ "quinn",
+ "rand 0.9.1",
+ "ring",
+ "rustls",
+ "serde",
+ "socket2",
+ "thiserror 2.0.12",
+ "tinyvec",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "hickory-proto"
+version = "0.26.0-alpha.1"
+source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.4#9b08cbd3bdb4e523bb524c454ad110b0d2955d51"
+dependencies = [
+ "async-trait",
  "bitflags",
  "bytes",
  "cfg-if",
@@ -1367,7 +1402,7 @@ source = "git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.3#
 dependencies = [
  "cfg-if",
  "futures-util",
- "hickory-proto",
+ "hickory-proto 0.26.0-alpha.1 (git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.3)",
  "ipconfig",
  "moka",
  "once_cell",
@@ -3079,7 +3114,7 @@ dependencies = [
  "futures-util",
  "glob",
  "h3-util",
- "hickory-proto",
+ "hickory-proto 0.26.0-alpha.1 (git+https://github.com/mokeyish/hickory-dns.git?rev=0.26.0-smartdns.4)",
  "hickory-resolver",
  "hostname",
  "http",
