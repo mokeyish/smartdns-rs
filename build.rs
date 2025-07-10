@@ -67,7 +67,7 @@ fn download<P: AsRef<Path> + Copy>(url: &str, file_path: P) -> bool {
         return false;
     }
 
-    let rest = http::get(url).unwrap_or_else(|_| panic!("URL: {} download failed!!!", url));
+    let rest = http::get(url).unwrap_or_else(|_| panic!("URL: {url} download failed!!!"));
 
     let bytes = rest.bytes().expect("read bytes from server failed!!!");
 
@@ -119,8 +119,7 @@ fn create_build_time_vars() -> anyhow::Result<()> {
     let build_timestamp = chrono::Utc::now().timestamp_millis();
     writeln!(
         file,
-        r#"pub const BUILD_DATE: chrono::DateTime<chrono::Utc> = chrono::DateTime::from_timestamp_millis({}).unwrap();"#,
-        build_timestamp
+        r#"pub const BUILD_DATE: chrono::DateTime<chrono::Utc> = chrono::DateTime::from_timestamp_millis({build_timestamp}).unwrap();"#
     )?;
 
     writeln!(

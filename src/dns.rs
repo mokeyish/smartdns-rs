@@ -99,8 +99,8 @@ impl Debug for LookupFrom {
             Self::None => write!(f, "None"),
             Self::Cache => write!(f, "Cache"),
             Self::Static => write!(f, "Static"),
-            Self::Zone(arg0) => write!(f, "Zone: {}", arg0),
-            Self::Server(arg0) => write!(f, "Server: {}", arg0),
+            Self::Zone(arg0) => write!(f, "Zone: {arg0}"),
+            Self::Server(arg0) => write!(f, "Server: {arg0}"),
         }
     }
 }

@@ -148,10 +148,10 @@ impl PartialEq<Ipv6Addr> for PingAddr {
 impl Display for PingAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PingAddr::Icmp(addr) => write!(f, "icmp://{}", addr),
-            PingAddr::Tcp(addr) => write!(f, "tcp://{}", addr),
-            PingAddr::Http(addr) => write!(f, "http://{}", addr),
-            PingAddr::Https(addr) => write!(f, "https://{}", addr),
+            PingAddr::Icmp(addr) => write!(f, "icmp://{addr}"),
+            PingAddr::Tcp(addr) => write!(f, "tcp://{addr}"),
+            PingAddr::Http(addr) => write!(f, "http://{addr}"),
+            PingAddr::Https(addr) => write!(f, "https://{addr}"),
         }
     }
 }
@@ -863,7 +863,7 @@ mod tests {
             assert!(matches!(results.last().unwrap(), Err(PingError::Timeout)));
 
             for item in results {
-                println!("Ping {:?}", item);
+                println!("Ping {item:?}");
             }
         })
     }

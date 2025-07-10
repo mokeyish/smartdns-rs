@@ -184,7 +184,7 @@ where
                 metadata.target()
             )?;
             if let Some(line) = metadata.line() {
-                write!(&mut writer, ":{}", line)?;
+                write!(&mut writer, ":{line}")?;
             }
         }
 
@@ -200,7 +200,7 @@ where
 
                 // Skip formatting the fields if the span had no fields.
                 if !fields.is_empty() {
-                    write!(writer, "{{{}}}", fields)?;
+                    write!(writer, "{{{fields}}}")?;
                 }
             }
         }

@@ -125,7 +125,7 @@ impl IntoResponse for crate::dns::DnsError {
     fn into_response(self) -> Response {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!(r#"{{ "error": "{0}" }}"#, self),
+            format!(r#"{{ "error": "{self}" }}"#),
         )
             .into_response()
     }

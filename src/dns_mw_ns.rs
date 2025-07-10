@@ -695,9 +695,9 @@ mod tests {
             let t3 = results[2].clone();
             let success = t1 == t3 && t1 != t2;
             if !success {
-                println!("{:?}", t1);
-                println!("{:?}", t2);
-                println!("{:?}", t3);
+                println!("{t1:?}");
+                println!("{t2:?}");
+                println!("{t3:?}");
             }
             success
         }

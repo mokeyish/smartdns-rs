@@ -19,7 +19,7 @@ pub mod serde_str {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        T::from_str(&s).map_err(|_| serde::de::Error::custom(format!("{:?}", s)))
+        T::from_str(&s).map_err(|_| serde::de::Error::custom(format!("{s:?}")))
     }
 }
 
@@ -68,7 +68,7 @@ impl<'de, T: FromStr> Deserialize<'de> for Stringable<T> {
     {
         let s = String::deserialize(deserializer)?;
         T::from_str(&s)
-            .map_err(|_| serde::de::Error::custom(format!("{:?}", s)))
+            .map_err(|_| serde::de::Error::custom(format!("{s:?}")))
             .map(Self)
     }
 }

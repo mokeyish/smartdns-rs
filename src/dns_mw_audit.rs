@@ -214,7 +214,7 @@ fn record_audit_to_file(
     } else {
         // write as nornmal log format.
         for audit in audit_records {
-            if writeln!(audit_file, "{}", audit).is_err() {
+            if writeln!(audit_file, "{audit}").is_err() {
                 warn!("Write audit to file '{:?}' failed", audit_file.path());
             }
         }

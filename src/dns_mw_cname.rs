@@ -57,10 +57,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddl
                     let new_req = req.with_cname(cname.clone());
                     match next.run(&mut ctx, &new_req).await {
                         Ok(mut lookup) => {
-                            std::mem::swap(
-                                lookup.queries_mut(),
-                                &mut vec![req.query().original().clone()],
-                            );
+                            *lookup.queries_mut() = vec![req.query().original().clone()];
                             lookup.answers_mut().insert(0, cname_record);
                             Ok(lookup)
                         }

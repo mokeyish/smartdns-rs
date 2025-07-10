@@ -324,7 +324,7 @@ impl std::fmt::Display for AddressRuleValue {
                         } else {
                             write!(f, ",")?;
                         }
-                        write!(f, "{}", ip)?;
+                        write!(f, "{ip}")?;
                     }
                 }
                 if let Some(v6) = v6 {
@@ -334,7 +334,7 @@ impl std::fmt::Display for AddressRuleValue {
                         } else {
                             write!(f, ",")?;
                         }
-                        write!(f, "{}", ip)?;
+                        write!(f, "{ip}")?;
                     }
                 }
                 Ok(())

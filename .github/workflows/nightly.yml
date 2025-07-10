@@ -3,7 +3,7 @@ name: Nightly builds
 
 on:  
   schedule:
-    - cron:  '30 5,17 * * *'
+    - cron:  '30 3 * * *'
   push:
     branches:
       - ci*

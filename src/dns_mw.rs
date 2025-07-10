@@ -234,7 +234,7 @@ mod tests {
         pub fn with_rdata<N: IntoName>(self, name: N, rdata: RData, ttl: u32) -> Self {
             let name = match name.into_name() {
                 Ok(name) => name,
-                Err(err) => panic!("invalid Name {}", err),
+                Err(err) => panic!("invalid Name {err}"),
             };
 
             self.with_record(Record::from_rdata(name, ttl, rdata))
@@ -252,7 +252,7 @@ mod tests {
         ) -> Self {
             let name = match name.into_name() {
                 Ok(name) => name,
-                Err(err) => panic!("invalid Name {}", err),
+                Err(err) => panic!("invalid Name {err}"),
             };
 
             let query = Query::query(name, record_type);
