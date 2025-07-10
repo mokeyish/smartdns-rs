@@ -61,7 +61,7 @@ impl ResolveCommand {
                                 print(&res, &palette);
                             }
                             Err(err) => {
-                                println!("{}", err);
+                                println!("{err}");
                             }
                         }
                     }
@@ -376,7 +376,7 @@ impl FromStr for Variant {
             return Ok(Self::Domain(name));
         }
 
-        Err(format!("Invalid query variant: {}", s))
+        Err(format!("Invalid query variant: {s}"))
     }
 }
 

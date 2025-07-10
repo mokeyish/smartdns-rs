@@ -235,12 +235,12 @@ impl std::fmt::Display for DnsUrl {
 
         // path
         if let Some(path) = self.path() {
-            write!(f, "{}", path)?;
+            write!(f, "{path}")?;
         }
 
         // fragment
         if let Some(fragment) = self.fragment.as_deref() {
-            write!(f, "#{}", fragment)?;
+            write!(f, "#{fragment}")?;
         }
 
         // query
@@ -270,7 +270,7 @@ impl From<&Ipv4Addr> for DnsUrl {
 impl From<&Ipv6Addr> for DnsUrl {
     #[inline]
     fn from(ip: &Ipv6Addr) -> Self {
-        format!("[{}]", ip).parse().unwrap()
+        format!("[{ip}]").parse().unwrap()
     }
 }
 
@@ -349,7 +349,7 @@ impl<'de> serde::Deserialize<'de> for DnsUrl {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        DnsUrl::from_str(&s).map_err(|_| serde::de::Error::custom(format!("{:?}", s)))
+        DnsUrl::from_str(&s).map_err(|_| serde::de::Error::custom(format!("{s:?}")))
     }
 }
 

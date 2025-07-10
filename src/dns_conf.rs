@@ -155,7 +155,7 @@ impl RuntimeConfig {
                 server.server.to_string(),
                 server.group,
                 match proxy {
-                    Some(s) => format!("over {}", s),
+                    Some(s) => format!("over {s}"),
                     None => "".to_string(),
                 }
             );
@@ -193,7 +193,7 @@ impl RuntimeConfig {
         info!(
             "speed check mode: {}",
             match self.speed_check_mode() {
-                Some(mode) => format!("{:?}", mode),
+                Some(mode) => format!("{mode:?}"),
                 None => "OFF".to_string(),
             }
         );

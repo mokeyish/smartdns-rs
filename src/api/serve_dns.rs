@@ -42,7 +42,7 @@ async fn serve_dns_get(
         }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!(r#"{{ "error": "{0}" }}"#, err),
+            format!(r#"{{ "error": "{err}" }}"#),
         )
             .into_response(),
     }
@@ -63,7 +63,7 @@ async fn serve_dns(
         }
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!(r#"{{ "error": "{0}" }}"#, err),
+            format!(r#"{{ "error": "{err}" }}"#),
         )
             .into_response(),
     }

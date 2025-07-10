@@ -154,7 +154,7 @@ impl Cli {
                             };
                             if let Some(out) = out {
                                 if let Ok(out) = String::from_utf8(out.stdout) {
-                                    print!("{}", out);
+                                    print!("{out}");
                                 } else {
                                     warn!("get service status failed.");
                                 }
@@ -209,7 +209,7 @@ impl Cli {
 
                 match res {
                     Ok(()) => println!("symlink created"),
-                    Err(err) => println!("failed to create symlink, {}", err),
+                    Err(err) => println!("failed to create symlink, {err}"),
                 }
             }
             #[allow(unreachable_patterns)]
@@ -244,7 +244,7 @@ impl RuntimeConfig {
             use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
             let mdns_servers = [*MDNS_IPV4, *MDNS_IPV6]
                 .into_iter()
-                .map(|ip| format!("mdns://{}", ip))
+                .map(|ip| format!("mdns://{ip}"))
                 .flat_map(|s| DnsUrl::from_str(&s).ok())
                 .map(|url| {
                     let mut config = NameServerInfo::from(url);
@@ -365,7 +365,7 @@ mod run_user {
 
         let user = get_user_by_name(username);
         let Some(user) = user else {
-            return Err(io::Error::other(format!("User {} not found", username)));
+            return Err(io::Error::other(format!("User {username} not found")));
         };
 
         let group = groupname.map(get_group_by_name).unwrap_or_default();
@@ -396,25 +396,24 @@ mod run_user {
     #[inline]
     fn set_gid(gid: u32) -> io::Result<()> {
         set_current_gid(gid)
-            .map_err(|err| io::Error::other(format!("Failed to set gid: {gid}, {}", err)))
+            .map_err(|err| io::Error::other(format!("Failed to set gid: {gid}, {err}")))
     }
 
     #[inline]
     fn set_uid(uid: u32) -> io::Result<()> {
         set_current_uid(uid)
-            .map_err(|err| io::Error::other(format!("Failed to set uid: {uid}, {}", err)))
+            .map_err(|err| io::Error::other(format!("Failed to set uid: {uid}, {err}")))
     }
 
     #[inline]
     fn set_caps(caps: &caps::CapsHashSet) -> io::Result<()> {
         caps::set(None, Effective, caps)
             .and(caps::set(None, Permitted, caps))
-            .map_err(|err| io::Error::other(format!("Failed to set capabilities: {}", err)))
+            .map_err(|err| io::Error::other(format!("Failed to set capabilities: {err}")))
     }
 
     #[inline]
     fn keepcaps() -> io::Result<()> {
-        set_keepcaps(true)
-            .map_err(|err| io::Error::other(format!("Failed to set keepcaps: {}", err)))
+        set_keepcaps(true).map_err(|err| io::Error::other(format!("Failed to set keepcaps: {err}")))
     }
 }
