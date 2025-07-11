@@ -1,18 +1,20 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, ops::Deref};
 
-use crate::{config::WildcardName, libdns::proto::rr::Name};
+use crate::{config::WildcardName, libdns::proto::rr::Name, third_ext::HashCode};
 
-#[derive(Debug)]
-pub struct DomainMap<T: Debug>(HashMap<WildcardName, T>);
+pub struct DomainMap<T> {
+    map: HashMap<u64, T>,
+    wildcards: HashMap<u64, Vec<WildcardName>>, // hash => wildcard names
+}
 
-impl<T: Debug> DomainMap<T> {
+impl<T> DomainMap<T> {
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn find(&self, name: &Name) -> Option<&T> {
-        if self.0.is_empty() {
+        if self.map.is_empty() {
             return None;
         }
         let mut name = if name.is_wildcard() {
@@ -22,34 +24,40 @@ impl<T: Debug> DomainMap<T> {
         };
 
         let mut lvl = 0;
+        let mut last = name.clone();
         loop {
             {
                 if lvl == 0 {
                     let wildcard_name = WildcardName::Full(name);
-                    if let Some(v) = self.0.get(&wildcard_name) {
+                    if let Some(v) = self.map.get(&wildcard_name.hash_code()) {
                         return Some(v);
                     }
                     name = wildcard_name.into();
                 }
 
                 if lvl == 1 {
-                    let wildcard_name = WildcardName::Sub(name);
-                    if let Some(v) = self.0.get(&wildcard_name) {
-                        return Some(v);
+                    let w = name.hash_code();
+                    if let Some(wildcards) = self.wildcards.get(&w) {
+                        for w in wildcards.iter() {
+                            if w.is_match(&last) {
+                                if let Some(v) = self.map.get(&w.hash_code()) {
+                                    return Some(v);
+                                }
+                            }
+                        }
                     }
-                    name = wildcard_name.into();
                 }
 
                 if lvl >= 1 {
                     let wildcard_name = WildcardName::Suffix(name);
-                    if let Some(v) = self.0.get(&wildcard_name) {
+                    if let Some(v) = self.map.get(&wildcard_name.hash_code()) {
                         return Some(v);
                     }
                     name = wildcard_name.into();
                 }
 
                 let wildcard_name = WildcardName::Default(name);
-                if let Some(v) = self.0.get(&wildcard_name) {
+                if let Some(v) = self.map.get(&wildcard_name.hash_code()) {
                     return Some(v);
                 }
                 name = wildcard_name.into();
@@ -64,7 +72,9 @@ impl<T: Debug> DomainMap<T> {
                 break;
             }
 
-            name = name.base_name();
+            last = name;
+
+            name = last.base_name();
             lvl += 1;
         }
 
@@ -78,38 +88,73 @@ impl<T: Debug> DomainMap<T> {
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.map.len()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.map.is_empty()
     }
 
     #[inline]
     pub fn insert(&mut self, name: impl Into<WildcardName>, value: T) -> Option<T> {
-        let mut name = name.into();
+        let mut name: WildcardName = name.into();
         name.set_fqdn(true);
-        self.0.insert(name, value)
+        let k = name.hash_code();
+        if name.is_sub() {
+            self.wildcards
+                .entry(name.deref().hash_code())
+                .or_default()
+                .push(name);
+        }
+
+        self.map.insert(k, value)
     }
 
     #[inline]
     pub fn remove(&mut self, name: &WildcardName) -> Option<T> {
-        self.0.remove(name)
+        if name.is_sub() {
+            self.wildcards
+                .entry(name.deref().hash_code())
+                .or_default()
+                .retain(|n| n != name);
+        }
+        self.map.remove(&name.hash_code())
     }
 }
 
-impl<T: Debug> Default for DomainMap<T> {
+impl<T> Default for DomainMap<T> {
     #[inline]
     fn default() -> Self {
-        Self(Default::default())
+        Self {
+            map: Default::default(),
+            wildcards: Default::default(),
+        }
     }
 }
 
-impl<T: Debug> From<HashMap<WildcardName, T>> for DomainMap<T> {
+impl<T> FromIterator<(WildcardName, T)> for DomainMap<T> {
+    fn from_iter<I: IntoIterator<Item = (WildcardName, T)>>(iter: I) -> Self {
+        let mut map: HashMap<u64, T> = Default::default();
+        let mut wildcards: HashMap<u64, Vec<WildcardName>> = Default::default();
+        for (n, v) in iter.into_iter() {
+            let k = n.hash_code();
+
+            if n.is_sub() {
+                wildcards.entry(n.deref().hash_code()).or_default().push(n);
+            }
+
+            map.insert(k, v);
+        }
+
+        Self { map, wildcards }
+    }
+}
+
+impl<T> From<HashMap<WildcardName, T>> for DomainMap<T> {
     #[inline]
     fn from(value: HashMap<WildcardName, T>) -> Self {
-        Self(value)
+        value.into_iter().collect()
     }
 }
 
@@ -149,9 +194,9 @@ impl DomainSet {
 
 impl FromIterator<WildcardName> for DomainSet {
     fn from_iter<T: IntoIterator<Item = WildcardName>>(iter: T) -> Self {
-        DomainSet(DomainMap(HashMap::from_iter(
+        DomainSet(DomainMap::from_iter(
             iter.into_iter().map(|item| (item, ())),
-        )))
+        ))
     }
 }
 
@@ -404,18 +449,68 @@ mod phf {
 }
 
 #[cfg(test)]
-#[cfg(nightly)]
 mod tests {
+
+    use std::str::FromStr;
 
     use super::*;
 
     #[test]
-    fn test_set_contains() {
+    fn test_set_contains_default() {
         let mut set = DomainSet::new();
 
         set.insert(WildcardName::Default("example.com".parse().unwrap()));
         assert!(set.contains(&"example.com".parse().unwrap()));
         assert!(set.contains(&"www.example.com".parse().unwrap()));
+        assert!(!set.contains(&"com".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_set_contains_suffix() {
+        let mut set = DomainSet::new();
+
+        set.insert(WildcardName::Suffix("example.com".parse().unwrap()));
+        assert!(!set.contains(&"example.com".parse().unwrap()));
+        assert!(set.contains(&"www.example.com".parse().unwrap()));
+        assert!(set.contains(&"a.www.example.com".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_set_contains_sub() {
+        let mut set = DomainSet::new();
+
+        set.insert(WildcardName::Sub(
+            Default::default(),
+            "example.com".parse().unwrap(),
+        ));
+        assert!(!set.contains(&"example.com".parse().unwrap()));
+        assert!(set.contains(&"www.example.com".parse().unwrap()));
+        assert!(!set.contains(&"a.www.example.com".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_set_contains_sub2() {
+        let mut set = DomainSet::new();
+
+        set.insert(WildcardName::from_str("a*b.example.com").unwrap());
+
+        assert!(set.contains(&"awwb.example.com".parse().unwrap()));
+        assert!(!set.contains(&"aww.example.com".parse().unwrap()));
+        assert!(!set.contains(&"wwb.example.com".parse().unwrap()));
+        assert!(!set.contains(&"example.com".parse().unwrap()));
+        assert!(!set.contains(&"www.example.com".parse().unwrap()));
+        assert!(!set.contains(&"a.www.example.com".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_set_contains_full() {
+        let mut set = DomainSet::new();
+
+        set.insert(WildcardName::Full("example.com".parse().unwrap()));
+        assert!(set.contains(&"example.com".parse().unwrap()));
+        assert!(!set.contains(&"com".parse().unwrap()));
+        assert!(!set.contains(&"www.example.com".parse().unwrap()));
+        assert!(!set.contains(&"a.www.example.com".parse().unwrap()));
     }
 
     #[cfg(feature = "experimental-trie")]
