@@ -11,8 +11,17 @@ impl NomParser for WildcardName {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             map(
-                preceded((char('*'), char('.')), NomParser::parse),
-                WildcardName::Sub,
+                (
+                    map_res(
+                        terminated(
+                            verify(is_not("."), |w: &str| !w.is_empty() && w.contains('*')),
+                            char('.'),
+                        ),
+                        Wildcard::from_str,
+                    ),
+                    NomParser::parse,
+                ),
+                |(w, n)| WildcardName::Sub(w, n),
             ),
             map(
                 preceded((char('-'), char('.')), NomParser::parse),
@@ -24,7 +33,7 @@ impl NomParser for WildcardName {
             ),
             map(NomParser::parse, |name: Name| {
                 if name.is_wildcard() {
-                    WildcardName::Sub(name.base_name())
+                    WildcardName::Sub(Default::default(), name.base_name())
                 } else if name.is_root() {
                     WildcardName::Suffix(name)
                 } else {
@@ -111,6 +120,6 @@ mod test {
         assert_eq!(n, WildcardName::Suffix(Name::root()));
 
         let n = WildcardName::from_str("*").unwrap();
-        assert_eq!(n, WildcardName::Sub(Name::root()));
+        assert_eq!(n, WildcardName::Sub(Default::default(), Name::root()));
     }
 }

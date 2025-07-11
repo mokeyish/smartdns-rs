@@ -3,7 +3,7 @@ name = "smartdns"
 version = "0.12.2"
 authors = ["YISH <mokeyish@hotmail.com>"]
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.87.0"
 
 keywords = ["DNS", "BIND", "dig", "SmartDNS", "Dnsmasq"]
 categories = ["network-programming"]
@@ -211,6 +211,7 @@ byte-unit = { version = "5.0.3", features = ["serde"]}
 ipnet = { version = "2.11", features = ["json"]}
 which = { version = "8.0.0", optional = true }
 glob = "0.3.1"
+wildcard = "0.3.0"
 
 # process
 sysinfo = { version = "0.35", default-features = false, features = ["system"]}
