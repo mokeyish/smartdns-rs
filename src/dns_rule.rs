@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
-use crate::config::WildcardName;
+use crate::{config::WildcardName, third_ext::HashCode};
 use std::sync::LazyLock;
 
 use crate::{
@@ -24,6 +24,7 @@ impl DomainRuleMap {
     }
     #[allow(clippy::too_many_arguments)]
     pub fn create(
+        rule_map: &mut HashMap<u64, Arc<DomainRule>>,
         domain_rules: &DomainRules,
         address_rules: &AddressRules,
         forward_rules: &ForwardRules,
@@ -98,11 +99,10 @@ impl DomainRuleMap {
         rule_items.sort_by(|(a, ..), (b, ..)| a.cmp(b));
 
         let mut rules = DomainMap::default();
-        let mut rule_pool = HashMap::<DomainRule, Arc<DomainRule>>::new();
 
         for (name, v) in rule_items {
-            let rule = rule_pool
-                .entry(v.clone())
+            let rule = rule_map
+                .entry(v.hash_code())
                 .or_insert_with(move || Arc::new(v))
                 .to_owned();
 
@@ -222,6 +222,7 @@ mod tests {
     #[test]
     fn test_zone_rule() {
         let map = DomainRuleMap::create(
+            &mut Default::default(),
             &Default::default(),
             &vec![
                 AddressRule {

@@ -727,8 +727,11 @@ impl RuntimeConfigBuilder {
 
         let mut domain_rule_group_map = HashMap::new();
 
+        let mut rule_map = Default::default();
+
         for (group_name, rule_group) in &self.rule_groups {
             let domain_rule_map = DomainRuleMap::create(
+                &mut rule_map,
                 &rule_group.domain_rules,
                 &rule_group.address_rules,
                 &rule_group.forward_rules,
