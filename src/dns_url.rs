@@ -14,13 +14,17 @@ use std::{
 };
 use url::{Host, Url};
 
-/// alias: system、google、cloudflare、quad9
+/// alias: google、cloudflare、quad9     => not support yet
 /// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => DNS over UDP
 /// tcp://8.8.8.8:53                            => DNS over TCP
 /// tls://8.8.8.8:853                           => DoT:  DNS over TLS
 /// quic://8.8.8.8:853                          => DoT:  DNS over QUIC
 /// https://1.1.1.1/dns-query                   => DoH:  DNS over HTTPS
 /// h3://1.1.1.1/dns-query                      => DoH3: DNS over HTTP/3
+/// system                                      => Use system nameservers
+/// dhcp://system                               => Use system nameservers
+/// dhcp                                        => Use nameservers from DHCP
+/// dhcp://en0                                  => Use nameservers from DHCP on interface en0
 #[derive(Debug, Clone, Eq)]
 pub struct DnsUrl {
     proto: Protocol,
