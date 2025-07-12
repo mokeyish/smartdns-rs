@@ -1,3 +1,4 @@
+use ipnet::Ipv6Net;
 use nom::{
     IResult, Parser, branch::*, bytes::complete::*, character::complete::*, combinator::*,
     multi::*, sequence::*,
@@ -105,6 +106,7 @@ pub enum OneConfig {
     HttpsRecord(ConfigForDomain<HttpsRecordRule>),
     ConfFile(PathBuf),
     DnsmasqLeaseFile(PathBuf),
+    Dns64(Ipv6Net),
     Domain(Name),
     DomainRule(ConfigForDomain<DomainRule>),
     DomainSetProvider(DomainSetProvider),
@@ -202,6 +204,7 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(config("domain-rule"), OneConfig::DomainRule),
         map(config("domain-set"), OneConfig::DomainSetProvider),
         map(config("dnsmasq-lease-file"), OneConfig::DnsmasqLeaseFile),
+        map(config("dns64"), OneConfig::Dns64),
         map(
             config("dualstack-ip-allow-force-AAAA"),
             OneConfig::DualstackIpAllowForceAAAA,
@@ -225,11 +228,11 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(config("cname"), OneConfig::CNAME),
         map(config("num-workers"), OneConfig::NumWorkers),
         map(config("domain"), OneConfig::Domain),
-        map(config("hosts-file"), OneConfig::HostsFile),
-        map(config("https-record"), OneConfig::HttpsRecord),
     ));
 
     let group3 = alt((
+        map(config("hosts-file"), OneConfig::HostsFile),
+        map(config("https-record"), OneConfig::HttpsRecord),
         map(config("ignore-ip"), OneConfig::IgnoreIp),
         map(config("local-ttl"), OneConfig::LocalTtl),
         map(config("log-console"), OneConfig::LogConsole),
@@ -247,11 +250,11 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
         map(config("rr-ttl-min"), OneConfig::RrTtlMin),
         map(config("rr-ttl-max"), OneConfig::RrTtlMax),
         map(config("rr-ttl"), OneConfig::RrTtl),
-        map(config("resolv-file"), OneConfig::ResolvFile),
-        map(config("resolv-hostanme"), OneConfig::ResolvHostname),
     ));
 
     let group4 = alt((
+        map(config("resolv-file"), OneConfig::ResolvFile),
+        map(config("resolv-hostanme"), OneConfig::ResolvHostname),
         map(config("response-mode"), OneConfig::ResponseMode),
         map(config("server-name"), OneConfig::ServerName),
         map(config("speed-check-mode"), OneConfig::SpeedMode),

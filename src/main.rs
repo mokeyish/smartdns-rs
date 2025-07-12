@@ -21,6 +21,7 @@ mod dns_mw_audit;
 mod dns_mw_bogus;
 mod dns_mw_cache;
 mod dns_mw_cname;
+mod dns_mw_dns64;
 mod dns_mw_dnsmasq;
 mod dns_mw_dualstack;
 mod dns_mw_hosts;
