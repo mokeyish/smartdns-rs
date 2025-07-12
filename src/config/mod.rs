@@ -18,7 +18,7 @@ use crate::{
 };
 
 use byte_unit::Byte;
-use ipnet::IpNet;
+use ipnet::{IpNet, Ipv6Net};
 use serde::{self, Deserialize, Serialize};
 
 mod audit;
@@ -168,6 +168,11 @@ pub struct Config {
     pub dualstack_ip_selection_threshold: Option<u16>,
     /// dualstack-ip-allow-force-AAAA [yes|no]
     pub dualstack_ip_allow_force_aaaa: Option<bool>,
+
+    /// DNS64 prefix
+    ///
+    /// dns64 ip-prefix/mask
+    pub dns64_prefix: Option<Ipv6Net>,
 
     /// edns client subnet
     ///

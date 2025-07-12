@@ -935,6 +935,7 @@ impl RuntimeConfigBuilder {
                 CachePersist(v) => self.cache.persist = Some(v),
                 CacheCheckpointTime(v) => self.cache.checkpoint_time = Some(v),
                 CNAME(v) => rule_group.cnames.push(v),
+                Dns64(v) => self.dns64_prefix = Some(v),
                 ExpandPtrFromAddress(v) => self.expand_ptr_from_address = Some(v),
                 NftSet(v) => self.nftsets.push(v),
                 HttpsRecord(v) => rule_group.https_records.push(v),

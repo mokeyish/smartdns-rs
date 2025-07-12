@@ -479,6 +479,7 @@ fn build_middleware(
     use crate::dns_mw_bogus::DnsBogusMiddleware;
     use crate::dns_mw_cache::DnsCacheMiddleware;
     use crate::dns_mw_cname::DnsCNameMiddleware;
+    use crate::dns_mw_dns64::Dns64Middleware;
     use crate::dns_mw_dnsmasq::DnsmasqMiddleware;
     use crate::dns_mw_dualstack::DnsDualStackIpSelectionMiddleware;
     use crate::dns_mw_hosts::DnsHostsMiddleware;
@@ -500,6 +501,10 @@ fn build_middleware(
 
         if cfg.rule_groups().values().all(|x| !x.cnames.is_empty()) {
             builder = builder.with(DnsCNameMiddleware);
+        }
+
+        if let Some(dns64_prefix) = cfg.dns64_prefix {
+            builder = builder.with(Dns64Middleware::new(dns64_prefix));
         }
 
         builder = builder.with(DnsZoneMiddleware::new());

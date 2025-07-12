@@ -29,6 +29,19 @@ impl NomParser for IpNet {
     }
 }
 
+impl NomParser for Ipv6Net {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        map_res(
+            (
+                nom_recipes::ipv6,
+                preceded(tag("/"), map_res(digit1, |s: &str| s.parse::<u8>())),
+            ),
+            |(ip, len)| Ipv6Net::new(ip, len),
+        )
+        .parse(input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
