@@ -86,13 +86,17 @@ fn setup_socket<'a, T: Into<SockRef<'a>>>(
 
     // https://github.com/pymumu/smartdns/blob/e26ecf6a52851f88e2937448019f74b753c0e6dc/src/dns_server/server_socket.c#L111
     if sock_typ == Type::STREAM {
-        sock_ref.set_reuse_address(true)?;
-
         // enable TCP_FASTOPEN
         sock_ref.set_nodelay(true)?;
     }
 
-    #[cfg(target_os = "macos")]
+    sock_ref.set_reuse_address(true)?;
+    #[cfg(not(any(
+        target_os = "solaris",
+        target_os = "illumos",
+        target_os = "cygwin",
+        target_os = "windows"
+    )))]
     sock_ref.set_reuse_port(true)?;
 
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
