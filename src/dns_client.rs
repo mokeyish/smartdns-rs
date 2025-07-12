@@ -1149,7 +1149,7 @@ mod connection_provider {
             _server_addr: SocketAddr,
         ) -> Result<Arc<dyn quinn::AsyncUdpSocket>, io::Error> {
             use quinn::Runtime;
-            let socket = std::net::UdpSocket::bind(local_addr)?;
+            let socket = next_random_udp(local_addr)?;
             quinn::TokioRuntime.wrap_udp_socket(socket)
         }
     }
@@ -1235,6 +1235,33 @@ mod connection_provider {
                     .map_err(|err| io::Error::other(err.to_string())),
             }
         }
+    }
+
+    fn next_random_udp(bind_addr: SocketAddr) -> io::Result<std::net::UdpSocket> {
+        const ATTEMPT_RANDOM: usize = 10;
+        if bind_addr.port() == 0 {
+            for attempt in 0..ATTEMPT_RANDOM {
+                // Per RFC 6056 Section 3.2:
+                //
+                // As mentioned in Section 2.1, the dynamic ports consist of the range
+                // 49152-65535.  However, ephemeral port selection algorithms should use
+                // the whole range 1024-65535.
+                let port = rand::random_range(1024..=u16::MAX);
+
+                let bind_addr = SocketAddr::new(bind_addr.ip(), port);
+
+                match std::net::UdpSocket::bind(bind_addr) {
+                    Ok(socket) => {
+                        log::debug!("created socket successfully");
+                        return Ok(socket);
+                    }
+                    Err(err) => {
+                        log::debug!("unable to bind port, attempt: {}: {err}", attempt);
+                    }
+                }
+            }
+        }
+        std::net::UdpSocket::bind(bind_addr)
     }
 }
 
