@@ -136,6 +136,25 @@ impl NameServerInfo {
     }
 }
 
+impl std::fmt::Display for NameServerInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.server)?;
+        for g in &self.group {
+            write!(f, " -g {g}")?;
+        }
+
+        if self.exclude_default_group {
+            write!(f, " -e")?;
+        }
+
+        if let Some(proxy) = &self.proxy {
+            write!(f, " -p {proxy}")?;
+        }
+
+        Ok(())
+    }
+}
+
 impl From<DnsUrl> for NameServerInfo {
     fn from(url: DnsUrl) -> Self {
         Self {

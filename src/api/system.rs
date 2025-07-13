@@ -10,7 +10,7 @@ pub fn routes() -> StatefulRouter {
     routes![status,].into_router()
 }
 
-#[get("/system/status", description = "Get system status", responses(
+#[get("/system/status", tag="System", description = "Get system status", responses(
     (status = 200, content_type="application/json", body = SystemStatus )
 ))]
 async fn status(State(s): State<Arc<ServeState>>) -> Json<SystemStatus> {

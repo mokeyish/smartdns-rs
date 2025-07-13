@@ -273,6 +273,7 @@ bindgen = "0.71"
 
 # Dev-dependencies are not used when compiling a package for building, but are used for compiling tests, examples, and benchmarks.
 [dev-dependencies]
+indoc = "2"
 # reqwest = { version = "0.12", default-features = false, features = [
 #   "blocking",
 #   "rustls-tls",

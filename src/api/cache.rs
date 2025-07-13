@@ -5,32 +5,30 @@ use super::openapi::{
     http::{get, post},
     routes,
 };
-use super::{IntoDataListPayload, ServeState, StatefulRouter};
-use crate::log;
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use super::{ServeState, StatefulRouter};
+use crate::{api::DataListPayload, config::CacheConfig, dns_mw_cache::CachedQueryRecord, log};
+use axum::{Json, extract::State, http::StatusCode};
 
 pub fn routes() -> StatefulRouter {
-    let route1 = routes![flush_cache, caches].into_router();
-    let route2 = routes![cache_config].into_router();
-    route1.merge(route2)
+    let r1 = routes![flush, caches].into_router();
+    let r2 = routes![config].into_router();
+    r1.merge(r2)
 
-    // routes![flush_cache, caches, cache_config].into_router()
+    // routes![flush, caches, config].into_router()
 }
 
-#[get("/caches")]
-async fn caches(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
-    Json(
-        (if let Some(c) = state.app.cache().await {
-            c.cached_records().await
-        } else {
-            vec![]
-        })
-        .into_data_list_payload(),
-    )
+#[get("/caches", tag = "Caches", operation_id = "list_caches")]
+async fn caches(State(state): State<Arc<ServeState>>) -> Json<DataListPayload<CachedQueryRecord>> {
+    let caches = if let Some(c) = state.app.cache().await {
+        c.cached_records().await
+    } else {
+        vec![]
+    };
+    Json(caches.into())
 }
 
-#[post("/caches/flush")]
-async fn flush_cache(State(state): State<Arc<ServeState>>) -> StatusCode {
+#[post("/caches/flush", tag = "Caches", operation_id = "flush_caches")]
+async fn flush(State(state): State<Arc<ServeState>>) -> StatusCode {
     if let Some(c) = state.app.cache().await {
         c.clear().await;
     }
@@ -38,7 +36,8 @@ async fn flush_cache(State(state): State<Arc<ServeState>>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
-#[get("/caches/config")]
-async fn cache_config(State(state): State<Arc<ServeState>>) -> impl IntoResponse {
-    Json(state.app.cfg().await.cache_config()).into_response()
+#[get("/caches/config", tag = "Caches", operation_id = "get_cache_config")]
+async fn config(State(state): State<Arc<ServeState>>) -> Json<CacheConfig> {
+    let config = state.app.cfg().await.cache_config().clone();
+    Json(config)
 }

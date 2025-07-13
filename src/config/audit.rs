@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{infra::file_mode::FileMode, third_ext::serde_opt_str};
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuditConfig {
     /// dns audit
     ///

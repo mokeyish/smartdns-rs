@@ -23,7 +23,7 @@ pub fn routes() -> StatefulRouter {
     routes![serve_dns_get, serve_dns].into_router()
 }
 
-#[get("/dns-query", params(QueryParam), responses(
+#[get("/dns-query", tag="DNS", params(QueryParam), responses(
     (status = 200, description = "DNS response", body = DnsResponse)
 ))]
 async fn serve_dns_get(
@@ -48,7 +48,7 @@ async fn serve_dns_get(
     }
 }
 
-#[post("/dns-query")]
+#[post("/dns-query", tag = "DNS")]
 async fn serve_dns(
     State(state): State<Arc<ServeState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
