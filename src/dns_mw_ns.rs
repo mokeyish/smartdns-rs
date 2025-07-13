@@ -659,7 +659,7 @@ mod tests {
 
             let server = servers[i % servers.len()];
 
-            let cfg = RuntimeConfig::builder().with(server).build();
+            let cfg = RuntimeConfig::builder().with(server).build().unwrap();
 
             let domain = "www.bing.com";
 
