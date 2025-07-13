@@ -111,7 +111,7 @@ impl RuntimeConfig {
         };
 
         match builder.with_conf_file(&path).build() {
-            Ok(cfg) => return cfg.into(),
+            Ok(cfg) => cfg.into(),
             Err(err) => {
                 panic!(
                     "Failed to load configuration file at {}: {}",
