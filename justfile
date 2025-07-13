@@ -1,13 +1,10 @@
 
 cargo := if env_var_or_default('USE_CROSS', 'false') == "true" { "cross" } else { "cargo" }
 
-[private]
+
 alias b := build
-
-[private]
+alias c := clippy
 alias t := test
-
-[private]
 alias pack := package
 
 set positional-arguments
@@ -171,7 +168,7 @@ check *args: patch
 clippy: patch
   {{cargo}} clippy --fix --all
 
-# format the code
+# Format the code
 fmt: patch
   {{cargo}} fmt --all
 

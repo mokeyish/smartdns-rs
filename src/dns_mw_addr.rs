@@ -248,11 +248,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_address_rule_soa2() {
         let cfg = RuntimeConfig::builder()
-            .with(
-                r#"
-            domain-rule /google.com/ -address 1.2.3.4
-            "#,
-            )
+            .with(r#"domain-rule /google.com/ -address 1.2.3.4"#)
             .build()
             .unwrap();
 

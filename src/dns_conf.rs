@@ -38,7 +38,7 @@ pub const DEFAULT_CONF_DIR: &str = "/etc/smartdns";
 pub struct RuntimeConfig {
     conf_dir: Option<PathBuf>,
     conf_file: Option<PathBuf>,
-
+    managed_dir: Option<PathBuf>,
     inner: Config,
 
     rule_groups: HashMap<String, RuleGroup>,
@@ -66,7 +66,7 @@ impl RuntimeConfig {
     pub fn load<P: AsRef<Path>>(conf_dir: Option<PathBuf>, path: Option<P>) -> Arc<Self> {
         let mut builder = Self::builder();
 
-        if let Some(conf_dir) = conf_dir {
+        if let Some(conf_dir) = conf_dir.as_deref() {
             builder = builder.with_conf_dir(conf_dir);
         }
 
@@ -74,6 +74,15 @@ impl RuntimeConfig {
             let mut path = Cow::Borrowed(conf.as_ref());
             if path.is_dir() {
                 path = Cow::Owned(path.join(format!("{}.conf", crate::NAME.to_lowercase())));
+            }
+            if conf_dir.is_none()
+                && let Some(dir) = path.parent()
+                && dir
+                    .file_stem()
+                    .map(|s| s.eq_ignore_ascii_case(crate::NAME))
+                    .unwrap_or_default()
+            {
+                builder = builder.with_conf_dir(dir);
             }
             path
         } else {
@@ -126,6 +135,7 @@ impl RuntimeConfig {
         RuntimeConfigBuilder {
             conf_dir: Default::default(),
             conf_file: Default::default(),
+            managed_dir: Default::default(),
             config: Default::default(),
             loaded_files: Default::default(),
             rule_groups: Default::default(),
@@ -622,6 +632,14 @@ impl RuntimeConfig {
         }
     }
 
+    pub fn conf_dir(&self) -> Option<&Path> {
+        self.conf_dir.as_deref()
+    }
+
+    pub fn managed_dir(&self) -> Option<&Path> {
+        self.managed_dir.as_deref()
+    }
+
     pub fn reload_new(&self) -> anyhow::Result<Arc<RuntimeConfig>> {
         let builder = RuntimeConfigBuilder {
             conf_dir: self.conf_dir.clone(),
@@ -645,6 +663,7 @@ impl std::ops::Deref for RuntimeConfig {
 pub struct RuntimeConfigBuilder {
     conf_dir: Option<PathBuf>,
     conf_file: Option<PathBuf>,
+    managed_dir: Option<PathBuf>,
     config: Config,
     rule_groups: HashMap<String, RuleGroup>,
     rule_group_stack: Vec<(String, RuleGroup)>,
@@ -663,7 +682,6 @@ impl RuntimeConfigBuilder {
 
         let conf_file = self.conf_file;
         let conf_dir = self.conf_dir;
-
         let mut cfg = self.config;
 
         if !self.rule_group_stack.is_empty() {
@@ -839,9 +857,18 @@ impl RuntimeConfigBuilder {
 
         std::mem::swap(&mut proxy_servers, &mut cfg.proxy_servers);
 
+        let managed_dir = conf_dir.as_deref().map(|dir| {
+            let dir = dir.join("managed");
+            if !dir.exists() {
+                let _ = std::fs::create_dir_all(&dir);
+            }
+            dir
+        });
+
         Ok(RuntimeConfig {
             conf_dir,
             conf_file,
+            managed_dir,
             inner: cfg,
             rule_groups: self.rule_groups,
             domain_rule_group_map,
@@ -873,7 +900,7 @@ impl std::ops::DerefMut for RuntimeConfigBuilder {
 
 impl RuntimeConfigBuilder {
     pub fn with(mut self, config: &str) -> Self {
-        self.config(config);
+        self.config(config.trim());
         self
     }
 
@@ -910,11 +937,7 @@ impl RuntimeConfigBuilder {
     }
 
     pub fn config(&mut self, line: &str) {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            return;
-        }
-        use crate::config::parser::OneConfig::*;
+        use crate::config::parser::ConfigItem::*;
         let rule_group = match self.rule_group_stack.last_mut() {
             Some((_, rule_group)) => rule_group,
             None => {
@@ -925,7 +948,7 @@ impl RuntimeConfigBuilder {
         };
 
         match parser::parse_config(line) {
-            Ok((_, config_item)) => match config_item {
+            Ok((_, Some(config_item))) => match config_item {
                 AuditEnable(v) => self.audit.enable = Some(v),
                 AuditFile(v) => self.audit.file = Some(v),
                 AuditFileMode(v) => self.audit.file_mode = Some(v),
@@ -1043,6 +1066,7 @@ impl RuntimeConfigBuilder {
                 }
                 ClientRule(client_rule) => self.client_rules.push(client_rule),
             },
+            Ok((_, None)) => (),
             Err(err) => {
                 warn!("unknown conf: {}, {:?}", line, err);
             }

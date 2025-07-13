@@ -19,7 +19,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddl
         let cname = match &ctx.domain_rule {
             Some(rule) => rule.get(|r| match &r.cname {
                 Some(cname) => match cname {
-                    CNameRule::IGN => None,
+                    CNameRule::Ignore => None,
                     CNameRule::Value(n) => Some(n.clone()),
                 },
                 None => None,

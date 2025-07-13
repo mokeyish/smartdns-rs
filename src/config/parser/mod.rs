@@ -22,6 +22,7 @@ mod ip_alias;
 mod ip_net;
 mod ip_set;
 mod iporset;
+// mod line;
 mod log_level;
 mod nameserver;
 mod nftset;
@@ -80,7 +81,7 @@ impl NomParser for String {
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 #[allow(clippy::large_enum_variant)]
-pub enum OneConfig {
+pub enum ConfigItem {
     Address(AddressRule),
     AuditEnable(bool),
     AuditFile(PathBuf),
@@ -156,15 +157,154 @@ pub enum OneConfig {
     IpAlias(IpAlias),
 }
 
-pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
-    fn comment(input: &str) -> IResult<&str, Option<&str>> {
-        opt(preceded(space1, preceded(char('#'), not_line_ending))).parse(input)
+impl std::fmt::Display for ConfigItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigItem::Address(rule) => {
+                write!(f, "address {rule}")?;
+            }
+            ConfigItem::AuditEnable(_) => todo!(),
+            ConfigItem::AuditFile(_) => todo!(),
+            ConfigItem::AuditFileMode(_) => todo!(),
+            ConfigItem::AuditNum(_) => todo!(),
+            ConfigItem::AuditSize(_) => todo!(),
+            ConfigItem::BindCertFile(_) => todo!(),
+            ConfigItem::BindCertKeyFile(_) => todo!(),
+            ConfigItem::BindCertKeyPass(_) => todo!(),
+            ConfigItem::BlacklistIp(_) => todo!(),
+            ConfigItem::BogusNxDomain(_) => todo!(),
+            ConfigItem::CacheFile(_) => todo!(),
+            ConfigItem::CachePersist(_) => todo!(),
+            ConfigItem::CacheSize(_) => todo!(),
+            ConfigItem::CacheCheckpointTime(_) => todo!(),
+            ConfigItem::CaFile(_) => todo!(),
+            ConfigItem::CaPath(_) => todo!(),
+            ConfigItem::ClientRule(_) => todo!(),
+            ConfigItem::CNAME(_) => todo!(),
+            ConfigItem::SrvRecord(_) => todo!(),
+            ConfigItem::GroupBegin(_) => todo!(),
+            ConfigItem::GroupEnd => todo!(),
+            ConfigItem::HttpsRecord(_) => todo!(),
+            ConfigItem::ConfFile(_) => todo!(),
+            ConfigItem::DnsmasqLeaseFile(_) => todo!(),
+            ConfigItem::Domain(_) => todo!(),
+            ConfigItem::DomainRule(_) => todo!(),
+            ConfigItem::DomainSetProvider(_) => todo!(),
+            ConfigItem::DualstackIpAllowForceAAAA(_) => todo!(),
+            ConfigItem::DualstackIpSelection(_) => todo!(),
+            ConfigItem::DualstackIpSelectionThreshold(_) => todo!(),
+            ConfigItem::EdnsClientSubnet(_) => todo!(),
+            ConfigItem::ExpandPtrFromAddress(_) => todo!(),
+            ConfigItem::ForceAAAASOA(_) => todo!(),
+            ConfigItem::ForceHTTPSSOA(_) => todo!(),
+            ConfigItem::ForceQtypeSoa(_) => todo!(),
+            ConfigItem::ForwardRule(rule) => {
+                write!(f, "nameserver {rule}")?;
+            }
+            ConfigItem::HostsFile(_) => todo!(),
+            ConfigItem::IgnoreIp(_) => todo!(),
+            ConfigItem::Listener(_) => todo!(),
+            ConfigItem::LocalTtl(_) => todo!(),
+            ConfigItem::LogConsole(_) => todo!(),
+            ConfigItem::LogNum(_) => todo!(),
+            ConfigItem::LogSize(_) => todo!(),
+            ConfigItem::LogLevel(_) => todo!(),
+            ConfigItem::LogFile(_) => todo!(),
+            ConfigItem::LogFileMode(_) => todo!(),
+            ConfigItem::LogFilter(_) => todo!(),
+            ConfigItem::MaxReplyIpNum(_) => todo!(),
+            ConfigItem::MdnsLookup(_) => todo!(),
+            ConfigItem::NftSet(_) => todo!(),
+            ConfigItem::NumWorkers(_) => todo!(),
+            ConfigItem::PrefetchDomain(_) => todo!(),
+            ConfigItem::ProxyConfig(_) => todo!(),
+            ConfigItem::ResolvHostname(_) => todo!(),
+            ConfigItem::ResponseMode(_) => todo!(),
+            ConfigItem::ServeExpired(_) => todo!(),
+            ConfigItem::ServeExpiredTtl(_) => todo!(),
+            ConfigItem::ServeExpiredReplyTtl(_) => todo!(),
+            ConfigItem::Server(c) => {
+                write!(f, "server {c}")?;
+            }
+            ConfigItem::ServerName(_) => todo!(),
+            ConfigItem::ResolvFile(_) => todo!(),
+            ConfigItem::RrTtl(_) => todo!(),
+            ConfigItem::RrTtlMin(_) => todo!(),
+            ConfigItem::RrTtlMax(_) => todo!(),
+            ConfigItem::RrTtlReplyMax(_) => todo!(),
+            ConfigItem::SpeedMode(_) => todo!(),
+            ConfigItem::TcpIdleTime(_) => todo!(),
+            ConfigItem::WhitelistIp(_) => todo!(),
+            ConfigItem::User(_) => todo!(),
+            ConfigItem::IpSetProvider(_) => todo!(),
+            ConfigItem::IpAlias(_) => todo!(),
+            ConfigItem::Dns64(_) => todo!(),
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
+pub enum ConfigLine<'a> {
+    Config {
+        config: ConfigItem,
+        comment: Option<&'a str>,
+    },
+    Comment(&'a str),
+    EmptyLine,
+    Eof,
+}
+
+pub struct ConfigFile<'a>(Vec<ConfigLine<'a>>);
+
+impl<'a> std::ops::Deref for ConfigFile<'a> {
+    type Target = Vec<ConfigLine<'a>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> std::ops::DerefMut for ConfigFile<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'a> std::fmt::Display for ConfigFile<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for line in &self.0 {
+            match line {
+                ConfigLine::Config { config, comment } => {
+                    writeln!(f, "{}{}", config, comment.unwrap_or_default())?
+                }
+                ConfigLine::Comment(comment) => writeln!(f, "{comment}")?,
+                ConfigLine::EmptyLine => writeln!(f)?,
+                ConfigLine::Eof => (),
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ConfigFile<'_> {
+    pub fn parse(input: &str) -> IResult<&str, ConfigFile<'_>> {
+        map(separated_list0(line_ending, parse_line), ConfigFile).parse(input)
+    }
+}
+
+fn parse_line<'a>(input: &'a str) -> IResult<&'a str, ConfigLine<'a>> {
+    fn comment(input: &str) -> IResult<&str, &str> {
+        map(recognize((char('#'), not_line_ending)), |comment: &str| {
+            comment.trim_end()
+        })
+        .parse(input)
     }
 
     fn config_name<'a>(
         keyword: &'static str,
     ) -> impl Parser<&'a str, Output = &'a str, Error = nom::error::Error<&'a str>> {
-        preceded(space0, tag_no_case(keyword))
+        tag_no_case(keyword)
     }
 
     fn config<'a, T: NomParser>(
@@ -174,118 +314,145 @@ pub fn parse_config(input: &str) -> IResult<&str, OneConfig> {
     }
 
     let group1 = alt((
-        map(config("address"), OneConfig::Address),
-        map(config("audit-enable"), OneConfig::AuditEnable),
-        map(config("audit-file-mode"), OneConfig::AuditFileMode),
-        map(config("audit-file"), OneConfig::AuditFile),
-        map(config("audit-num"), OneConfig::AuditNum),
-        map(config("audit-size"), OneConfig::AuditSize),
-        map(config("bind-cert-file"), OneConfig::BindCertFile),
-        map(config("bind-cert-key-file"), OneConfig::BindCertKeyFile),
-        map(config("bind-cert-key-pass"), OneConfig::BindCertKeyPass),
-        map(config("bogus-nxdomain"), OneConfig::BogusNxDomain),
-        map(config("blacklist-ip"), OneConfig::BlacklistIp),
-        map(config("cache-file"), OneConfig::CacheFile),
-        map(config("cache-persist"), OneConfig::CachePersist),
-        map(config("cache-size"), OneConfig::CacheSize),
+        map(config("address"), ConfigItem::Address),
+        map(config("audit-enable"), ConfigItem::AuditEnable),
+        map(config("audit-file-mode"), ConfigItem::AuditFileMode),
+        map(config("audit-file"), ConfigItem::AuditFile),
+        map(config("audit-num"), ConfigItem::AuditNum),
+        map(config("audit-size"), ConfigItem::AuditSize),
+        map(config("bind-cert-file"), ConfigItem::BindCertFile),
+        map(config("bind-cert-key-file"), ConfigItem::BindCertKeyFile),
+        map(config("bind-cert-key-pass"), ConfigItem::BindCertKeyPass),
+        map(config("bogus-nxdomain"), ConfigItem::BogusNxDomain),
+        map(config("blacklist-ip"), ConfigItem::BlacklistIp),
+        map(config("cache-file"), ConfigItem::CacheFile),
+        map(config("cache-persist"), ConfigItem::CachePersist),
+        map(config("cache-size"), ConfigItem::CacheSize),
         map(
             config("cache-checkpoint-time"),
-            OneConfig::CacheCheckpointTime,
+            ConfigItem::CacheCheckpointTime,
         ),
-        map(config("ca-file"), OneConfig::CaFile),
-        map(config("ca-path"), OneConfig::CaPath),
-        map(config("client-rules"), OneConfig::ClientRule),
-        map(config("client-rule"), OneConfig::ClientRule),
-        map(config("conf-file"), OneConfig::ConfFile),
+        map(config("ca-file"), ConfigItem::CaFile),
+        map(config("ca-path"), ConfigItem::CaPath),
+        map(config("client-rules"), ConfigItem::ClientRule),
+        map(config("client-rule"), ConfigItem::ClientRule),
+        map(config("conf-file"), ConfigItem::ConfFile),
     ));
 
     let group2 = alt((
-        map(config("domain-rules"), OneConfig::DomainRule),
-        map(config("domain-rule"), OneConfig::DomainRule),
-        map(config("domain-set"), OneConfig::DomainSetProvider),
-        map(config("dnsmasq-lease-file"), OneConfig::DnsmasqLeaseFile),
-        map(config("dns64"), OneConfig::Dns64),
+        map(config("domain-rules"), ConfigItem::DomainRule),
+        map(config("domain-rule"), ConfigItem::DomainRule),
+        map(config("domain-set"), ConfigItem::DomainSetProvider),
+        map(config("dnsmasq-lease-file"), ConfigItem::DnsmasqLeaseFile),
+        map(config("dns64"), ConfigItem::Dns64),
         map(
             config("dualstack-ip-allow-force-AAAA"),
-            OneConfig::DualstackIpAllowForceAAAA,
+            ConfigItem::DualstackIpAllowForceAAAA,
         ),
         map(
             config("dualstack-ip-selection"),
-            OneConfig::DualstackIpSelection,
+            ConfigItem::DualstackIpSelection,
         ),
-        map(config("edns-client-subnet"), OneConfig::EdnsClientSubnet),
+        map(config("edns-client-subnet"), ConfigItem::EdnsClientSubnet),
         map(
             config("expand-ptr-from-address"),
-            OneConfig::ExpandPtrFromAddress,
+            ConfigItem::ExpandPtrFromAddress,
         ),
-        map(config("force-AAAA-SOA"), OneConfig::ForceAAAASOA),
-        map(config("force-HTTPS-SOA"), OneConfig::ForceHTTPSSOA),
-        map(config("force-qtype-soa"), OneConfig::ForceQtypeSoa),
-        map(config("response"), OneConfig::ResponseMode),
-        map(config("group-begin"), OneConfig::GroupBegin),
-        map(config_name("group-end"), |_| OneConfig::GroupEnd),
-        map(config("prefetch-domain"), OneConfig::PrefetchDomain),
-        map(config("cname"), OneConfig::CNAME),
-        map(config("num-workers"), OneConfig::NumWorkers),
-        map(config("domain"), OneConfig::Domain),
+        map(config("force-AAAA-SOA"), ConfigItem::ForceAAAASOA),
+        map(config("force-HTTPS-SOA"), ConfigItem::ForceHTTPSSOA),
+        map(config("force-qtype-soa"), ConfigItem::ForceQtypeSoa),
+        map(config("response"), ConfigItem::ResponseMode),
+        map(config("group-begin"), ConfigItem::GroupBegin),
+        map(config_name("group-end"), |_| ConfigItem::GroupEnd),
+        map(config("prefetch-domain"), ConfigItem::PrefetchDomain),
+        map(config("cname"), ConfigItem::CNAME),
+        map(config("num-workers"), ConfigItem::NumWorkers),
+        map(config("domain"), ConfigItem::Domain),
+        map(config("hosts-file"), ConfigItem::HostsFile),
+        map(config("https-record"), ConfigItem::HttpsRecord),
     ));
 
     let group3 = alt((
-        map(config("hosts-file"), OneConfig::HostsFile),
-        map(config("https-record"), OneConfig::HttpsRecord),
-        map(config("ignore-ip"), OneConfig::IgnoreIp),
-        map(config("local-ttl"), OneConfig::LocalTtl),
-        map(config("log-console"), OneConfig::LogConsole),
-        map(config("log-file-mode"), OneConfig::LogFileMode),
-        map(config("log-file"), OneConfig::LogFile),
-        map(config("log-filter"), OneConfig::LogFilter),
-        map(config("log-level"), OneConfig::LogLevel),
-        map(config("log-num"), OneConfig::LogNum),
-        map(config("log-size"), OneConfig::LogSize),
-        map(config("max-reply-ip-num"), OneConfig::MaxReplyIpNum),
-        map(config("mdns-lookup"), OneConfig::MdnsLookup),
-        map(config("nameserver"), OneConfig::ForwardRule),
-        map(config("proxy-server"), OneConfig::ProxyConfig),
-        map(config("rr-ttl-reply-max"), OneConfig::RrTtlReplyMax),
-        map(config("rr-ttl-min"), OneConfig::RrTtlMin),
-        map(config("rr-ttl-max"), OneConfig::RrTtlMax),
-        map(config("rr-ttl"), OneConfig::RrTtl),
+        map(config("ignore-ip"), ConfigItem::IgnoreIp),
+        map(config("local-ttl"), ConfigItem::LocalTtl),
+        map(config("log-console"), ConfigItem::LogConsole),
+        map(config("log-file-mode"), ConfigItem::LogFileMode),
+        map(config("log-file"), ConfigItem::LogFile),
+        map(config("log-filter"), ConfigItem::LogFilter),
+        map(config("log-level"), ConfigItem::LogLevel),
+        map(config("log-num"), ConfigItem::LogNum),
+        map(config("log-size"), ConfigItem::LogSize),
+        map(config("max-reply-ip-num"), ConfigItem::MaxReplyIpNum),
+        map(config("mdns-lookup"), ConfigItem::MdnsLookup),
+        map(config("nameserver"), ConfigItem::ForwardRule),
+        map(config("proxy-server"), ConfigItem::ProxyConfig),
+        map(config("rr-ttl-reply-max"), ConfigItem::RrTtlReplyMax),
+        map(config("rr-ttl-min"), ConfigItem::RrTtlMin),
+        map(config("rr-ttl-max"), ConfigItem::RrTtlMax),
+        map(config("rr-ttl"), ConfigItem::RrTtl),
+        map(config("resolv-file"), ConfigItem::ResolvFile),
+        map(config("resolv-hostanme"), ConfigItem::ResolvHostname),
     ));
 
     let group4 = alt((
-        map(config("resolv-file"), OneConfig::ResolvFile),
-        map(config("resolv-hostanme"), OneConfig::ResolvHostname),
-        map(config("response-mode"), OneConfig::ResponseMode),
-        map(config("server-name"), OneConfig::ServerName),
-        map(config("speed-check-mode"), OneConfig::SpeedMode),
+        map(config("response-mode"), ConfigItem::ResponseMode),
+        map(config("server-name"), ConfigItem::ServerName),
+        map(config("speed-check-mode"), ConfigItem::SpeedMode),
         map(
             config("serve-expired-reply-ttl"),
-            OneConfig::ServeExpiredReplyTtl,
+            ConfigItem::ServeExpiredReplyTtl,
         ),
-        map(config("serve-expired-ttl"), OneConfig::ServeExpiredTtl),
-        map(config("serve-expired"), OneConfig::ServeExpired),
-        map(config("srv-record"), OneConfig::SrvRecord),
-        map(config("resolv-hostname"), OneConfig::ResolvHostname),
-        map(config("tcp-idle-time"), OneConfig::TcpIdleTime),
-        map(config("nftset"), OneConfig::NftSet),
-        map(config("user"), OneConfig::User),
+        map(config("serve-expired-ttl"), ConfigItem::ServeExpiredTtl),
+        map(config("serve-expired"), ConfigItem::ServeExpired),
+        map(config("srv-record"), ConfigItem::SrvRecord),
+        map(config("resolv-hostname"), ConfigItem::ResolvHostname),
+        map(config("tcp-idle-time"), ConfigItem::TcpIdleTime),
+        map(config("nftset"), ConfigItem::NftSet),
+        map(config("user"), ConfigItem::User),
     ));
 
     let group5 = alt((
-        map(config("whitelist-ip"), OneConfig::WhitelistIp),
-        map(config("ip-set"), OneConfig::IpSetProvider),
-        map(config("ip-alias"), OneConfig::IpAlias),
-        map(NomParser::parse, OneConfig::Listener),
-        map(NomParser::parse, OneConfig::Server),
+        map(config("whitelist-ip"), ConfigItem::WhitelistIp),
+        map(config("ip-set"), ConfigItem::IpSetProvider),
+        map(config("ip-alias"), ConfigItem::IpAlias),
+        map(NomParser::parse, ConfigItem::Listener),
+        map(NomParser::parse, ConfigItem::Server),
     ));
 
     let group = alt((group1, group2, group3, group4, group5));
 
-    terminated(group, comment).parse(input)
+    alt((
+        map(
+            (
+                preceded(space0, group),
+                alt((
+                    map(recognize((space1, comment)), Some),
+                    map(space0, |_| None),
+                )),
+            ),
+            |(config, comment)| ConfigLine::Config { config, comment },
+        ),
+        map(preceded(space0, comment), ConfigLine::Comment),
+        map(eof, |_| ConfigLine::Eof),
+        map(space0, |_| ConfigLine::EmptyLine),
+    ))
+    .parse(input)
+}
+
+pub fn parse_config(input: &str) -> IResult<&str, Option<ConfigItem>> {
+    let (input, line) = parse_line(input)?;
+
+    let item = match line {
+        ConfigLine::Config { config, .. } => Some(config),
+        _ => None,
+    };
+
+    Ok((input, item))
 }
 
 #[cfg(test)]
 mod tests {
+    use indoc::indoc;
     use std::path::Path;
 
     use super::*;
@@ -296,7 +463,7 @@ mod tests {
             parse_config("nftset /www.example.com/#4:inet#tab#dns4").unwrap(),
             (
                 "",
-                OneConfig::NftSet(ConfigForDomain {
+                ConfigItem::NftSet(ConfigForDomain {
                     domain: Domain::Name("www.example.com".parse().unwrap()),
                     config: vec![ConfigForIP::V4(NFTsetConfig {
                         family: "inet",
@@ -304,6 +471,7 @@ mod tests {
                         name: "dns4".to_string()
                     })]
                 })
+                .into()
             )
         );
 
@@ -311,7 +479,7 @@ mod tests {
             parse_config("nftset /www.example.com/#4:inet#tab#dns4 # comment 123").unwrap(),
             (
                 "",
-                OneConfig::NftSet(ConfigForDomain {
+                ConfigItem::NftSet(ConfigForDomain {
                     domain: Domain::Name("www.example.com".parse().unwrap()),
                     config: vec![ConfigForIP::V4(NFTsetConfig {
                         family: "inet",
@@ -319,6 +487,7 @@ mod tests {
                         name: "dns4".to_string()
                     })]
                 })
+                .into()
             )
         );
     }
@@ -329,13 +498,16 @@ mod tests {
             parse_config("blacklist-ip  243.185.187.39").unwrap(),
             (
                 "",
-                OneConfig::BlacklistIp(IpOrSet::Net("243.185.187.39/32".parse().unwrap()))
+                ConfigItem::BlacklistIp(IpOrSet::Net("243.185.187.39/32".parse().unwrap())).into()
             )
         );
 
         assert_eq!(
             parse_config("blacklist-ip ip-set:name").unwrap(),
-            ("", OneConfig::BlacklistIp(IpOrSet::Set("name".to_string())))
+            (
+                "",
+                ConfigItem::BlacklistIp(IpOrSet::Set("name".to_string())).into()
+            )
         );
     }
 
@@ -345,13 +517,16 @@ mod tests {
             parse_config("whitelist-ip  243.185.187.39").unwrap(),
             (
                 "",
-                OneConfig::WhitelistIp(IpOrSet::Net("243.185.187.39/32".parse().unwrap()))
+                ConfigItem::WhitelistIp(IpOrSet::Net("243.185.187.39/32".parse().unwrap())).into()
             )
         );
 
         assert_eq!(
             parse_config("whitelist-ip ip-set:name").unwrap(),
-            ("", OneConfig::WhitelistIp(IpOrSet::Set("name".to_string())))
+            (
+                "",
+                ConfigItem::WhitelistIp(IpOrSet::Set("name".to_string())).into()
+            )
         );
     }
 
@@ -359,7 +534,7 @@ mod tests {
     fn test_parse_log_size() {
         assert_eq!(
             parse_config("log-size 1M").unwrap(),
-            ("", OneConfig::LogSize("1M".parse().unwrap()))
+            ("", ConfigItem::LogSize("1M".parse().unwrap()).into())
         );
     }
 
@@ -367,7 +542,7 @@ mod tests {
     fn test_parse_speed_check_mode() {
         assert_eq!(
             parse_config("speed-check-mode none").unwrap(),
-            ("", OneConfig::SpeedMode(Default::default()))
+            ("", ConfigItem::SpeedMode(Default::default()).into())
         );
     }
 
@@ -375,7 +550,10 @@ mod tests {
     fn test_parse_response_mode() {
         assert_eq!(
             parse_config("response-mode fastest-response").unwrap(),
-            ("", OneConfig::ResponseMode(ResponseMode::FastestResponse))
+            (
+                "",
+                ConfigItem::ResponseMode(ResponseMode::FastestResponse).into()
+            )
         );
     }
 
@@ -383,7 +561,7 @@ mod tests {
     fn test_parse_resolv_hostname() {
         assert_eq!(
             parse_config("resolv-hostname no").unwrap(),
-            ("", OneConfig::ResolvHostname(false))
+            ("", ConfigItem::ResolvHostname(false).into())
         );
     }
 
@@ -393,11 +571,12 @@ mod tests {
             parse_config("domain-set -name outbound -file /etc/smartdns/geoip.txt").unwrap(),
             (
                 "",
-                OneConfig::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
+                ConfigItem::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
                     name: "outbound".to_string(),
                     file: Path::new("/etc/smartdns/geoip.txt").to_path_buf(),
                     content_type: Default::default(),
                 }))
+                .into()
             )
         );
 
@@ -405,11 +584,12 @@ mod tests {
             parse_config("domain-set -n proxy-server -f proxy-server-list.txt").unwrap(),
             (
                 "",
-                OneConfig::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
+                ConfigItem::DomainSetProvider(DomainSetProvider::File(DomainSetFileProvider {
                     name: "proxy-server".to_string(),
                     file: Path::new("proxy-server-list.txt").to_path_buf(),
                     content_type: Default::default(),
                 }))
+                .into()
             )
         );
     }
@@ -420,13 +600,14 @@ mod tests {
             parse_config("domain-rules /domain-set:domain-block-list/ --address #").unwrap(),
             (
                 "",
-                OneConfig::DomainRule(ConfigForDomain {
+                ConfigItem::DomainRule(ConfigForDomain {
                     domain: Domain::Set("domain-block-list".to_string()),
                     config: DomainRule {
                         address: Some(AddressRuleValue::SOA),
                         ..Default::default()
                     }
                 })
+                .into()
             )
         );
     }
@@ -437,11 +618,115 @@ mod tests {
             parse_config("ip-set -name name -file /path/to/file.txt").unwrap(),
             (
                 "",
-                OneConfig::IpSetProvider(IpSetProvider {
+                ConfigItem::IpSetProvider(IpSetProvider {
                     name: "name".to_string(),
                     file: Path::new("/path/to/file.txt").to_path_buf(),
                 })
+                .into()
             )
         );
+    }
+
+    #[test]
+    fn test_parse_line() {
+        assert_eq!(
+            parse_line("address /example.com/1.2.3.5").unwrap().1,
+            ConfigLine::Config {
+                config: ConfigItem::Address(AddressRule {
+                    domain: "example.com".parse().unwrap(),
+                    address: "1.2.3.5".parse().unwrap()
+                }),
+                comment: None
+            }
+        );
+
+        assert_eq!(
+            parse_line("address /example.com/1.2.3.5  ").unwrap().1, // trailing spaces should be ignored
+            ConfigLine::Config {
+                config: ConfigItem::Address(AddressRule {
+                    domain: "example.com".parse().unwrap(),
+                    address: "1.2.3.5".parse().unwrap()
+                }),
+                comment: None
+            }
+        );
+
+        assert_eq!(
+            parse_line("address /example.com/1.2.3.5  # comment")
+                .unwrap()
+                .1, // trailing spaces should be ignored
+            ConfigLine::Config {
+                config: ConfigItem::Address(AddressRule {
+                    domain: "example.com".parse().unwrap(),
+                    address: "1.2.3.5".parse().unwrap()
+                }),
+                comment: Some("  # comment")
+            }
+        );
+
+        assert_eq!(
+            parse_line("# comment").unwrap().1,
+            ConfigLine::Comment("# comment")
+        );
+
+        assert_eq!(
+            parse_line("# comment  ").unwrap().1, // trailing spaces should be ignored
+            ConfigLine::Comment("# comment")
+        );
+
+        assert_eq!(
+            parse_line("  # comment").unwrap().1, // leading spaces should be ignored
+            ConfigLine::Comment("# comment")
+        );
+
+        assert_eq!(parse_line("").unwrap().1, ConfigLine::Eof);
+
+        assert_eq!(parse_line(" ").unwrap().1, ConfigLine::EmptyLine);
+    }
+
+    #[test]
+    fn test_config_file_update() {
+        let conf_in = indoc! {"
+        # comments are preserved1
+        address /example.com/1.2.3.4
+        address /a.example.com/5.6.7.8 # comments are preserved2
+        address /b.example.com/9.10.11.12 # comments are preserved3
+          # comments are preserved4
+        "};
+
+        let conf_out = indoc! {"
+        # comments are preserved1
+        address /example.com/1.2.3.4
+        address /a.example.com/#6 # comments are preserved2
+        address /b.example.com/9.10.11.12 # comments are preserved3
+        # comments are preserved4
+        "};
+
+        let (_, mut conf) = ConfigFile::parse(conf_in).unwrap();
+
+        assert_eq!(conf.0.len(), 6);
+
+        let mut rules = conf
+            .0
+            .iter()
+            .enumerate()
+            .flat_map(|(i, c)| match c {
+                ConfigLine::Config {
+                    config: ConfigItem::Address(rule),
+                    ..
+                } => Some((i, rule.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rules.len(), 3);
+
+        let (line, rule) = rules.get_mut(1).unwrap();
+        rule.address = AddressRuleValue::SOAv6;
+        if let Some(ConfigLine::Config { config, .. }) = conf.0.get_mut(*line) {
+            *config = ConfigItem::Address(rule.clone());
+        };
+
+        assert_eq!(conf.to_string(), conf_out);
     }
 }

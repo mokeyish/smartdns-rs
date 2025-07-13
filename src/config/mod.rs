@@ -352,18 +352,26 @@ impl std::fmt::Display for AddressRuleValue {
 #[allow(clippy::upper_case_acronyms)]
 pub enum Ignorable<T> {
     #[default]
-    IGN,
+    Ignore,
     Value(T),
 }
 
 pub type CNameRule = Ignorable<Name>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, crate::api::ToSchema)]
 pub struct AddressRule {
     #[serde(with = "serde_str")]
+    #[schema(value_type = String)]
     pub domain: Domain,
     #[serde(with = "serde_str")]
+    #[schema(value_type = String)]
     pub address: AddressRuleValue,
+}
+
+impl std::fmt::Display for AddressRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "/{}/{}", self.domain, self.address)
+    }
 }
 
 /// alias: nameserver rules
@@ -372,6 +380,12 @@ pub struct ForwardRule {
     #[serde(with = "serde_str")]
     pub domain: Domain,
     pub nameserver: String,
+}
+
+impl std::fmt::Display for ForwardRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "/{}/{}", self.domain, self.nameserver)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]

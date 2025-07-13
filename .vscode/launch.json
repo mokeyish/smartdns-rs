@@ -21,7 +21,7 @@
         "run",
         "-d", "./etc/smartdns",
         // "-c", "etc/smartdns/smartdns.conf",
-        "-c", "tests/example/smartdns.conf",
+        "-c", "etc/smartdns/smartdns-dev.conf",
         "-p", "./smartdns.pid",
         "-vvvv"
       ],

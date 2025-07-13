@@ -22,12 +22,12 @@ mod log;
 mod nameserver;
 mod openapi;
 mod serve_dns;
-mod settings;
 mod system;
 
 use crate::{app::App, server::DnsHandle};
 
 type StatefulRouter = Router<Arc<ServeState>>;
+pub use openapi::ToSchema;
 
 pub struct ServeState {
     pub app: App,
@@ -86,7 +86,6 @@ fn api_routes() -> StatefulRouter {
         .merge(nameserver::routes())
         .merge(address::routes())
         .merge(forward::routes())
-        .merge(settings::routes())
         .merge(audit::routes())
         .merge(listener::routes())
         .merge(log::routes())
@@ -97,16 +96,22 @@ async fn version() -> Json<&'static str> {
     Json(crate::BUILD_VERSION)
 }
 
-struct ApiError(anyhow::Error);
+enum ApiError {
+    Internal(anyhow::Error),
+    NotFound(String),
+}
 
 // Tell axum how to convert `AppError` into a response.
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", self.0),
-        )
-            .into_response()
+        match self {
+            ApiError::Internal(error) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Something went wrong: {error}"),
+            )
+                .into_response(),
+            ApiError::NotFound(err) => (StatusCode::NOT_FOUND, err).into_response(),
+        }
     }
 }
 
@@ -117,7 +122,7 @@ where
     E: Into<anyhow::Error>,
 {
     fn from(err: E) -> Self {
-        Self(err.into())
+        Self::Internal(err.into())
     }
 }
 
@@ -151,13 +156,8 @@ impl<T> DataListPayload<T> {
     }
 }
 
-trait IntoDataListPayload<T> {
-    fn into_data_list_payload(self) -> DataListPayload<T>;
-}
-
-impl<T> IntoDataListPayload<T> for Vec<T> {
-    #[inline]
-    fn into_data_list_payload(self) -> DataListPayload<T> {
-        DataListPayload::new(self)
+impl<T> From<Vec<T>> for DataListPayload<T> {
+    fn from(data: Vec<T>) -> Self {
+        Self::new(data)
     }
 }
