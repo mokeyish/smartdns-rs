@@ -214,7 +214,8 @@ mod tests {
     async fn test_address_rule_soa_v6() {
         let cfg = RuntimeConfig::builder()
             .with("domain-rule /google.com/ -address #6")
-            .build();
+            .build()
+            .unwrap();
 
         assert_eq!(
             cfg.domain_rule_group("default")
@@ -252,7 +253,8 @@ mod tests {
             domain-rule /google.com/ -address 1.2.3.4
             "#,
             )
-            .build();
+            .build()
+            .unwrap();
 
         assert_eq!(
             cfg.domain_rule_group("default")
@@ -288,7 +290,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ttl_clip_ttl_min() -> Result<(), DnsError> {
-        let cfg = RuntimeConfig::builder().with("rr-ttl-min 50").build();
+        let cfg = RuntimeConfig::builder()
+            .with("rr-ttl-min 50")
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
@@ -319,7 +324,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ttl_clip_ttl_max() -> Result<(), DnsError> {
-        let cfg = RuntimeConfig::builder().with("rr-ttl-max 50").build();
+        let cfg = RuntimeConfig::builder()
+            .with("rr-ttl-max 50")
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
@@ -353,7 +361,8 @@ mod tests {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
@@ -388,7 +397,8 @@ mod tests {
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
             .with("rr-ttl-reply-max 30")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
@@ -423,7 +433,8 @@ mod tests {
             .with("rr-ttl-min 55")
             .with("rr-ttl-reply-max 30")
             .with("max-reply-ip-num 2")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
@@ -463,7 +474,8 @@ mod tests {
             .with("rr-ttl-min 55")
             .with("rr-ttl-reply-max 30")
             .with("max-reply-ip-num 1")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
@@ -491,7 +503,8 @@ mod tests {
             .with("rr-ttl-min 55")
             .with("rr-ttl-reply-max 30")
             .with("max-reply-ip-num 2")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(
@@ -531,7 +544,8 @@ mod tests {
             .with("rr-ttl-min 55")
             .with("rr-ttl-reply-max 30")
             .with("max-reply-ip-num 2")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(AddressMiddleware)
             .with_multi_records(

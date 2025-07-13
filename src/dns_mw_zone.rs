@@ -164,7 +164,8 @@ mod tests {
     async fn test_srv_record() {
         let cfg = RuntimeConfig::builder()
             .with("srv-record /_vlmcs._tcp/example.com,1688,1,2")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
 

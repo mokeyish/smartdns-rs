@@ -119,7 +119,8 @@ mod tests {
     async fn test_query_ip() -> anyhow::Result<()> {
         let cfg = RuntimeConfig::builder()
             .with("hosts-file ./tests/test_data/hosts/a*.hosts")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(DnsHostsMiddleware::new()).build(cfg);
 
@@ -147,7 +148,8 @@ mod tests {
         let cfg = RuntimeConfig::builder()
             .with("hosts-file ./tests/test_data/hosts/a*.hosts")
             .with("expand-ptr-from-address yes")
-            .build();
+            .build()
+            .unwrap();
 
         let mock = DnsMockMiddleware::mock(DnsHostsMiddleware::new()).build(cfg);
 
