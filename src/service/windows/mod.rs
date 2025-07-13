@@ -83,10 +83,9 @@ pub(super) fn create_service_definition() -> ServiceDefinition {
                 "/C".into(),
                 format!(
                     r#"
-                    sc query {0} | findstr STATE.*:.*RUNNING > NUL
-                    && (sc query {0} && exit 0) ||  (sc query {0} && exit 1)    
-                    "#,
-                    SERVICE_NAME
+                    sc query {SERVICE_NAME} | findstr STATE.*:.*RUNNING > NUL
+                    && (sc query {SERVICE_NAME} && exit 0) ||  (sc query {SERVICE_NAME} && exit 1)    
+                    "#
                 )
                 .lines()
                 .collect::<String>()

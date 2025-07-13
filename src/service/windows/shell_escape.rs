@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::iter::repeat;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
 /// Common UTF-16 code points.
@@ -43,15 +42,16 @@ pub fn escape(s: Cow<'_, OsStr>) -> Cow<'_, OsStr> {
 
         match chars.next() {
             Some(utf16::DOUBLEQUOTE) => {
-                escaped_wide_string.extend(repeat(utf16::BACKSLASH).take(num_slashes * 2 + 1));
+                escaped_wide_string
+                    .extend(std::iter::repeat_n(utf16::BACKSLASH, num_slashes * 2 + 1));
                 escaped_wide_string.push(utf16::DOUBLEQUOTE);
             }
             Some(c) => {
-                escaped_wide_string.extend(repeat(utf16::BACKSLASH).take(num_slashes));
+                escaped_wide_string.extend(std::iter::repeat_n(utf16::BACKSLASH, num_slashes));
                 escaped_wide_string.push(c);
             }
             None => {
-                escaped_wide_string.extend(repeat(utf16::BACKSLASH).take(num_slashes * 2));
+                escaped_wide_string.extend(std::iter::repeat_n(utf16::BACKSLASH, num_slashes * 2));
                 break;
             }
         }

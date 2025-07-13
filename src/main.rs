@@ -85,7 +85,7 @@ fn main() {
 
 #[cfg(windows)]
 fn main() -> windows_service::Result<()> {
-    if matches!(std::env::args().last(), Some(flag) if flag == "--ws7642ea814a90496daaa54f2820254f12")
+    if matches!(std::env::args().next_back(), Some(flag) if flag == "--ws7642ea814a90496daaa54f2820254f12")
     {
         return service::windows::run();
     }
