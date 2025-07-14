@@ -48,7 +48,7 @@ pub struct NameServerInfo {
     pub name: Option<String>,
 
     /// the nameserver url.
-    pub server: DnsUrl,
+    pub server: NameServerUrl,
 
     /// set server to group, use with nameserver /domain/group.
     /// ```
@@ -157,6 +157,12 @@ impl std::fmt::Display for NameServerInfo {
 
 impl From<DnsUrl> for NameServerInfo {
     fn from(url: DnsUrl) -> Self {
+        NameServerUrl::Url(url).into()
+    }
+}
+
+impl From<NameServerUrl> for NameServerInfo {
+    fn from(url: NameServerUrl) -> Self {
         Self {
             server: url,
             name: Default::default(),
@@ -172,6 +178,33 @@ impl From<DnsUrl> for NameServerInfo {
             resolve_group: Default::default(),
             subnet: Default::default(),
             enabled: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NameServerUrl {
+    System,
+    #[serde(untagged)]
+    Url(DnsUrl),
+}
+
+impl NameServerUrl {
+    pub fn url(&self) -> Option<&DnsUrl> {
+        if let Self::Url(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+}
+
+impl std::fmt::Display for NameServerUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NameServerUrl::System => write!(f, "system"),
+            NameServerUrl::Url(url) => url.fmt(f),
         }
     }
 }
@@ -227,9 +260,24 @@ mod tests {
         assert_eq!(name_server.name, Some("AliDNS".to_string()));
         assert_eq!(
             name_server.server,
-            "https://dns.alidns.com/dns-query".parse().unwrap()
+            NameServerUrl::Url("https://dns.alidns.com/dns-query".parse().unwrap())
         );
         assert_eq!(name_server.group, vec!["china".to_string()]);
         assert_eq!(name_server.enabled, Some(true));
+    }
+
+    #[test]
+    fn test_json_nameserver_url() {
+        for (nsurl, expect_json) in [
+            (
+                NameServerUrl::Url("https://dns.alidns.com/dns-query".parse().unwrap()),
+                r#""https://dns.alidns.com/dns-query""#,
+            ),
+            (NameServerUrl::System, r#""system""#),
+        ] {
+            let json = serde_json::to_string(&nsurl).unwrap();
+            assert_eq!(json, expect_json);
+            assert_eq!(serde_json::from_str::<NameServerUrl>(&json).unwrap(), nsurl);
+        }
     }
 }
