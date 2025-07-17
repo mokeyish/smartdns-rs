@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 pub use crate::config::*;
 use crate::dns::DomainRuleGetter;
+use crate::dns_url::DnsProtocol;
 use crate::infra::ipset::IpMap;
 use crate::log;
 use crate::{
@@ -771,11 +772,8 @@ impl RuntimeConfigBuilder {
 
         // set nameserver group for bootstraping
         for server in cfg.nameservers.iter_mut() {
-            let NameServerUrl::Url(url) = &server.server else {
-                continue;
-            };
-            if url.ip().is_none() {
-                let host = url.host().to_string();
+            if server.server.proto() != DnsProtocol::System && server.server.ip().is_none() {
+                let host = server.server.host().unwrap().to_string();
                 if let Ok(Some(rule)) = host
                     .as_str()
                     .parse()
@@ -1288,7 +1286,7 @@ mod tests {
         let server_group = cfg.get_server_group("bootstrap");
         let server = server_group.first().cloned().unwrap();
 
-        assert_eq!(server.server.url().unwrap().proto(), &Protocol::Https);
+        assert_eq!(server.server.proto(), DnsProtocol::H(Protocol::Https));
         assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
 
         assert!(server.group.iter().any(|g| g == "bootstrap"));
@@ -1308,7 +1306,7 @@ mod tests {
 
         let server = server_group.first().cloned().unwrap();
 
-        assert_eq!(server.server.url().unwrap().proto(), &Protocol::Https);
+        assert_eq!(server.server.proto(), DnsProtocol::H(Protocol::Https));
         assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
         assert!(server.group.is_empty());
         assert!(!server.exclude_default_group);
@@ -1323,7 +1321,7 @@ mod tests {
 
         let server = cfg.nameservers.iter().find(|s| s.bootstrap_dns).unwrap();
 
-        assert_eq!(server.server.url().unwrap().proto(), &Protocol::Https);
+        assert_eq!(server.server.proto(), DnsProtocol::H(Protocol::Https));
         assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
         assert!(server.exclude_default_group);
         assert!(server.bootstrap_dns);
@@ -1338,7 +1336,7 @@ mod tests {
 
         let server = cfg.nameservers.iter().find(|s| s.bootstrap_dns).unwrap();
 
-        assert_eq!(server.server, NameServerUrl::System);
+        assert_eq!(server.server.proto(), DnsProtocol::System);
         assert_eq!(server.server.to_string(), "system");
         assert!(server.exclude_default_group);
         assert!(server.bootstrap_dns);
@@ -1352,7 +1350,7 @@ mod tests {
 
         let server = cfg.nameservers.iter().find(|s| s.bootstrap_dns).unwrap();
 
-        assert_eq!(server.server.url().unwrap().proto(), &Protocol::Https);
+        assert_eq!(server.server.proto(), DnsProtocol::H(Protocol::Https));
         assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
         assert_eq!(server.subnet, Some("192.168.0.0/16".parse().unwrap()));
         assert!(server.exclude_default_group);
@@ -1366,7 +1364,7 @@ mod tests {
             .build()
             .unwrap();
         let server = cfg.nameservers.first().unwrap();
-        assert_eq!(server.server.url().unwrap().proto(), &Protocol::Https);
+        assert_eq!(server.server.proto(), DnsProtocol::H(Protocol::Https));
         assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
         assert_eq!(server.so_mark, Some(255));
     }
@@ -1380,7 +1378,7 @@ mod tests {
 
         let server = cfg.nameservers.first().unwrap();
 
-        assert_eq!(server.server.url().unwrap().proto(), &Protocol::Https);
+        assert_eq!(server.server.proto(), DnsProtocol::H(Protocol::Https));
         assert_eq!(server.server.to_string(), "https://223.5.5.5/dns-query");
         assert_eq!(server.so_mark, Some(255));
     }
@@ -1397,16 +1395,10 @@ mod tests {
         let server = cfg.nameservers.first().unwrap();
 
         assert!(!server.exclude_default_group);
-        assert_eq!(server.server.url().unwrap().proto(), &Protocol::Tls);
+        assert_eq!(server.server.proto(), DnsProtocol::H(Protocol::Tls));
         assert_eq!(server.server.to_string(), "tls://dns.nextdns.io");
-        assert_eq!(
-            server.server.url().unwrap().ip(),
-            "45.90.28.0".parse::<IpAddr>().ok()
-        );
-        assert_eq!(
-            server.server.url().unwrap().domain(),
-            Some("dns.nextdns.io")
-        );
+        assert_eq!(server.server.ip(), "45.90.28.0".parse::<IpAddr>().ok());
+        assert_eq!(server.server.domain(), Some("dns.nextdns.io"));
     }
 
     #[test]

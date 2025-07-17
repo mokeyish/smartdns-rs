@@ -9,25 +9,26 @@ use super::*;
 impl NomParser for NameServerInfo {
     fn parse(input: &str) -> IResult<&str, Self> {
         let dns_url = |default_proto| {
-            let proto = map(
-                opt(alt((
-                    tag_no_case("udp://"),
-                    tag_no_case("tcp://"),
-                    #[cfg(feature = "dns-over-tls")]
-                    tag_no_case("tls://"),
-                    #[cfg(feature = "dns-over-https")]
-                    tag_no_case("https://"),
-                    #[cfg(feature = "dns-over-quic")]
-                    tag_no_case("quic://"),
-                    #[cfg(feature = "dns-over-h3")]
-                    tag_no_case("h3://"),
-                ))),
-                move |p| p.unwrap_or(default_proto),
-            );
+            let proto = opt(alt((
+                tag_no_case("udp://"),
+                tag_no_case("tcp://"),
+                #[cfg(feature = "dns-over-tls")]
+                tag_no_case("tls://"),
+                #[cfg(feature = "dns-over-https")]
+                tag_no_case("https://"),
+                #[cfg(feature = "dns-over-quic")]
+                tag_no_case("quic://"),
+                #[cfg(feature = "dns-over-h3")]
+                tag_no_case("h3://"),
+            )));
 
             map_res(
                 pair(proto, take_till1(|c: char| c.is_whitespace())),
-                |(a, b)| {
+                move |(a, b)| {
+                    let a = a.unwrap_or(match b {
+                        "system" => "",
+                        _ => default_proto,
+                    });
                     let url: String = [a, b].concat();
                     match DnsUrl::from_str(&url) {
                         Ok(url) => Ok(url),
@@ -42,14 +43,6 @@ impl NomParser for NameServerInfo {
                 },
             )
         };
-
-        let server_url = alt((
-            value(
-                NameServerUrl::System,
-                pair(tag_no_case("system"), not(satisfy(|c| !c.is_whitespace()))),
-            ),
-            dns_url("udp://").map(|url| NameServerUrl::Url(url)),
-        ));
 
         let (input, url) = alt((
             preceded(
@@ -77,11 +70,7 @@ impl NomParser for NameServerInfo {
                 tag_no_case("server-quic"),
                 preceded(space1, dns_url("quic://")),
             ),
-        ))
-        .map(NameServerUrl::Url)
-        .or(preceded(
-            tag_no_case("server"),
-            preceded(space1, server_url),
+            preceded(tag_no_case("server"), preceded(space1, dns_url("udp://"))),
         ))
         .parse(input)?;
 
@@ -91,65 +80,61 @@ impl NomParser for NameServerInfo {
 
         if let Some(options) = options {
             for (k, v) in options {
-                match (k.to_lowercase().as_str(), &mut nameserver.server) {
-                    ("e" | "exclude-default-group", _) => nameserver.exclude_default_group = true,
-                    ("blacklist-ip", _) => nameserver.blacklist_ip = true,
-                    ("whitelist-ip", _) => nameserver.whitelist_ip = true,
-                    ("check-edns", _) => nameserver.check_edns = true,
-                    ("b" | "bootstrap-dns", _) => nameserver.bootstrap_dns = true,
-                    ("set-mark", _) => match v {
+                match k.to_lowercase().as_str() {
+                    "e" | "exclude-default-group" => nameserver.exclude_default_group = true,
+                    "blacklist-ip" => nameserver.blacklist_ip = true,
+                    "whitelist-ip" => nameserver.whitelist_ip = true,
+                    "check-edns" => nameserver.check_edns = true,
+                    "b" | "bootstrap-dns" => nameserver.bootstrap_dns = true,
+                    "set-mark" => match v {
                         Some(m) => nameserver.so_mark = u32::from_str_or_hex(m).ok(),
                         None => {
                             log::warn!("expect mark")
                         }
                     },
-                    ("g" | "group", _) => match v {
+                    "g" | "group" => match v {
                         Some(g) => nameserver.group.push(g.to_string()),
                         None => {
                             log::warn!("expect group name")
                         }
                     },
-                    ("p" | "proxy", _) => {
+                    "p" | "proxy" => {
                         nameserver.proxy = v.map(|p| p.to_string());
                     }
-                    ("interface", _) => {
+                    "interface" => {
                         nameserver.interface = v.map(|p| p.to_string());
                     }
-                    ("subnet", _) => match v {
+                    "subnet" => match v {
                         Some(s) => nameserver.subnet = IpNet::parse(s).ok().map(|s| s.1),
                         None => {
                             log::warn!("expect suedns client subnetbnet")
                         }
                     },
-                    ("host-name", NameServerUrl::Url(server)) => match v {
+                    "host-name" => match v {
                         Some(host_name) => {
                             if host_name == "-" {
-                                server.set_sni_off(true);
+                                nameserver.server.set_sni_off(true);
                             } else {
-                                server.set_host(host_name);
+                                nameserver.server.set_host(host_name);
                             }
                         }
                         None => {
                             log::warn!("expect host-name")
                         }
                     },
-                    ("k" | "no-check-certificate", NameServerUrl::Url(server)) => {
-                        server.set_ssl_verify(false);
+                    "k" | "no-check-certificate" => {
+                        nameserver.server.set_ssl_verify(false);
                     }
-                    ("tls-host-verify", NameServerUrl::Url(server)) => match v {
-                        Some(tls_host_verify) => match server.host() {
-                            url::Host::Ipv4(ipv4_addr) => {
-                                server.set_ip(IpAddr::V4(*ipv4_addr));
-                                server.set_host(tls_host_verify);
-                            }
-                            url::Host::Ipv6(ipv6_addr) => {
-                                server.set_ip(IpAddr::V6(*ipv6_addr));
-                                server.set_host(tls_host_verify);
-                            }
-                            url::Host::Domain(_) => {
+                    "tls-host-verify" => match v {
+                        Some(tls_host_verify) => {
+                            if let Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) =
+                                nameserver.server.host()
+                            {
+                                nameserver.server.set_host(tls_host_verify);
+                            } else {
                                 log::warn!("tls-host-verify expects an ip address host");
                             }
-                        },
+                        }
                         None => {
                             log::warn!("expect tls-host-verify")
                         }
@@ -180,7 +165,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::Url(DnsUrl::from_str("udp://8.8.8.8:53").unwrap()),
+                    server: DnsUrl::from_str("udp://8.8.8.8:53").unwrap(),
                     interface: Some("Net".to_string()),
                     ..name_server_default()
                 }
@@ -192,7 +177,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::Url(DnsUrl::from_str("udp://8.8.8.8").unwrap()),
+                    server: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
                     ..name_server_default()
                 }
             ))
@@ -203,7 +188,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::System,
+                    server: DnsUrl::from_str("system").unwrap(),
                     ..name_server_default()
                 }
             ))
@@ -214,7 +199,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::System,
+                    server: DnsUrl::from_str("system").unwrap(),
                     exclude_default_group: true,
                     ..name_server_default()
                 }
@@ -226,7 +211,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::Url(DnsUrl::from_str("udp://8.8.8.8").unwrap()),
+                    server: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
                     subnet: Some("192.168.1.1/32".parse().unwrap()),
                     ..name_server_default()
                 }
@@ -252,7 +237,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::Url(DnsUrl::from_str("tls://8.8.8.8:853").unwrap()),
+                    server: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
                     ..name_server_default()
                 }
             ))
@@ -263,7 +248,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::Url(DnsUrl::from_str("tls://8.8.8.8:853").unwrap()),
+                    server: DnsUrl::from_str("tls://8.8.8.8:853").unwrap(),
                     ..name_server_default()
                 }
             ))
@@ -275,9 +260,7 @@ mod tests {
                 "",
                 NameServerInfo {
                     name: None,
-                    server: NameServerUrl::Url(
-                        DnsUrl::from_str("tls://[2606:4700:4700::1111]").unwrap()
-                    ),
+                    server: DnsUrl::from_str("tls://[2606:4700:4700::1111]").unwrap(),
                     ..name_server_default()
                 }
             ))
@@ -293,9 +276,7 @@ mod tests {
             Ok((
                 "",
                 NameServerInfo {
-                    server: NameServerUrl::Url(
-                        DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap()
-                    ),
+                    server: DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap(),
                     group: vec!["bootstrap".to_string()],
                     exclude_default_group: true,
                     ..name_server_default()
@@ -313,9 +294,7 @@ mod tests {
             Ok((
                 " # -proxy proxy",
                 NameServerInfo {
-                    server: NameServerUrl::Url(
-                        DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap()
-                    ),
+                    server: DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap(),
                     group: vec!["alidns".to_string()],
                     exclude_default_group: true,
                     ..name_server_default()

@@ -12,11 +12,10 @@ use tokio::sync::RwLock;
 use url::Host;
 
 use crate::{
-    config::NameServerUrl,
     dns::DnsResponse,
     dns_conf::NameServerInfo,
     dns_error::LookupError,
-    dns_url::DnsUrlParamExt,
+    dns_url::{DnsProtocol, DnsUrlParamExt},
     log::{self, debug, info, warn},
     proxy::ProxyConfig,
     rustls::TlsClientConfigBundle,
@@ -45,6 +44,7 @@ use bootstrap::BootstrapResolver;
 use connection_provider::{
     Connection, ConnectionProvider, RawNameServerConfig, TokioRuntimeProvider,
 };
+use smallvec::SmallVec;
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
@@ -111,12 +111,8 @@ impl DnsClientBuilder {
             let entry = server_instances.entry(server_config);
             if let std::collections::hash_map::Entry::Occupied(_) = entry {
                 if dedup {
-                    return (None, &[][..]);
+                    return SmallVec::new();
                 }
-            }
-            if let NameServerUrl::System = server_config.server {
-                entry.or_default();
-                return (None, &*boot.servers);
             }
             let server = entry.or_insert_with(|| {
                 let proxy = server_config
@@ -125,22 +121,20 @@ impl DnsClientBuilder {
                     .map(|n| proxies.get(n))
                     .unwrap_or_default()
                     .cloned();
-                match NameServer::new(
+                NameServer::new(
                     server_config.clone(),
                     proxy,
                     Some(tls_client_config.clone()),
                     resolver,
                     client_subnet,
-                ) {
-                    Ok(s) => Some(Arc::new(s)),
-                    Err(err) => {
-                        let url = server_config.server.to_string();
-                        log::error!("failed to create nameserver {url}, error: {err}");
-                        None
-                    }
-                }
+                )
+                .unwrap_or_else(|err| {
+                    let url = server_config.server.to_string();
+                    log::error!("failed to create nameserver {url}, error: {err}");
+                    SmallVec::new()
+                })
             });
-            (server.clone(), &[][..])
+            server.clone()
         };
 
         let mut bootstrap_servers;
@@ -148,15 +142,12 @@ impl DnsClientBuilder {
             bootstrap_servers = server_infos
                 .iter()
                 .filter(|info| info.bootstrap_dns)
-                .filter(|info| match &info.server {
-                    NameServerUrl::System => true,
-                    NameServerUrl::Url(server) => {
-                        if server.ip().is_none() {
-                            warn!("bootstrap-dns must use ip addess, {:?}", server.host());
-                            false
-                        } else {
-                            true
-                        }
+                .filter(|info| {
+                    if info.server.proto() != DnsProtocol::System && info.server.ip().is_none() {
+                        warn!("bootstrap-dns must use ip addess, {:?}", info.server.host());
+                        false
+                    } else {
+                        true
                     }
                 })
                 .cloned()
@@ -166,9 +157,8 @@ impl DnsClientBuilder {
                 bootstrap_servers = server_infos
                     .iter()
                     .filter(|info| info.proxy.is_none())
-                    .filter(|info| match &info.server {
-                        NameServerUrl::System => true,
-                        NameServerUrl::Url(server) => server.ip().is_some(),
+                    .filter(|info| {
+                        info.server.proto() == DnsProtocol::System || info.server.ip().is_some()
                     })
                     .cloned()
                     .collect::<Vec<_>>()
@@ -187,10 +177,7 @@ impl DnsClientBuilder {
             let resolver: Arc<BootstrapResolver> = if !bootstrap_servers.is_empty() {
                 let servers = bootstrap_servers
                     .iter()
-                    .flat_map(|server_config| {
-                        let (server, servers) = make_server(&server_config, None, true);
-                        servers.iter().cloned().chain(server)
-                    })
+                    .flat_map(|server_config| make_server(server_config, None, true))
                     .collect();
 
                 let new_resolver = NameServerGroup {
@@ -229,9 +216,7 @@ impl DnsClientBuilder {
             let servers = group
                 .iter()
                 .flat_map(|server_config| {
-                    let (server, servers) =
-                        make_server(*server_config, Some(bootstrap.clone()), false);
-                    servers.iter().cloned().chain(server)
+                    make_server(*server_config, Some(bootstrap.clone()), false)
                 })
                 .collect();
 
@@ -392,22 +377,73 @@ impl NameServer {
         tls_client_config: Option<TlsClientConfigBundle>,
         resolver: Option<Arc<BootstrapResolver>>,
         default_client_subnet: Option<ClientSubnet>,
-    ) -> anyhow::Result<Self> {
-        let NameServerUrl::Url(url) = &config.server else {
-            unreachable!()
-        };
+    ) -> anyhow::Result<smallvec::SmallVec<[Arc<Self>; 1]>> {
+        match config.server.proto() {
+            DnsProtocol::System => {
+                let conf = crate::libdns::resolver::system_conf::read_system_conf();
+                let servers = match &conf {
+                    Ok((r, _)) => r.name_servers(),
+                    Err(err) => anyhow::bail!("read system conf failed: {}", err),
+                };
+                servers
+                    .iter()
+                    .map(|server| {
+                        Self::make(
+                            config.clone(),
+                            proxy.clone(),
+                            tls_client_config.clone(),
+                            resolver.clone(),
+                            default_client_subnet,
+                            server.socket_addr,
+                            Some(&match server.socket_addr.ip() {
+                                IpAddr::V4(addr) => Host::Ipv4(addr),
+                                IpAddr::V6(addr) => Host::Ipv6(addr),
+                            }),
+                            server.protocol,
+                        )
+                        .map(Arc::new)
+                    })
+                    .collect()
+            }
+            DnsProtocol::H(protocol) => {
+                let socket_addr = {
+                    let ip_addr = config.server.ip();
+                    let port = config.server.port().unwrap();
+                    SocketAddr::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port)
+                };
 
-        let socket_addr = {
-            let ip_addr = url.ip();
-            let port = url.port();
-            SocketAddr::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port)
-        };
+                Ok(SmallVec::from_buf([Arc::new(Self::make(
+                    config,
+                    proxy,
+                    tls_client_config,
+                    resolver,
+                    default_client_subnet,
+                    socket_addr,
+                    None,
+                    protocol,
+                )?)]))
+            }
+        }
+    }
+
+    fn make(
+        config: NameServerInfo,
+        proxy: Option<ProxyConfig>,
+        tls_client_config: Option<TlsClientConfigBundle>,
+        resolver: Option<Arc<BootstrapResolver>>,
+        default_client_subnet: Option<ClientSubnet>,
+        socket_addr: SocketAddr,
+        host: Option<&Host>,
+        protocol: Protocol,
+    ) -> anyhow::Result<NameServer> {
+        let url = config.server;
+        let host = host.or(url.host()).unwrap();
 
         if socket_addr.ip().is_unspecified() && resolver.is_none() {
             anyhow::bail!("Parameter resolver is required for non-ip upstream");
         }
 
-        let (tls_dns_name, tls_config) = if url.proto().is_encrypted() {
+        let (tls_dns_name, tls_config) = if protocol.is_encrypted() {
             let Some(tls_client_config) = tls_client_config else {
                 anyhow::bail!("Parameter tls_client_config is required for Encrypted upstream");
             };
@@ -420,7 +456,7 @@ impl NameServer {
                 tls_client_config.normal
             };
 
-            (Some(url.host().to_string()), Some(config))
+            (Some(host.to_string()), Some(config))
         } else {
             (None, None)
         };
@@ -447,7 +483,6 @@ impl NameServer {
 
         let provider = GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device));
 
-        let protocol = *url.proto();
         let http_endpoint = url.path().map(|s| s.to_string());
 
         let config = RawNameServerConfig {
@@ -466,7 +501,7 @@ impl NameServer {
         };
 
         Ok(Self {
-            server: url.host().to_owned(),
+            server: host.to_owned(),
             ip_addrs: url
                 .ip()
                 .map(|ip| RwLock::new(Arc::from([ip])))
