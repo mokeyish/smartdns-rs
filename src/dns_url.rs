@@ -14,6 +14,13 @@ use std::{
 };
 use url::{Host, Url};
 
+/// The protocol on which a NameServer should be communicated with
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum DnsProtocol {
+    System,
+    H(Protocol),
+}
+
 /// alias: system、google、cloudflare、quad9
 /// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => DNS over UDP
 /// tcp://8.8.8.8:53                            => DNS over TCP
@@ -23,8 +30,8 @@ use url::{Host, Url};
 /// h3://1.1.1.1/dns-query                      => DoH3: DNS over HTTP/3
 #[derive(Debug, Clone, Eq)]
 pub struct DnsUrl {
-    proto: Protocol,
-    host: Host,
+    proto: DnsProtocol,
+    host: Option<Host>,
     port: Option<u16>,
     path: Option<String>,
     ip: Option<IpAddr>,
@@ -34,21 +41,27 @@ pub struct DnsUrl {
 
 impl DnsUrl {
     #[inline]
-    pub fn proto(&self) -> &Protocol {
-        &self.proto
+    pub fn proto(&self) -> DnsProtocol {
+        self.proto
     }
 
     #[inline]
-    pub fn host(&self) -> &Host {
-        &self.host
+    pub fn host(&self) -> Option<&Host> {
+        self.host.as_ref()
     }
 
-    pub fn port(&self) -> u16 {
-        self.port.unwrap_or_else(|| self.proto.default_port())
+    pub fn port(&self) -> Option<u16> {
+        self.port.or_else(|| match self.proto {
+            DnsProtocol::System => None,
+            DnsProtocol::H(proto) => Some(proto.default_port()),
+        })
     }
 
-    pub fn is_default_port(&self) -> bool {
-        self.proto.is_default_port(self.port())
+    pub fn is_default_port(&self) -> Option<bool> {
+        match self.proto {
+            DnsProtocol::System => None,
+            DnsProtocol::H(proto) => Some(proto.is_default_port(self.port()?)),
+        }
     }
 
     pub fn prefer_h3(&self) -> bool {
@@ -57,7 +70,7 @@ impl DnsUrl {
 
     pub fn path(&self) -> Option<&str> {
         match self.proto {
-            Protocol::Https | Protocol::H3 => match self.path.as_ref() {
+            DnsProtocol::H(Https | H3) => match self.path.as_ref() {
                 Some(p) if !p.is_empty() => Some(p),
                 _ => Some("/dns-query"),
             },
@@ -67,7 +80,7 @@ impl DnsUrl {
 
     pub fn ip(&self) -> Option<IpAddr> {
         self.ip
-            .or_else(|| match self.host() {
+            .or_else(|| match self.host()? {
                 Host::Domain(_) => None,
                 Host::Ipv4(ip) => Some(ip.to_owned().into()),
                 Host::Ipv6(ip) => Some(ip.to_owned().into()),
@@ -76,7 +89,7 @@ impl DnsUrl {
     }
 
     pub fn domain(&self) -> Option<&str> {
-        if let Host::Domain(domain) = self.host() {
+        if let Some(Host::Domain(domain)) = self.host() {
             Some(domain.as_str())
         } else {
             self.params.get("host").map(|s| s.as_str())
@@ -85,7 +98,7 @@ impl DnsUrl {
 
     #[inline]
     pub fn addr(&self) -> Option<SocketAddr> {
-        self.ip().map(|ip| SocketAddr::new(ip, self.port()))
+        Some(SocketAddr::new(self.ip()?, self.port()?))
     }
 
     pub fn set_ip(&mut self, ip: IpAddr) {
@@ -93,16 +106,16 @@ impl DnsUrl {
     }
 
     pub fn set_proto(&mut self, proto: Protocol) {
-        self.proto = proto;
+        self.proto = DnsProtocol::H(proto);
     }
 
     pub fn set_host(&mut self, name: &str) {
         match self.host() {
-            Host::Ipv4(ip) => self.set_ip((*ip).into()),
-            Host::Ipv6(ip) => self.set_ip((*ip).into()),
+            Some(Host::Ipv4(ip)) => self.set_ip((*ip).into()),
+            Some(Host::Ipv6(ip)) => self.set_ip((*ip).into()),
             _ => (),
         }
-        self.host = Host::Domain(name.to_string())
+        self.host = Some(Host::Domain(name.to_string()));
     }
 }
 
@@ -141,6 +154,17 @@ impl FromStr for DnsUrl {
     fn from_str(url: &str) -> Result<Self, Self::Err> {
         let mut url = url.to_lowercase();
         if !url.contains("://") {
+            if url == "system" {
+                return Ok(Self {
+                    proto: DnsProtocol::System,
+                    host: None,
+                    port: None,
+                    path: None,
+                    ip: None,
+                    params: Default::default(),
+                    fragment: None,
+                });
+            }
             url.insert_str(0, "udp://")
         }
 
@@ -204,8 +228,8 @@ impl FromStr for DnsUrl {
             .collect::<BTreeMap<_, _>>();
 
         Ok(Self {
-            proto,
-            host,
+            proto: DnsProtocol::H(proto),
+            host: Some(host),
             port,
             path: if url.path() == "/" && !is_endwith_slash {
                 None
@@ -221,16 +245,24 @@ impl FromStr for DnsUrl {
 
 impl std::fmt::Display for DnsUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let proto = match self.proto {
+            DnsProtocol::System => {
+                write!(f, "system")?;
+                return Ok(());
+            }
+            DnsProtocol::H(proto) => proto,
+        };
+
         // schema
-        write!(f, "{}://", self.proto)?;
+        write!(f, "{}://", proto)?;
 
         // host
-        write!(f, "{}", self.host())?;
+        write!(f, "{}", self.host().unwrap())?;
 
         // port
 
-        if !self.is_default_port() {
-            write!(f, ":{}", self.port())?;
+        if !self.is_default_port().unwrap() {
+            write!(f, ":{}", self.port().unwrap())?;
         }
 
         // path
@@ -374,9 +406,9 @@ mod tests {
     #[test]
     fn test_parse_udp() {
         let url = DnsUrl::from_str("8.8.8.8").unwrap();
-        assert_eq!(url.proto, Protocol::Udp);
-        assert_eq!(url.host.to_string(), "8.8.8.8");
-        assert_eq!(url.port(), 53);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Udp));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "8.8.8.8");
+        assert_eq!(url.port(), Some(53));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://8.8.8.8");
         assert!(url.ip().is_some());
@@ -385,9 +417,9 @@ mod tests {
     #[test]
     fn test_parse_udp_1() {
         let url = DnsUrl::from_str("udp://8.8.8.8").unwrap();
-        assert_eq!(url.proto, Protocol::Udp);
-        assert_eq!(url.host.to_string(), "8.8.8.8");
-        assert_eq!(url.port(), 53);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Udp));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "8.8.8.8");
+        assert_eq!(url.port(), Some(53));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://8.8.8.8");
         assert!(url.ip().is_some());
@@ -396,9 +428,9 @@ mod tests {
     #[test]
     fn test_parse_udp_2() {
         let url = DnsUrl::from_str("udp://1.1.1.1:8053").unwrap();
-        assert_eq!(url.proto, Protocol::Udp);
-        assert_eq!(url.host.to_string(), "1.1.1.1");
-        assert_eq!(url.port(), 8053);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Udp));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "1.1.1.1");
+        assert_eq!(url.port(), Some(8053));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://1.1.1.1:8053");
         assert!(url.ip().is_some());
@@ -407,16 +439,19 @@ mod tests {
     #[test]
     fn test_parse_udp_ipv6() {
         for ip in CLOUDFLARE_IPS.iter().map(DnsUrl::from) {
-            assert!(ip.proto.is_datagram());
+            let DnsProtocol::H(proto) = ip.proto else {
+                panic!()
+            };
+            assert!(proto.is_datagram());
         }
     }
 
     #[test]
     fn test_parse_tcp() {
         let url = DnsUrl::from_str("tcp://8.8.8.8").unwrap();
-        assert_eq!(url.proto, Protocol::Tcp);
-        assert_eq!(url.host.to_string(), "8.8.8.8");
-        assert_eq!(url.port(), 53);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Tcp));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "8.8.8.8");
+        assert_eq!(url.port(), Some(53));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tcp://8.8.8.8");
     }
@@ -424,9 +459,9 @@ mod tests {
     #[test]
     fn test_parse_tcp_1() {
         let url = DnsUrl::from_str("tcp://8.8.8.8:8053").unwrap();
-        assert_eq!(url.proto, Protocol::Tcp);
-        assert_eq!(url.host.to_string(), "8.8.8.8");
-        assert_eq!(url.port(), 8053);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Tcp));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "8.8.8.8");
+        assert_eq!(url.port(), Some(8053));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tcp://8.8.8.8:8053");
     }
@@ -435,9 +470,9 @@ mod tests {
     #[cfg(feature = "dns-over-tls")]
     fn test_parse_tls_1() {
         let url = DnsUrl::from_str("tls://8.8.8.8").unwrap();
-        assert_eq!(url.proto, Protocol::Tls);
-        assert_eq!(url.host.to_string(), "8.8.8.8");
-        assert_eq!(url.port(), 853);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Tls));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "8.8.8.8");
+        assert_eq!(url.port(), Some(853));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tls://8.8.8.8");
     }
@@ -446,9 +481,9 @@ mod tests {
     #[cfg(feature = "dns-over-tls")]
     fn test_parse_tls_2() {
         let url = DnsUrl::from_str("tls://8.8.8.8:953").unwrap();
-        assert_eq!(url.proto, Protocol::Tls);
-        assert_eq!(url.host.to_string(), "8.8.8.8");
-        assert_eq!(url.port(), 953);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Tls));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "8.8.8.8");
+        assert_eq!(url.port(), Some(953));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tls://8.8.8.8:953");
     }
@@ -458,9 +493,9 @@ mod tests {
     fn test_parse_tls_3() {
         let mut url = DnsUrl::from_str("tls://8.8.8.8:953").unwrap();
         url.set_host("dns.google");
-        assert_eq!(url.proto, Protocol::Tls);
-        assert_eq!(url.host.to_string(), "dns.google");
-        assert_eq!(url.port(), 953);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Tls));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "dns.google");
+        assert_eq!(url.port(), Some(953));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "tls://dns.google:953");
         assert_eq!(url.ip(), "8.8.8.8".parse().ok())
@@ -470,9 +505,9 @@ mod tests {
     #[cfg(feature = "dns-over-https")]
     fn test_parse_https() {
         let url = DnsUrl::from_str("https://dns.google/dns-query").unwrap();
-        assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.google");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Https));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "dns.google");
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
         assert!(url.ip().is_none());
@@ -482,9 +517,9 @@ mod tests {
     #[cfg(feature = "dns-over-https")]
     fn test_parse_https_1() {
         let url = DnsUrl::from_str("https://dns.google/dns-query1").unwrap();
-        assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.google");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Https));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "dns.google");
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/dns-query1"));
         assert_eq!(url.to_string(), "https://dns.google/dns-query1");
         assert!(url.ip().is_none());
@@ -495,9 +530,9 @@ mod tests {
     fn test_parse_https_2() {
         let url = DnsUrl::from_str("https://dns.google").unwrap();
 
-        assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.google");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Https));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "dns.google");
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
         assert!(url.ip().is_none());
@@ -508,9 +543,12 @@ mod tests {
     fn test_parse_quic() {
         let url = DnsUrl::from_str("quic://dns.adguard-dns.com").unwrap();
 
-        assert_eq!(url.proto, Protocol::Quic);
-        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
-        assert_eq!(url.port(), 853);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Quic));
+        assert_eq!(
+            url.host.as_ref().unwrap().to_string(),
+            "dns.adguard-dns.com"
+        );
+        assert_eq!(url.port(), Some(853));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "quic://dns.adguard-dns.com");
         assert!(url.ip().is_none());
@@ -521,9 +559,12 @@ mod tests {
     fn test_parse_h3() {
         let url = DnsUrl::from_str("h3://dns.adguard-dns.com").unwrap();
 
-        assert_eq!(url.proto, Protocol::H3);
-        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::H3));
+        assert_eq!(
+            url.host.as_ref().unwrap().to_string(),
+            "dns.adguard-dns.com"
+        );
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "h3://dns.adguard-dns.com/dns-query");
         assert!(url.ip().is_none());
@@ -534,9 +575,12 @@ mod tests {
     fn test_parse_h3_2() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Https));
+        assert_eq!(
+            url.host.as_ref().unwrap().to_string(),
+            "dns.adguard-dns.com"
+        );
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert!(url.prefer_h3());
@@ -548,9 +592,12 @@ mod tests {
     fn test_parse_h3_3() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Https));
+        assert_eq!(
+            url.host.as_ref().unwrap().to_string(),
+            "dns.adguard-dns.com"
+        );
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert!(url.prefer_h3());
@@ -562,9 +609,12 @@ mod tests {
     fn test_parse_h3_4() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Https));
+        assert_eq!(
+            url.host.as_ref().unwrap().to_string(),
+            "dns.adguard-dns.com"
+        );
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert!(url.prefer_h3());
@@ -576,9 +626,12 @@ mod tests {
     fn test_parse_h3_5() {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/2dns-query#h3").unwrap();
 
-        assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
-        assert_eq!(url.port(), 443);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Https));
+        assert_eq!(
+            url.host.as_ref().unwrap().to_string(),
+            "dns.adguard-dns.com"
+        );
+        assert_eq!(url.port(), Some(443));
         assert_eq!(url.path(), Some("/2dns-query"));
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/2dns-query#h3");
         assert!(url.prefer_h3());
@@ -597,9 +650,9 @@ mod tests {
     #[cfg(feature = "mdns")]
     fn test_parse_mdns() {
         let url = DnsUrl::from_str("mdns://127.0.0.1").unwrap();
-        assert_eq!(url.proto, Protocol::Mdns);
-        assert_eq!(url.host.to_string(), "127.0.0.1");
-        assert_eq!(url.port(), 5353);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Mdns));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "127.0.0.1");
+        assert_eq!(url.port(), Some(5353));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "mdns://127.0.0.1");
         assert!(url.ip().is_some());
@@ -609,20 +662,30 @@ mod tests {
     #[cfg(feature = "mdns")]
     fn test_parse_mdns1() {
         let url = DnsUrl::from_str("224.0.0.251").unwrap();
-        assert_eq!(url.proto, Protocol::Mdns);
-        assert_eq!(url.host.to_string(), "224.0.0.251");
-        assert_eq!(url.port(), 5353);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Mdns));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "224.0.0.251");
+        assert_eq!(url.port(), Some(5353));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "mdns://224.0.0.251");
         assert!(url.ip().is_some());
     }
 
     #[test]
+    fn test_parse_system() {
+        let url = DnsUrl::from_str("system").unwrap();
+        assert_eq!(url.proto, DnsProtocol::System);
+        assert_eq!(url.host, None);
+        assert_eq!(url.port(), None);
+        assert_eq!(url.path(), None);
+        assert_eq!(url.ip(), None)
+    }
+
+    #[test]
     fn test_parse_misc_01() {
         let url = DnsUrl::from_str("127.0.0.1:1053").unwrap();
-        assert_eq!(url.proto, Protocol::Udp);
-        assert_eq!(url.host.to_string(), "127.0.0.1");
-        assert_eq!(url.port(), 1053);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Udp));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "127.0.0.1");
+        assert_eq!(url.port(), Some(1053));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://127.0.0.1:1053");
         assert!(url.ip().is_some());
@@ -631,9 +694,9 @@ mod tests {
     #[test]
     fn test_parse_misc_02() {
         let url = DnsUrl::from_str("[240e:1f:1::1]").unwrap();
-        assert_eq!(url.proto, Protocol::Udp);
-        assert_eq!(url.host.to_string(), "[240e:1f:1::1]");
-        assert_eq!(url.port(), 53);
+        assert_eq!(url.proto, DnsProtocol::H(Protocol::Udp));
+        assert_eq!(url.host.as_ref().unwrap().to_string(), "[240e:1f:1::1]");
+        assert_eq!(url.port(), Some(53));
         assert_eq!(url.path(), None);
         assert_eq!(url.to_string(), "udp://[240e:1f:1::1]");
         assert!(url.ip().is_some());

@@ -9,25 +9,26 @@ use super::*;
 impl NomParser for NameServerInfo {
     fn parse(input: &str) -> IResult<&str, Self> {
         let dns_url = |default_proto| {
-            let proto = map(
-                opt(alt((
-                    tag_no_case("udp://"),
-                    tag_no_case("tcp://"),
-                    #[cfg(feature = "dns-over-tls")]
-                    tag_no_case("tls://"),
-                    #[cfg(feature = "dns-over-https")]
-                    tag_no_case("https://"),
-                    #[cfg(feature = "dns-over-quic")]
-                    tag_no_case("quic://"),
-                    #[cfg(feature = "dns-over-h3")]
-                    tag_no_case("h3://"),
-                ))),
-                move |p| p.unwrap_or(default_proto),
-            );
+            let proto = opt(alt((
+                tag_no_case("udp://"),
+                tag_no_case("tcp://"),
+                #[cfg(feature = "dns-over-tls")]
+                tag_no_case("tls://"),
+                #[cfg(feature = "dns-over-https")]
+                tag_no_case("https://"),
+                #[cfg(feature = "dns-over-quic")]
+                tag_no_case("quic://"),
+                #[cfg(feature = "dns-over-h3")]
+                tag_no_case("h3://"),
+            )));
 
             map_res(
                 pair(proto, take_till1(|c: char| c.is_whitespace())),
-                |(a, b)| {
+                move |(a, b)| {
+                    let a = a.unwrap_or(match b {
+                        "system" => "",
+                        _ => default_proto,
+                    });
                     let url: String = [a, b].concat();
                     match DnsUrl::from_str(&url) {
                         Ok(url) => Ok(url),
@@ -125,19 +126,15 @@ impl NomParser for NameServerInfo {
                         nameserver.server.set_ssl_verify(false);
                     }
                     "tls-host-verify" => match v {
-                        Some(tls_host_verify) => match nameserver.server.host() {
-                            url::Host::Ipv4(ipv4_addr) => {
-                                nameserver.server.set_ip(IpAddr::V4(*ipv4_addr));
+                        Some(tls_host_verify) => {
+                            if let Some(url::Host::Ipv4(_) | url::Host::Ipv6(_)) =
+                                nameserver.server.host()
+                            {
                                 nameserver.server.set_host(tls_host_verify);
-                            }
-                            url::Host::Ipv6(ipv6_addr) => {
-                                nameserver.server.set_ip(IpAddr::V6(*ipv6_addr));
-                                nameserver.server.set_host(tls_host_verify);
-                            }
-                            url::Host::Domain(_) => {
+                            } else {
                                 log::warn!("tls-host-verify expects an ip address host");
                             }
-                        },
+                        }
                         None => {
                             log::warn!("expect tls-host-verify")
                         }
@@ -181,6 +178,29 @@ mod tests {
                 "",
                 NameServerInfo {
                     server: DnsUrl::from_str("udp://8.8.8.8").unwrap(),
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        assert_eq!(
+            NameServerInfo::parse("server system"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("system").unwrap(),
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        assert_eq!(
+            NameServerInfo::parse("server system -exclude-default-group"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("system").unwrap(),
+                    exclude_default_group: true,
                     ..name_server_default()
                 }
             ))

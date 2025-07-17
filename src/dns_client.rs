@@ -15,7 +15,7 @@ use crate::{
     dns::DnsResponse,
     dns_conf::NameServerInfo,
     dns_error::LookupError,
-    dns_url::DnsUrlParamExt,
+    dns_url::{DnsProtocol, DnsUrlParamExt},
     log::{self, debug, info, warn},
     proxy::ProxyConfig,
     rustls::TlsClientConfigBundle,
@@ -44,6 +44,7 @@ use bootstrap::BootstrapResolver;
 use connection_provider::{
     Connection, ConnectionProvider, RawNameServerConfig, TokioRuntimeProvider,
 };
+use smallvec::SmallVec;
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
@@ -102,20 +103,51 @@ impl DnsClientBuilder {
         } = self;
 
         let tls_client_config = TlsClientConfigBundle::new(ca_path, ca_file);
-        let mut default_group_servers = HashMap::new();
-        let mut server_instances = HashMap::new();
 
-        let bootstrap = async {
-            let mut bootstrap_servers = server_infos
+        let boot = Arc::new(BootstrapResolver::from_system_conf());
+
+        let mut server_instances = HashMap::<&NameServerInfo, _>::new();
+        let mut make_server = |server_config, resolver, dedup| {
+            let entry = server_instances.entry(server_config);
+            if let std::collections::hash_map::Entry::Occupied(_) = entry {
+                if dedup {
+                    return SmallVec::new();
+                }
+            }
+            let server = entry.or_insert_with(|| {
+                let proxy = server_config
+                    .proxy
+                    .as_deref()
+                    .map(|n| proxies.get(n))
+                    .unwrap_or_default()
+                    .cloned();
+                NameServer::new(
+                    server_config.clone(),
+                    proxy,
+                    Some(tls_client_config.clone()),
+                    resolver,
+                    client_subnet,
+                )
+                .unwrap_or_else(|err| {
+                    let url = server_config.server.to_string();
+                    log::error!("failed to create nameserver {url}, error: {err}");
+                    SmallVec::new()
+                })
+            });
+            server.clone()
+        };
+
+        let mut bootstrap_servers;
+        let bootstrap = {
+            bootstrap_servers = server_infos
                 .iter()
+                .filter(|info| info.bootstrap_dns)
                 .filter(|info| {
-                    info.bootstrap_dns && {
-                        if info.server.ip().is_none() {
-                            warn!("bootstrap-dns must use ip addess, {:?}", info.server.host());
-                            false
-                        } else {
-                            true
-                        }
+                    if info.server.proto() != DnsProtocol::System && info.server.ip().is_none() {
+                        warn!("bootstrap-dns must use ip addess, {:?}", info.server.host());
+                        false
+                    } else {
+                        true
                     }
                 })
                 .cloned()
@@ -124,15 +156,16 @@ impl DnsClientBuilder {
             if bootstrap_servers.is_empty() {
                 bootstrap_servers = server_infos
                     .iter()
-                    .filter(|info| info.server.ip().is_some() && info.proxy.is_none())
+                    .filter(|info| info.proxy.is_none())
+                    .filter(|info| {
+                        info.server.proto() == DnsProtocol::System || info.server.ip().is_some()
+                    })
                     .cloned()
                     .collect::<Vec<_>>()
             }
 
             if bootstrap_servers.is_empty() {
                 warn!("not bootstrap-dns found, use system_conf instead.");
-            } else {
-                bootstrap_servers.dedup();
             }
 
             if !bootstrap_servers.is_empty() {
@@ -141,48 +174,10 @@ impl DnsClientBuilder {
                 }
             }
 
-            let boot = Arc::new(BootstrapResolver::from_system_conf());
-
             let resolver: Arc<BootstrapResolver> = if !bootstrap_servers.is_empty() {
                 let servers = bootstrap_servers
-                    .into_iter()
-                    .flat_map(|server_config| {
-                        let server = server_instances
-                            .entry(server_config.clone())
-                            .or_insert_with(|| {
-                                let proxy = server_config
-                                    .proxy
-                                    .as_deref()
-                                    .map(|n| proxies.get(n))
-                                    .unwrap_or_default()
-                                    .cloned();
-                                match NameServer::new(
-                                    server_config.clone(),
-                                    proxy,
-                                    Some(tls_client_config.clone()),
-                                    None,
-                                    client_subnet,
-                                ) {
-                                    Ok(s) => {
-                                        let s = Arc::new(s);
-                                        if !server_config.exclude_default_group {
-                                            default_group_servers.insert(server_config, s.clone());
-                                        }
-
-                                        Some(s)
-                                    }
-                                    Err(err) => {
-                                        let url = server_config.server.to_string();
-                                        log::error!(
-                                            "failed to create nameserver {url}, error: {err}"
-                                        );
-                                        None
-                                    }
-                                }
-                            });
-
-                        server.clone()
-                    })
+                    .iter()
+                    .flat_map(|server_config| make_server(server_config, None, true))
                     .collect();
 
                 let new_resolver = NameServerGroup {
@@ -192,88 +187,43 @@ impl DnsClientBuilder {
 
                 Arc::new(BootstrapResolver::new(new_resolver.into()))
             } else {
-                boot
+                boot.clone()
             };
 
             resolver
-        }
-        .await;
+        };
 
         assert!(!bootstrap.is_empty(), "no bootstrap nameserver found.");
 
-        let server_config_groups: HashMap<String, HashSet<NameServerInfo>> = server_infos
-            .iter()
-            .fold(HashMap::new(), |mut map, server_config| {
-                if server_config.group.is_empty() {
-                    map.entry("".to_string())
-                        .or_default()
-                        .insert(server_config.clone());
-                } else {
-                    for name in server_config.group.iter() {
-                        map.entry(name.to_string())
-                            .or_default()
-                            .insert(server_config.clone());
-                    }
-                }
-                map
-            });
+        let mut server_config_groups = HashMap::<Option<&str>, HashSet<&NameServerInfo>>::new();
+        for (g, server_config) in server_infos.iter().flat_map(|serv_conf| {
+            let group = serv_conf.group.iter().map(move |g| (Some(&**g), serv_conf));
+            let default = (!serv_conf.exclude_default_group).then_some((None, serv_conf));
+            group.chain(default)
+        }) {
+            server_config_groups
+                .entry(g)
+                .or_default()
+                .insert(server_config);
+        }
 
         let mut server_groups = HashMap::with_capacity(server_config_groups.len());
+        let mut default_group_servers = (*bootstrap).clone();
 
         let resolver_opts = Arc::new(bootstrap.options().clone());
 
-        for (group_name, group) in server_config_groups {
-            let server_configs = group.into_iter().collect::<Vec<_>>();
-
-            let mut servers = vec![];
-
-            for server_config in server_configs {
-                let server = server_instances
-                    .entry(server_config.clone())
-                    .or_insert_with(|| {
-                        let proxy = server_config
-                            .proxy
-                            .as_deref()
-                            .map(|n| proxies.get(n))
-                            .unwrap_or_default()
-                            .cloned();
-
-                        match NameServer::new(
-                            server_config.clone(),
-                            proxy,
-                            Some(tls_client_config.clone()),
-                            Some(bootstrap.clone()),
-                            client_subnet,
-                        ) {
-                            Ok(s) => {
-                                let s = Arc::new(s);
-                                if !server_config.exclude_default_group {
-                                    default_group_servers.insert(server_config, s.clone());
-                                }
-
-                                Some(s)
-                            }
-                            Err(err) => {
-                                let url = server_config.server.to_string();
-                                log::error!("failed to create nameserver {url}, error: {err}");
-                                None
-                            }
-                        }
-                    });
-
-                if let Some(s) = server {
-                    servers.push(s.clone());
-                }
-            }
+        for (group_name, group) in &server_config_groups {
+            let servers = group
+                .iter()
+                .flat_map(|server_config| {
+                    make_server(*server_config, Some(bootstrap.clone()), false)
+                })
+                .collect();
 
             let server_group = NameServerGroup {
                 resolver_opts: resolver_opts.clone(),
                 servers,
             };
-
-            if group_name.is_empty() {
-                continue;
-            }
 
             debug!(
                 "create nameserver group {:?}, servers {}",
@@ -281,24 +231,19 @@ impl DnsClientBuilder {
                 server_group.len()
             );
 
-            server_groups.insert(group_name.clone(), Arc::new(server_group));
+            if let Some(group_name) = group_name {
+                server_groups.insert(group_name.to_string(), Arc::new(server_group));
+            } else {
+                default_group_servers = Arc::new(server_group);
+            }
         }
-
-        let default = if default_group_servers.is_empty() {
-            bootstrap.as_ref().deref().clone()
-        } else {
-            Arc::new(NameServerGroup {
-                resolver_opts,
-                servers: default_group_servers.into_values().collect(),
-            })
-        };
 
         for s in server_groups.values() {
             s.warmup().await;
         }
 
         DnsClient {
-            default,
+            default: default_group_servers,
             bootstrap,
             servers: server_groups,
         }
@@ -432,20 +377,73 @@ impl NameServer {
         tls_client_config: Option<TlsClientConfigBundle>,
         resolver: Option<Arc<BootstrapResolver>>,
         default_client_subnet: Option<ClientSubnet>,
-    ) -> anyhow::Result<Self> {
-        let url = &config.server;
+    ) -> anyhow::Result<smallvec::SmallVec<[Arc<Self>; 1]>> {
+        match config.server.proto() {
+            DnsProtocol::System => {
+                let conf = crate::libdns::resolver::system_conf::read_system_conf();
+                let servers = match &conf {
+                    Ok((r, _)) => r.name_servers(),
+                    Err(err) => anyhow::bail!("read system conf failed: {}", err),
+                };
+                servers
+                    .iter()
+                    .map(|server| {
+                        Self::make(
+                            config.clone(),
+                            proxy.clone(),
+                            tls_client_config.clone(),
+                            resolver.clone(),
+                            default_client_subnet,
+                            server.socket_addr,
+                            Some(&match server.socket_addr.ip() {
+                                IpAddr::V4(addr) => Host::Ipv4(addr),
+                                IpAddr::V6(addr) => Host::Ipv6(addr),
+                            }),
+                            server.protocol,
+                        )
+                        .map(Arc::new)
+                    })
+                    .collect()
+            }
+            DnsProtocol::H(protocol) => {
+                let socket_addr = {
+                    let ip_addr = config.server.ip();
+                    let port = config.server.port().unwrap();
+                    SocketAddr::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port)
+                };
 
-        let socket_addr = {
-            let ip_addr = url.ip();
-            let port = url.port();
-            SocketAddr::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED.into()), port)
-        };
+                Ok(SmallVec::from_buf([Arc::new(Self::make(
+                    config,
+                    proxy,
+                    tls_client_config,
+                    resolver,
+                    default_client_subnet,
+                    socket_addr,
+                    None,
+                    protocol,
+                )?)]))
+            }
+        }
+    }
+
+    fn make(
+        config: NameServerInfo,
+        proxy: Option<ProxyConfig>,
+        tls_client_config: Option<TlsClientConfigBundle>,
+        resolver: Option<Arc<BootstrapResolver>>,
+        default_client_subnet: Option<ClientSubnet>,
+        socket_addr: SocketAddr,
+        host: Option<&Host>,
+        protocol: Protocol,
+    ) -> anyhow::Result<NameServer> {
+        let url = config.server;
+        let host = host.or(url.host()).unwrap();
 
         if socket_addr.ip().is_unspecified() && resolver.is_none() {
             anyhow::bail!("Parameter resolver is required for non-ip upstream");
         }
 
-        let (tls_dns_name, tls_config) = if url.proto().is_encrypted() {
+        let (tls_dns_name, tls_config) = if protocol.is_encrypted() {
             let Some(tls_client_config) = tls_client_config else {
                 anyhow::bail!("Parameter tls_client_config is required for Encrypted upstream");
             };
@@ -458,7 +456,7 @@ impl NameServer {
                 tls_client_config.normal
             };
 
-            (Some(url.host().to_string()), Some(config))
+            (Some(host.to_string()), Some(config))
         } else {
             (None, None)
         };
@@ -485,7 +483,6 @@ impl NameServer {
 
         let provider = GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device));
 
-        let protocol = *url.proto();
         let http_endpoint = url.path().map(|s| s.to_string());
 
         let config = RawNameServerConfig {
@@ -504,7 +501,7 @@ impl NameServer {
         };
 
         Ok(Self {
-            server: url.host().to_owned(),
+            server: host.to_owned(),
             ip_addrs: url
                 .ip()
                 .map(|ip| RwLock::new(Arc::from([ip])))
