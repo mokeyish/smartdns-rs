@@ -203,6 +203,8 @@ lru = { version = "0.14", default-features = false }
 # time = "0.3"
 chrono = { version = "0.4.38", default-features = false, features = ["serde", "clock"]}
 surge-ping = "0.8.1"
+dhcproto = "0.13.0"
+network-interface = { version = "2.0.1", git = "https://github.com/mokeyish/network-interface.git", branch = "mac_addr"}
 rand = "0.9.1"
 smallvec = "1.13.2"
 csv = "1.1"
