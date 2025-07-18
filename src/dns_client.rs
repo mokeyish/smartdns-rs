@@ -15,7 +15,7 @@ use crate::{
     dns::DnsResponse,
     dns_conf::NameServerInfo,
     dns_error::LookupError,
-    dns_url::DnsUrlParamExt,
+    dns_url::{DnsUrl, HttpsPrefer, ProtocolConfig},
     log::{self, debug, info, warn},
     proxy::ProxyConfig,
     rustls::TlsClientConfigBundle,
@@ -413,14 +413,13 @@ impl GenericResolver for NameServerGroup {
 pub struct NameServer {
     datagram_conns: Arc<RwLock<Option<Arc<Connection>>>>,
 
-    server: Host,
+    server: DnsUrl,
 
     ip_addrs: RwLock<Arc<[IpAddr]>>,
 
     config: RawNameServerConfig,
     options: Arc<NameServerOpts>,
     connection_provider: ConnectionProvider,
-    prefer_protocol: Option<Protocol>,
 
     resolver: Option<Arc<BootstrapResolver>>,
 }
@@ -485,7 +484,7 @@ impl NameServer {
 
         let provider = GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device));
 
-        let protocol = *url.proto();
+        let protocol = url.proto().to_protocol().unwrap_or_default();
         let http_endpoint = url.path().map(|s| s.to_string());
 
         let config = RawNameServerConfig {
@@ -497,14 +496,8 @@ impl NameServer {
             http_endpoint,
         };
 
-        let prefer_protocol = if url.prefer_h3() {
-            Some(Protocol::H3)
-        } else {
-            None
-        };
-
         Ok(Self {
-            server: url.host().to_owned(),
+            server: url.clone(),
             ip_addrs: url
                 .ip()
                 .map(|ip| RwLock::new(Arc::from([ip])))
@@ -514,7 +507,6 @@ impl NameServer {
             options: options.into(),
             connection_provider: provider,
             resolver,
-            prefer_protocol,
         })
     }
 
@@ -523,7 +515,7 @@ impl NameServer {
         if !ip_addrs.is_empty() {
             return Ok(ip_addrs);
         }
-        match &self.server {
+        match &self.server.host() {
             Host::Domain(domain) => {
                 let resolver = self
                     .resolver
@@ -579,13 +571,14 @@ impl NameServer {
                 })
                 .collect::<Vec<_>>();
 
-            let alt_protocol = self.prefer_protocol.or_else(|| {
-                if config.protocol == Protocol::Https {
-                    Some(Protocol::H3)
-                } else {
-                    None
-                }
-            });
+            let (alt_protocol, delay) = match self.server.proto() {
+                ProtocolConfig::Https { prefer, .. } => match prefer {
+                    HttpsPrefer::Auto => (Some(Protocol::H3), false),
+                    HttpsPrefer::H2 => (None, false),
+                    HttpsPrefer::H3 => (Some(Protocol::H3), true),
+                },
+                _ => (Default::default(), Default::default()),
+            };
 
             if let Some(alt_protocol) = alt_protocol {
                 configs.extend(
@@ -616,7 +609,7 @@ impl NameServer {
                         )
                     })
                     .map(|(protocol, conn)| {
-                        let delay = matches!(self.prefer_protocol, Some(p) if p != protocol);
+                        let delay = delay && matches!(alt_protocol, Some(p) if p != protocol);
 
                         Box::pin(async move {
                             {
@@ -667,17 +660,13 @@ impl NameServer {
 impl From<RawNameServerConfig> for NameServer {
     fn from(config: RawNameServerConfig) -> Self {
         Self {
-            server: match config.socket_addr.ip() {
-                IpAddr::V4(ipv4_addr) => Host::Ipv4(ipv4_addr),
-                IpAddr::V6(ipv6_addr) => Host::Ipv6(ipv6_addr),
-            },
+            server: config.socket_addr.into(),
             config,
             ip_addrs: Default::default(),
             datagram_conns: Default::default(),
             options: Default::default(),
             connection_provider: Default::default(),
             resolver: Default::default(),
-            prefer_protocol: Default::default(),
         }
     }
 }
@@ -1586,7 +1575,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_nameserver_cloudflare_resolve() {
-        let dns_urls = CLOUDFLARE_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
+        let dns_urls = CLOUDFLARE_IPS
+            .iter()
+            .copied()
+            .map(DnsUrl::from)
+            .collect::<Vec<_>>();
 
         let client = DnsClient::builder().add_servers(dns_urls).build().await;
         assert!(query_google(&client).await);
@@ -1595,7 +1588,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_nameserver_alidns_resolve() {
-        let dns_urls = ALIDNS_IPS.iter().map(DnsUrl::from).collect::<Vec<_>>();
+        let dns_urls = ALIDNS_IPS
+            .iter()
+            .copied()
+            .map(DnsUrl::from)
+            .collect::<Vec<_>>();
         let client = DnsClient::builder().add_servers(dns_urls).build().await;
         assert!(query_google(&client).await);
         assert!(query_alidns(&client).await);

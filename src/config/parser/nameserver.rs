@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::dns_url::{DnsUrl, DnsUrlParamExt};
+use crate::dns_url::DnsUrl;
 use crate::log;
 use crate::third_ext::FromStrOrHex;
 

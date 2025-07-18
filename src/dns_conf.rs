@@ -1380,9 +1380,12 @@ mod tests {
 
         assert!(!server.exclude_default_group);
         assert_eq!(server.server.proto(), &Protocol::Tls);
-        assert_eq!(server.server.to_string(), "tls://dns.nextdns.io");
+        assert_eq!(
+            server.server.to_string(),
+            "tls://dns.nextdns.io?ip=45.90.28.0"
+        );
         assert_eq!(server.server.ip(), "45.90.28.0".parse::<IpAddr>().ok());
-        assert_eq!(server.server.domain(), Some("dns.nextdns.io"));
+        assert_eq!(server.server.server_name(), Some("dns.nextdns.io"));
     }
 
     #[test]
