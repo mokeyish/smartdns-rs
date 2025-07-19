@@ -3094,7 +3094,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "surge-ping",
  "sysinfo",
  "thiserror 2.0.12",
