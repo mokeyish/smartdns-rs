@@ -21,10 +21,7 @@ pub use crate::libdns::proto::{
 
 pub use crate::libdns::{
     proto::xfer::Protocol,
-    resolver::{
-        config::{NameServerConfig, NameServerConfigGroup},
-        lookup::Lookup,
-    },
+    resolver::{config::NameServerConfig, lookup::Lookup},
 };
 
 #[derive(Clone)]
@@ -157,7 +154,7 @@ mod serial_message {
 
     impl From<Query> for SerialMessage {
         fn from(query: Query) -> Self {
-            let mut message = Message::new();
+            let mut message = Message::query();
             message.add_query(query);
             message.into()
         }
@@ -246,7 +243,7 @@ mod request {
     impl DnsRequest {
         pub fn new(message: Message, src_addr: SocketAddr, protocol: Protocol) -> Self {
             let id = message.id();
-            let query = message.query().cloned().unwrap_or_default();
+            let query = message.queries().first().cloned().unwrap_or_default();
             Self {
                 id,
                 query: query.into(),
@@ -351,11 +348,11 @@ mod request {
         fn from(query: Query) -> Self {
             use std::net::{Ipv4Addr, SocketAddrV4};
 
-            let mut message = Message::new();
+            let mut message = Message::query();
             message.add_query(query.clone());
 
             Self {
-                id: rand::random(),
+                id: message.id(),
                 query: query.into(),
                 message: Arc::new(message),
                 src: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 53)),
@@ -426,8 +423,7 @@ mod response {
             I: Iterator<Item = Record>,
         {
             use op::message::{HeaderCounts, update_header_counts};
-            let mut message = Message::new();
-            message.set_message_type(MessageType::Response);
+            let mut message = Message::query().to_response();
             message.add_query(query.clone());
             message.add_answers(records);
 
@@ -437,7 +433,7 @@ mod response {
                 HeaderCounts {
                     query_count: message.queries().len(),
                     answer_count: message.answers().len(),
-                    nameserver_count: message.name_servers().len(),
+                    authority_count: message.authorities().len(),
                     additional_count: message.additionals().len(),
                 },
             );
@@ -453,7 +449,7 @@ mod response {
 
         pub fn empty() -> Self {
             Self {
-                message: Default::default(),
+                message: Message::query(),
                 valid_until: Instant::now(),
                 name_server_group: None,
             }
@@ -466,7 +462,7 @@ mod response {
         }
 
         pub fn query(&self) -> &Query {
-            self.deref().query().unwrap_or(&DEFAULT_QUERY)
+            self.deref().queries().first().unwrap_or(&DEFAULT_QUERY)
         }
 
         pub fn message(&self) -> &Message {

@@ -59,7 +59,7 @@ impl LookupError {
             }) = err.kind()
             {
                 let mut dns_response = DnsResponse::new_with_max_ttl(query.to_owned(), Vec::new());
-                dns_response.add_name_server(record.as_ref().to_owned().into_record_of_rdata());
+                dns_response.add_authority(record.as_ref().to_owned().into_record_of_rdata());
                 return Some(dns_response);
             }
         }

@@ -106,7 +106,7 @@ async fn process(
             let dnssec = query_param.dnssec;
             let checking_disabled = query_param.checking_disabled;
 
-            let mut message = Message::new();
+            let mut message = Message::query();
             message.add_query(Query::query(name, query_type));
             message.set_checking_disabled(checking_disabled);
             if dnssec {

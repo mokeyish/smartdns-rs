@@ -14,7 +14,7 @@ mod udp;
 use crate::{
     config::SslConfig,
     dns_conf::RuntimeConfig,
-    libdns::proto::op::{Header, Message, MessageType, ResponseCode},
+    libdns::proto::op::{Message, ResponseCode},
 };
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -272,24 +272,18 @@ impl DnsHandle {
             let message = err.0.0;
             let addr = message.addr();
             let protocol = message.protocol();
-            let request_header = DnsRequest::try_from(message)
-                .map(|req| *req.header())
-                .unwrap_or_default();
-            let mut response_header = Header::response_from_request(&request_header);
-            response_header.set_response_code(ResponseCode::Refused);
-            let mut response_message = Message::new();
-            response_message.set_header(response_header);
+            let mut response_message = DnsRequest::try_from(message)
+                .map(|req| req.to_response())
+                .unwrap_or_else(|_| Message::query().to_response());
+            response_message.set_response_code(ResponseCode::Refused);
             return SerialMessage::raw(response_message, addr, protocol);
         }
 
         match rx.await {
             Ok(msg) => msg,
             Err(_) => {
-                let mut response_header = Header::default();
-                response_header.set_response_code(ResponseCode::Refused);
-                response_header.set_message_type(MessageType::Response);
-                let mut response_message = Message::new();
-                response_message.set_header(response_header);
+                let mut response_message = Message::query().to_response();
+                response_message.set_response_code(ResponseCode::Refused);
                 response_message.into()
             }
         }

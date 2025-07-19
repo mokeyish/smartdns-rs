@@ -34,6 +34,8 @@ pub mod resolver {
     }
 }
 
+pub mod bridge;
+
 pub use proto::xfer::Protocol;
 
 pub trait ProtocolDefaultPort {
@@ -49,6 +51,7 @@ impl ProtocolDefaultPort for Protocol {
         match *self {
             Udp => 53,
             Tcp => 53,
+            #[cfg(feature = "dns-over-tls")]
             Tls => 853,
             #[cfg(feature = "dns-over-https")]
             Https => 443,
@@ -56,8 +59,6 @@ impl ProtocolDefaultPort for Protocol {
             H3 => 443,
             #[cfg(feature = "dns-over-quic")]
             Quic => 853,
-            #[cfg(feature = "mdns")]
-            Mdns => 5353,
             _ => unimplemented!(),
         }
     }
