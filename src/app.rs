@@ -460,11 +460,11 @@ async fn process(
 
             let mut response_header = Header::response_from_request(&request_header);
             response_header.set_response_code(ResponseCode::FormErr);
-            let mut response_message = Message::new();
+            let mut response_message = Message::query().to_response();
             response_message.set_header(response_header);
             SerialMessage::raw(response_message, addr, protocol)
         }
-        _ => SerialMessage::raw(Default::default(), addr, protocol),
+        _ => SerialMessage::raw(Message::query(), addr, protocol),
     }
 }
 

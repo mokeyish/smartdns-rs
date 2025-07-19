@@ -1,5 +1,3 @@
-#[cfg(feature = "mdns")]
-use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
 use crate::libdns::{
     Protocol::{self, *},
     ProtocolDefaultPort,
@@ -7,7 +5,6 @@ use crate::libdns::{
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "dns-over-tls")]
 use std::sync::Arc;
 use std::{collections::BTreeMap, ops::Deref};
 use std::{net::SocketAddr, string::ToString};
@@ -163,7 +160,7 @@ impl FromStr for DnsUrl {
             None => None,
         };
 
-        let mut proto = match url.scheme() {
+        let proto = match url.scheme() {
             proto @ "dhcp" => {
                 return Ok(Self {
                     proto: ProtocolConfig::Dhcp {
@@ -183,8 +180,6 @@ impl FromStr for DnsUrl {
             "quic" => Quic,
             #[cfg(feature = "dns-over-h3")]
             "h3" => H3,
-            #[cfg(feature = "mdns")]
-            "mdns" => Mdns,
             schema => return Err(DnsUrlParseErr::ProtocolNotSupport(schema.to_string())),
         };
 
@@ -198,22 +193,6 @@ impl FromStr for DnsUrl {
                 .map(|(n, v)| (n.into(), v.into()))
                 .collect(),
         );
-
-        #[cfg(feature = "mdns")]
-        if proto != Mdns
-            && match port {
-                Some(port) if port == Mdns.default_port() => true,
-                None => true,
-                _ => false,
-            }
-            && match &host {
-                Host::Ipv4(ip) if MDNS_IPV4.ip().eq(ip) => true,
-                Host::Ipv6(ip) if MDNS_IPV6.ip().eq(ip) => true,
-                _ => false,
-            }
-        {
-            proto = Mdns
-        }
 
         let fragment = url.fragment();
 
@@ -271,7 +250,6 @@ impl FromStr for DnsUrl {
                         .into(),
                     disable_grease: matches!(fragment, Some(fragment) if fragment.contains("disable_grease")),
                 },
-                Mdns => ProtocolConfig::Mdns,
                 _ => unimplemented!(),
             },
             host,
@@ -458,9 +436,6 @@ pub enum ProtocolConfig {
         #[cfg_attr(feature = "serde", serde(default))]
         disable_grease: bool,
     },
-    #[cfg(feature = "mdns")]
-    /// mDNS protocol for performing multicast lookups
-    Mdns,
     System,
     Dhcp {
         interface: Option<Arc<str>>,
@@ -481,8 +456,6 @@ impl ProtocolConfig {
             ProtocolConfig::Quic { .. } => Some(Protocol::Quic),
             #[cfg(feature = "dns-over-h3")]
             ProtocolConfig::H3 { .. } => Some(Protocol::H3),
-            #[cfg(feature = "mdns")]
-            ProtocolConfig::Mdns => Some(Protocol::Mdns),
             _ => None,
         }
     }
@@ -527,6 +500,23 @@ impl ProtocolConfig {
         }
     }
 
+    pub fn to_h3(&self) -> Option<Self> {
+        if let Self::Https {
+            server_name,
+            path,
+            prefer: _,
+        } = self
+        {
+            Some(Self::H3 {
+                server_name: server_name.clone(),
+                path: path.clone(),
+                disable_grease: false,
+            })
+        } else {
+            None
+        }
+    }
+
     fn to_str(&self) -> &'static str {
         match self {
             ProtocolConfig::Udp => "udp",
@@ -539,8 +529,6 @@ impl ProtocolConfig {
             ProtocolConfig::Quic { .. } => "quic",
             #[cfg(feature = "dns-over-h3")]
             ProtocolConfig::H3 { .. } => "h3",
-            #[cfg(feature = "mdns")]
-            ProtocolConfig::Mdns => "mdns",
             ProtocolConfig::System => "system",
             ProtocolConfig::Dhcp { .. } => "dhcp",
         }
@@ -586,8 +574,6 @@ impl From<Protocol> for ProtocolConfig {
                 path: DEFAULT_DNS_QUERY_PATH.into(),
                 disable_grease: Default::default(),
             },
-            #[cfg(feature = "mdns")]
-            Mdns => Self::Mdns,
             _ => unimplemented!(),
         }
     }
@@ -683,7 +669,7 @@ mod tests {
 
     use super::DnsUrl;
     use super::*;
-    use crate::preset_ns::CLOUDFLARE_IPS;
+    use crate::preset_ns::CLOUDFLARE;
     use std::ops::Deref;
 
     #[test]
@@ -718,7 +704,7 @@ mod tests {
 
     #[test]
     fn test_parse_udp_ipv6() {
-        for ip in CLOUDFLARE_IPS.iter().copied().map(DnsUrl::from) {
+        for ip in CLOUDFLARE.ips.iter().copied().map(DnsUrl::from) {
             assert!(ip.proto.is_datagram());
         }
     }
@@ -1000,28 +986,6 @@ mod tests {
         let url1 = DnsUrl::from_str("https://dns.adguard-dns.com?a=1&b=2&c=3").unwrap();
         let url2 = DnsUrl::from_str("https://dns.adguard-dns.com?b=2&a=1&c=3").unwrap();
         assert_eq!(url1, url2);
-    }
-
-    #[test]
-    #[cfg(feature = "mdns")]
-    fn test_parse_mdns() {
-        let url = DnsUrl::from_str("mdns://127.0.0.1").unwrap();
-        assert_eq!(url.proto, Protocol::Mdns);
-        assert_eq!(url.host.to_string(), "127.0.0.1");
-        assert_eq!(url.port(), 5353);
-        assert_eq!(url.to_string(), "mdns://127.0.0.1");
-        assert!(url.ip().is_some());
-    }
-
-    #[test]
-    #[cfg(feature = "mdns")]
-    fn test_parse_mdns1() {
-        let url = DnsUrl::from_str("224.0.0.251").unwrap();
-        assert_eq!(url.proto, Protocol::Mdns);
-        assert_eq!(url.host.to_string(), "224.0.0.251");
-        assert_eq!(url.port(), 5353);
-        assert_eq!(url.to_string(), "mdns://224.0.0.251");
-        assert!(url.ip().is_some());
     }
 
     #[test]

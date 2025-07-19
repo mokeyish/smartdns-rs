@@ -22,10 +22,9 @@ use crate::{
 };
 
 use crate::libdns::{
-    Protocol,
     proto::{
         DnsHandle, ProtoError, ProtoErrorKind,
-        op::{Edns, Message, MessageType, OpCode, Query},
+        op::{Edns, Message, Query},
         rr::{
             Record, RecordType,
             domain::{IntoName, Name},
@@ -33,10 +32,7 @@ use crate::libdns::{
         },
         xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
     },
-    resolver::{
-        config::{ResolverOpts, ServerOrderingStrategy},
-        name_server::GenericConnector,
-    },
+    resolver::config::{ResolverOpts, ServerOrderingStrategy},
 };
 
 use bootstrap::BootstrapResolver;
@@ -444,7 +440,7 @@ impl NameServer {
             anyhow::bail!("Parameter resolver is required for non-ip upstream");
         }
 
-        let (tls_dns_name, tls_config) = if url.proto().is_encrypted() {
+        let tls_config = if url.proto().is_encrypted() {
             let Some(tls_client_config) = tls_client_config else {
                 anyhow::bail!("Parameter tls_client_config is required for Encrypted upstream");
             };
@@ -457,9 +453,9 @@ impl NameServer {
                 tls_client_config.normal
             };
 
-            (Some(url.host().to_string()), Some(config))
+            Some(config)
         } else {
-            (None, None)
+            None
         };
 
         let mut options = NameServerOpts::new(
@@ -482,19 +478,9 @@ impl NameServer {
         let so_mark = config.so_mark;
         let device = config.interface;
 
-        let provider = GenericConnector::new(TokioRuntimeProvider::new(proxy, so_mark, device));
+        let provider = TokioRuntimeProvider::new(proxy, so_mark, device);
 
-        let protocol = url.proto().to_protocol().unwrap_or_default();
-        let http_endpoint = url.path().map(|s| s.to_string());
-
-        let config = RawNameServerConfig {
-            socket_addr,
-            protocol,
-            trust_negative_responses: true,
-            tls_dns_name,
-            bind_addr: None,
-            http_endpoint,
-        };
+        let config = url.into();
 
         Ok(Self {
             server: url.clone(),
@@ -558,7 +544,7 @@ impl NameServer {
 
         let conn = {
             let config = self.config.clone();
-            let options = self.options.as_ref().deref().clone();
+            let options = Arc::new(self.options.as_ref().deref().clone());
             let provider = self.connection_provider.clone();
             let ip_addrs = self.ip_addrs().await?;
 
@@ -566,28 +552,36 @@ impl NameServer {
                 .iter()
                 .map(|ip| {
                     let mut config = config.clone();
-                    config.socket_addr.set_ip(*ip);
-                    config
+                    config.ip = *ip;
+                    (config, true)
                 })
                 .collect::<Vec<_>>();
 
             let (alt_protocol, delay) = match self.server.proto() {
-                ProtocolConfig::Https { prefer, .. } => match prefer {
-                    HttpsPrefer::Auto => (Some(Protocol::H3), false),
+                s @ ProtocolConfig::Https { prefer, .. } => match prefer {
+                    HttpsPrefer::Auto => (s.to_h3(), false),
                     HttpsPrefer::H2 => (None, false),
-                    HttpsPrefer::H3 => (Some(Protocol::H3), true),
+                    HttpsPrefer::H3 => (s.to_h3(), true),
                 },
                 _ => (Default::default(), Default::default()),
             };
 
-            if let Some(alt_protocol) = alt_protocol {
+            if let Some(alt_protocol) = &alt_protocol {
                 configs.extend(
                     configs
                         .iter()
                         .map(|c| {
-                            let mut config = c.clone();
-                            config.protocol = alt_protocol;
-                            config
+                            let mut config = c.0.clone();
+                            config.connections = config
+                                .connections
+                                .iter()
+                                .map(|c| {
+                                    let mut c = c.clone();
+                                    c.protocol = alt_protocol.into();
+                                    c
+                                })
+                                .collect();
+                            (config, delay)
                         })
                         .collect::<Vec<_>>(),
                 );
@@ -598,19 +592,19 @@ impl NameServer {
             }
 
             if configs.len() == 1 {
-                Connection::new(config, options, provider)
+                let conn_config = config.connections[0].clone();
+                Connection::new(&config, conn_config, options, provider)
             } else {
                 let conns = configs
                     .into_iter()
-                    .map(|c| {
+                    .map(|(c, delay)| {
+                        let conn_config = c.connections[0].clone();
                         (
-                            c.protocol,
-                            Connection::new(c, options.clone(), provider.clone()),
+                            Connection::new(&c, conn_config, options.clone(), provider.clone()),
+                            delay,
                         )
                     })
-                    .map(|(protocol, conn)| {
-                        let delay = delay && matches!(alt_protocol, Some(p) if p != protocol);
-
+                    .map(|(conn, delay)| {
                         Box::pin(async move {
                             {
                                 let fut = conn
@@ -660,7 +654,7 @@ impl NameServer {
 impl From<RawNameServerConfig> for NameServer {
     fn from(config: RawNameServerConfig) -> Self {
         Self {
-            server: config.socket_addr.into(),
+            server: SocketAddr::new(config.ip, config.connections[0].port).into(),
             config,
             ip_addrs: Default::default(),
             datagram_conns: Default::default(),
@@ -933,15 +927,11 @@ fn build_message(
     is_dnssec: bool,
 ) -> Message {
     // build the message
-    let mut message: Message = Message::new();
+
+    let mut message = Message::query();
     // TODO: This is not the final ID, it's actually set in the poll method of DNS future
-    //  should we just remove this?
-    let id: u16 = rand::random();
     message
         .add_query(query)
-        .set_id(id)
-        .set_message_type(MessageType::Query)
-        .set_op_code(OpCode::Query)
         .set_recursion_desired(request_options.recursion_desired);
 
     // Extended dns
@@ -983,13 +973,11 @@ mod connection_provider {
         },
     };
 
-    pub type RawNameServer =
-        crate::libdns::resolver::name_server::NameServer<GenericConnector<TokioRuntimeProvider>>;
+    pub type RawNameServer = crate::libdns::resolver::name_server::NameServer<TokioRuntimeProvider>;
     pub type RawNameServerConfig = crate::libdns::resolver::config::NameServerConfig;
-    pub type Connection = crate::libdns::resolver::name_server::GenericNameServer<
-        connection_provider::TokioRuntimeProvider,
-    >;
-    pub type ConnectionProvider = GenericConnector<TokioRuntimeProvider>;
+    pub type Connection =
+        crate::libdns::resolver::name_server::NameServer<connection_provider::TokioRuntimeProvider>;
+    pub type ConnectionProvider = TokioRuntimeProvider;
 
     /// The Tokio Runtime for async execution
     #[derive(Clone, Default)]
@@ -1256,7 +1244,7 @@ mod connection_provider {
 
 mod bootstrap {
     use super::*;
-    use crate::libdns::resolver::config::{NameServerConfigGroup, ResolverConfig};
+    use crate::libdns::resolver::config::ResolverConfig;
 
     pub struct BootstrapResolver<T: GenericResolver = NameServerGroup>
     where
@@ -1301,20 +1289,9 @@ mod bootstrap {
                 crate::libdns::resolver::system_conf::read_system_conf().unwrap_or_else(|err| {
                     warn!("read system conf failed, {}", err);
 
-                    use crate::preset_ns::{ALIDNS, ALIDNS_IPS, CLOUDFLARE, CLOUDFLARE_IPS};
+                    use crate::preset_ns::{ALIDNS, CLOUDFLARE};
 
-                    let mut name_servers = NameServerConfigGroup::from_ips_https(
-                        ALIDNS_IPS,
-                        443,
-                        ALIDNS.to_string(),
-                        true,
-                    );
-                    name_servers.merge(NameServerConfigGroup::from_ips_https(
-                        CLOUDFLARE_IPS,
-                        443,
-                        CLOUDFLARE.to_string(),
-                        true,
-                    ));
+                    let name_servers = ALIDNS.https().chain(CLOUDFLARE.https()).collect::<Vec<_>>();
 
                     (
                         ResolverConfig::from_parts(None, vec![], name_servers),
@@ -1415,7 +1392,7 @@ mod tests {
     use super::*;
     use crate::{
         dns_url::DnsUrl,
-        preset_ns::{ALIDNS_IPS, CLOUDFLARE_IPS},
+        preset_ns::{ALIDNS, CLOUDFLARE},
         third_ext::{FutureJoinAllExt, FutureTimeoutExt},
     };
     use std::net::IpAddr;
@@ -1575,7 +1552,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_nameserver_cloudflare_resolve() {
-        let dns_urls = CLOUDFLARE_IPS
+        let dns_urls = CLOUDFLARE
+            .ips
             .iter()
             .copied()
             .map(DnsUrl::from)
@@ -1588,7 +1566,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_nameserver_alidns_resolve() {
-        let dns_urls = ALIDNS_IPS
+        let dns_urls = ALIDNS
+            .ips
             .iter()
             .copied()
             .map(DnsUrl::from)
