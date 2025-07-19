@@ -423,7 +423,7 @@ mod name_server_group {
     impl NameServerGroup {
         pub async fn warmup(&self) {
             for server in self.servers.iter() {
-                server.warmup().await;
+                let _ = server.warmup().await;
             }
         }
         #[inline]
@@ -483,7 +483,10 @@ mod name_server_group {
 
 mod name_server {
     use super::*;
-    use crate::libdns::custom::connection_provider::{Connection, ConnectionProvider};
+    use crate::libdns::custom::{
+        connection_provider::{Connection, ConnectionProvider},
+        warmup::DnsHandleWarmpup,
+    };
 
     pub struct NameServer {
         options: Arc<NameServerOpts>,
@@ -564,8 +567,9 @@ mod name_server {
             })
         }
 
-        pub async fn warmup(&self) {
-            todo!("")
+        pub async fn warmup(&self) -> Result<(), ProtoError> {
+            self.connection.warmup().await?;
+            Ok(())
         }
 
         #[inline]
