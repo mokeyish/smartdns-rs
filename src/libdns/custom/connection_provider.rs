@@ -96,7 +96,7 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
         Ok(async move {
             let bind_addr = None;
 
-            let ip_addrs = match server.host() {
+            let ip_addrs: StackVec<_> = match server.host() {
                 Host::Domain(domain) => {
                     match server.get_param::<IpAddr>("ip") {
                         Some(ip) => smallvec![ip],
@@ -112,7 +112,7 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                                 Ok(lookup_ip) => lookup_ip.ip_addrs().into_iter().collect(),
                                 Err(err) => {
                                     log::warn!("lookup ip: {domain} failed, {err}");
-                                    StackVec::new()
+                                    smallvec![]
                                 }
                             };
 
@@ -140,23 +140,24 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                 return Ok(conn);
             }
 
-            let server_addrs: Stack2xVec<_> = if let ProtocolConfig::Https { prefer, path, .. } = server.proto() {
-                let h3_proto = ProtocolConfig::H3 {
-                    path: path.clone(),
-                    disable_grease: false,
-                };
-                let delay_h2 = *prefer == HttpsPrefer::H3;
-                server_addrs.into_iter().flat_map(|server_addr|{
-                    let h2_server = server.clone();
-                    let mut h3_server = server.clone();
-                    h3_server.set_proto(h3_proto.clone());
-                    smallvec_inline![
-                        (h3_server, server_addr, false),
-                        (h2_server, server_addr, delay_h2),
-                    ]
-                }).collect()
-            } else {
-                server_addrs.into_iter().map(|server_addr|(server.clone(), server_addr, false)).collect()
+            let server_addrs: Stack2xVec<_> = match server.proto() {
+                ProtocolConfig::Https { prefer, path, .. } if *prefer != HttpsPrefer::H2 => {
+                    let h3_proto = ProtocolConfig::H3 {
+                        path: path.clone(),
+                        disable_grease: false,
+                    };
+                    let delay_h2 = *prefer == HttpsPrefer::H3;
+                    server_addrs.into_iter().flat_map(|server_addr|{
+                        let h2_server = server.clone();
+                        let mut h3_server = server.clone();
+                        h3_server.set_proto(h3_proto.clone());
+                        smallvec_inline![
+                            (h3_server, server_addr, false),
+                            (h2_server, server_addr, delay_h2),
+                        ]
+                    }).collect()
+                },
+                _ => server_addrs.into_iter().map(|server_addr|(server.clone(), server_addr, false)).collect()
             };
 
             let conns = server_addrs.into_iter().map(|(server, server_addr, delay)| {
