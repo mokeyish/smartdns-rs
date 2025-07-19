@@ -1,9 +1,13 @@
 use std::net::Ipv4Addr;
 
+use crate::dns_client::LookupOptions;
 use crate::dns_url::{DnsUrl, ProtocolConfig};
-use crate::libdns::resolver::config::{
-    ConnectionConfig as LibdnsConnectionConfig, NameServerConfig as LibdnsNameServerConfig,
-    ProtocolConfig as LibdnsProtocolConfig,
+use crate::libdns::{
+    proto::rr::RecordType,
+    resolver::config::{
+        ConnectionConfig as LibdnsConnectionConfig, NameServerConfig as LibdnsNameServerConfig,
+        ProtocolConfig as LibdnsProtocolConfig,
+    },
 };
 
 impl From<&ProtocolConfig> for LibdnsProtocolConfig {
@@ -57,5 +61,14 @@ impl From<&DnsUrl> for LibdnsNameServerConfig {
             true,
             vec![url.into()],
         )
+    }
+}
+
+impl From<RecordType> for LookupOptions {
+    fn from(record_type: RecordType) -> Self {
+        Self {
+            record_type,
+            ..Default::default()
+        }
     }
 }

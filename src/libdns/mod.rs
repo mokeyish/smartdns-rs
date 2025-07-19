@@ -35,6 +35,7 @@ pub mod resolver {
 }
 
 pub mod bridge;
+pub mod custom;
 
 pub use proto::xfer::Protocol;
 
