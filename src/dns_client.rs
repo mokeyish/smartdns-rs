@@ -1,21 +1,18 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    ops::{Deref, DerefMut},
+    net::{Ipv4Addr, SocketAddr},
+    ops::Deref,
     path::PathBuf,
     slice::Iter,
     sync::Arc,
-    time::Duration,
 };
 
 use tokio::sync::RwLock;
-use url::Host;
 
 use crate::{
     dns::DnsResponse,
     dns_conf::NameServerInfo,
     dns_error::LookupError,
-    dns_url::{DnsUrl, HttpsPrefer, ProtocolConfig},
     log::{self, debug, info, warn},
     proxy::ProxyConfig,
     rustls::TlsClientConfigBundle,
@@ -23,7 +20,7 @@ use crate::{
 
 use crate::libdns::{
     proto::{
-        DnsHandle, ProtoError, ProtoErrorKind,
+        DnsHandle, ProtoError,
         op::{Edns, Message, Query},
         rr::{
             Record, RecordType,
@@ -34,21 +31,13 @@ use crate::libdns::{
     },
     resolver::config::{ResolverOpts, ServerOrderingStrategy},
 };
-
-use bootstrap::BootstrapResolver;
-
-use crate::libdns::custom::connection_provider::{
-    Connection, ConnectionProvider, RawNameServerConfig,
-};
+pub use bootstrap::BootstrapResolver;
 pub use name_server::NameServer;
 pub use name_server_group::NameServerGroup;
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
 pub const MAX_TTL: u32 = 86400_u32;
-
-static DEFAULT_QUERY: std::sync::LazyLock<Query> =
-    std::sync::LazyLock::new(|| Query::query("example.com.".parse().unwrap(), RecordType::A));
 
 #[derive(Default)]
 pub struct DnsClientBuilder {
@@ -494,19 +483,11 @@ mod name_server_group {
 
 mod name_server {
     use super::*;
+    use crate::libdns::custom::connection_provider::{Connection, ConnectionProvider};
 
     pub struct NameServer {
-        datagram_conns: Arc<RwLock<Option<Arc<Connection>>>>,
-
-        server: DnsUrl,
-
-        ip_addrs: RwLock<Arc<[IpAddr]>>,
-
-        config: RawNameServerConfig,
         options: Arc<NameServerOpts>,
-        connection_provider: ConnectionProvider,
-
-        resolver: Option<Arc<BootstrapResolver>>,
+        connection: Connection,
     }
 
     impl NameServer {
@@ -568,194 +549,28 @@ mod name_server {
             let so_mark = config.so_mark;
             let device = config.interface;
 
-            let provider = ConnectionProvider::new(proxy, so_mark, device);
-
-            let config = url.into();
+            let connection = ConnectionProvider::new(
+                config.server,
+                Arc::new(options.deref().clone()),
+                resolver,
+                proxy,
+                so_mark,
+                device,
+            );
 
             Ok(Self {
-                server: url.clone(),
-                ip_addrs: url
-                    .ip()
-                    .map(|ip| RwLock::new(Arc::from([ip])))
-                    .unwrap_or_default(),
-                config,
-                datagram_conns: Default::default(),
                 options: options.into(),
-                connection_provider: provider,
-                resolver,
+                connection,
             })
         }
 
-        async fn ip_addrs(&self) -> Result<Arc<[IpAddr]>, ProtoError> {
-            let mut ip_addrs = self.ip_addrs.read().await.clone();
-            if !ip_addrs.is_empty() {
-                return Ok(ip_addrs);
-            }
-            match &self.server.host() {
-                Host::Domain(domain) => {
-                    let resolver = self
-                        .resolver
-                        .as_ref()
-                        .expect("resolver must be set when using domain name");
-
-                    ip_addrs = match resolver.lookup_ip(domain).await {
-                        Ok(lookup_ip) => lookup_ip.ip_addrs().into_iter().collect::<Vec<_>>(),
-                        Err(err) => {
-                            warn!("lookup ip: {domain} failed, {err}");
-                            vec![]
-                        }
-                    }
-                    .into();
-
-                    if ip_addrs.is_empty() {
-                        return Err(ProtoErrorKind::NoConnections.into());
-                    } else {
-                        *self.ip_addrs.write().await.deref_mut() = ip_addrs.clone();
-                    }
-                    Ok(ip_addrs)
-                }
-                Host::Ipv4(ip) => {
-                    ip_addrs = vec![IpAddr::V4(*ip)].into();
-                    *self.ip_addrs.write().await.deref_mut() = ip_addrs.clone();
-                    Ok(ip_addrs)
-                }
-                Host::Ipv6(ip) => {
-                    ip_addrs = vec![IpAddr::V6(*ip)].into();
-                    *self.ip_addrs.write().await.deref_mut() = ip_addrs.clone();
-                    Ok(ip_addrs)
-                }
-            }
-        }
-
-        async fn client(&self) -> Result<ClientHandle, ProtoError> {
-            if let Some(conn) = self.datagram_conns.read().await.clone() {
-                return Ok(ClientHandle { connection: conn });
-            }
-
-            let conn = {
-                let config = self.config.clone();
-                let options = Arc::new(self.options.as_ref().deref().clone());
-                let provider = self.connection_provider.clone();
-                let ip_addrs = self.ip_addrs().await?;
-
-                let mut configs = ip_addrs
-                    .iter()
-                    .map(|ip| {
-                        let mut config = config.clone();
-                        config.ip = *ip;
-                        (config, true)
-                    })
-                    .collect::<Vec<_>>();
-
-                let (alt_protocol, delay) = match self.server.proto() {
-                    s @ ProtocolConfig::Https { prefer, .. } => match prefer {
-                        HttpsPrefer::Auto => (s.to_h3(), false),
-                        HttpsPrefer::H2 => (None, false),
-                        HttpsPrefer::H3 => (s.to_h3(), true),
-                    },
-                    _ => (Default::default(), Default::default()),
-                };
-
-                if let Some(alt_protocol) = &alt_protocol {
-                    configs.extend(
-                        configs
-                            .iter()
-                            .map(|c| {
-                                let mut config = c.0.clone();
-                                config.connections = config
-                                    .connections
-                                    .iter()
-                                    .map(|c| {
-                                        let mut c = c.clone();
-                                        c.protocol = alt_protocol.into();
-                                        c
-                                    })
-                                    .collect();
-                                (config, delay)
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-
-                if configs.is_empty() {
-                    return Err(ProtoErrorKind::NoConnections.into());
-                }
-
-                if configs.len() == 1 {
-                    let conn_config = config.connections[0].clone();
-                    Connection::new(&config, conn_config, options, provider)
-                } else {
-                    let conns = configs
-                        .into_iter()
-                        .map(|(c, delay)| {
-                            let conn_config = c.connections[0].clone();
-                            (
-                                Connection::new(&c, conn_config, options.clone(), provider.clone()),
-                                delay,
-                            )
-                        })
-                        .map(|(conn, delay)| {
-                            Box::pin(async move {
-                                {
-                                    let fut = conn
-                                        .lookup(DEFAULT_QUERY.clone(), Default::default())
-                                        .first_answer();
-
-                                    if delay {
-                                        tokio::time::sleep(Duration::from_millis(100)).await;
-                                    }
-
-                                    match fut.await {
-                                        Ok(_) => Ok(conn),
-                                        Err(err) if err.kind.is_no_records_found() => Ok(conn),
-                                        Err(err) => Err(err),
-                                    }
-                                }
-                            })
-                        });
-
-                    match futures::future::select_ok(conns).await {
-                        Ok((conn, _)) => conn,
-                        Err(err) => {
-                            log::error!(
-                                "Failed to connect to any nameserver: {} {}",
-                                self.server,
-                                err
-                            );
-                            return Err(err);
-                        }
-                    }
-                }
-            };
-
-            let conn = Arc::new(conn);
-
-            self.datagram_conns.write().await.replace(conn.clone());
-
-            Ok(ClientHandle { connection: conn })
-        }
-
         pub async fn warmup(&self) {
-            let _ = self.client().await;
+            todo!("")
         }
 
         #[inline]
         pub fn options(&self) -> &NameServerOpts {
             &self.options
-        }
-    }
-
-    impl From<RawNameServerConfig> for NameServer {
-        fn from(config: RawNameServerConfig) -> Self {
-            Self {
-                server: SocketAddr::new(config.ip, config.connections[0].port).into(),
-                config,
-                ip_addrs: Default::default(),
-                datagram_conns: Default::default(),
-                options: Default::default(),
-                connection_provider: Default::default(),
-                resolver: Default::default(),
-            }
         }
     }
 
@@ -803,8 +618,7 @@ mod name_server {
             );
 
             let res = {
-                let client = self.client().await?;
-                let ns = client.connection;
+                let ns = &self.connection;
                 ns.send(req).first_answer().await?
             };
 
@@ -856,7 +670,7 @@ mod name_server {
 
 mod bootstrap {
     use super::*;
-    use crate::libdns::resolver::config::ResolverConfig;
+    use crate::{dns_url::DnsUrl, libdns::resolver::config::ResolverConfig};
 
     pub struct BootstrapResolver<T: GenericResolver = NameServerGroup>
     where
@@ -913,7 +727,10 @@ mod bootstrap {
             let mut name_servers = vec![];
 
             for config in resolv_config.name_servers() {
-                name_servers.push(Arc::new(config.clone().into()));
+                if let Ok(ns) = NameServer::new(DnsUrl::from(config).into(), None, None, None, None)
+                {
+                    name_servers.push(Arc::new(ns));
+                }
             }
 
             let resolv_opts = Arc::new(resolv_opts);

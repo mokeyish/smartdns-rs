@@ -1385,7 +1385,7 @@ mod tests {
             "tls://dns.nextdns.io?ip=45.90.28.0"
         );
         assert_eq!(server.server.ip(), "45.90.28.0".parse::<IpAddr>().ok());
-        assert_eq!(server.server.server_name(), Some("dns.nextdns.io"));
+        assert_eq!(server.server.name().as_ref(), "dns.nextdns.io");
     }
 
     #[test]

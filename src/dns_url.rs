@@ -12,7 +12,8 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
-use url::{Host, Url};
+pub use url::Host;
+use url::Url;
 
 /// alias: google、cloudflare、quad9             => not support yet
 /// udp://8.8.8.8 or 8.8.8.8 or [240e:1f:1::1]  => DNS over UDP
@@ -27,6 +28,7 @@ use url::{Host, Url};
 /// dhcp://en0                                  => Use nameservers from DHCP on interface en0
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DnsUrl {
+    name: Arc<str>,
     proto: ProtocolConfig,
     host: Host,
     port: Option<u16>,
@@ -34,6 +36,10 @@ pub struct DnsUrl {
 }
 
 impl DnsUrl {
+    /// The server name to use in the TLS handshake.
+    pub fn name(&self) -> &Arc<str> {
+        &self.name
+    }
     pub fn proto(&self) -> &ProtocolConfig {
         &self.proto
     }
@@ -54,20 +60,6 @@ impl DnsUrl {
         }
     }
 
-    pub fn server_name(&self) -> Option<&str> {
-        match self.proto() {
-            #[cfg(feature = "dns-over-tls")]
-            ProtocolConfig::Tls { server_name, .. } => server_name.as_deref(),
-            #[cfg(feature = "dns-over-quic")]
-            ProtocolConfig::Quic { server_name, .. } => server_name.as_deref(),
-            #[cfg(feature = "dns-over-https")]
-            ProtocolConfig::Https { server_name, .. } => server_name.as_deref(),
-            #[cfg(feature = "dns-over-h3")]
-            ProtocolConfig::H3 { server_name, .. } => server_name.as_deref(),
-            _ => None,
-        }
-    }
-
     pub fn ip(&self) -> Option<IpAddr> {
         match self.host() {
             Host::Domain(_) => None,
@@ -77,7 +69,11 @@ impl DnsUrl {
         .or_else(|| self.get_param::<IpAddr>("ip"))
     }
 
-    pub fn set_proto(&mut self, proto: Protocol) {
+    pub fn set_name<N: Into<Arc<str>>>(&mut self, name: N) {
+        self.name = name.into();
+    }
+
+    pub fn set_proto<P: Into<ProtocolConfig>>(&mut self, proto: P) {
         self.proto = proto.into();
     }
 
@@ -96,7 +92,7 @@ impl DnsUrl {
             Host::Domain(_) => (),
         }
         self.host = Host::Domain(host.to_string());
-        self.proto.set_server_name(host);
+        self.set_name(host);
     }
 }
 
@@ -115,6 +111,7 @@ impl FromStr for DnsUrl {
         match url.as_str() {
             "system" => {
                 return Ok(Self {
+                    name: url.clone().into(),
                     proto: ProtocolConfig::System,
                     host: Host::Domain(url),
                     port: Default::default(),
@@ -123,6 +120,7 @@ impl FromStr for DnsUrl {
             }
             "dhcp" => {
                 return Ok(Self {
+                    name: url.clone().into(),
                     proto: ProtocolConfig::Dhcp {
                         interface: Default::default(),
                     },
@@ -163,6 +161,7 @@ impl FromStr for DnsUrl {
         let proto = match url.scheme() {
             proto @ "dhcp" => {
                 return Ok(Self {
+                    name: proto.into(),
                     proto: ProtocolConfig::Dhcp {
                         interface: host.map(|s| s.to_string().into()),
                     },
@@ -196,12 +195,13 @@ impl FromStr for DnsUrl {
 
         let fragment = url.fragment();
 
-        let server_name = if let Host::Domain(domain) = &host {
+        let server_name: Arc<str> = if let Host::Domain(domain) = &host {
             Some(domain.to_string())
         } else {
             params.get("host").map(|s| s.to_string())
         }
-        .unwrap_or_else(|| host.to_string());
+        .unwrap_or_else(|| host.to_string())
+        .into();
 
         let path = if url.path() == "" || (url.path() == "/" && !is_endwith_slash) {
             None
@@ -219,16 +219,14 @@ impl FromStr for DnsUrl {
         }
 
         Ok(Self {
+            name: server_name,
             proto: match proto {
                 Udp => ProtocolConfig::Udp,
                 Tcp => ProtocolConfig::Tcp,
                 #[cfg(feature = "dns-over-tls")]
-                Tls => ProtocolConfig::Tls {
-                    server_name: Some(server_name.into()),
-                },
+                Tls => ProtocolConfig::Tls,
                 #[cfg(feature = "dns-over-https")]
                 Https => ProtocolConfig::Https {
-                    server_name: Some(server_name.into()),
                     path: path
                         .unwrap_or_else(|| DEFAULT_DNS_QUERY_PATH.to_string())
                         .into(),
@@ -239,12 +237,9 @@ impl FromStr for DnsUrl {
                     },
                 },
                 #[cfg(feature = "dns-over-quic")]
-                Quic => ProtocolConfig::Quic {
-                    server_name: Some(server_name.into()),
-                },
+                Quic => ProtocolConfig::Quic,
                 #[cfg(feature = "dns-over-h3")]
                 H3 => ProtocolConfig::H3 {
-                    server_name: Some(server_name.into()),
                     path: path
                         .unwrap_or_else(|| DEFAULT_DNS_QUERY_PATH.to_string())
                         .into(),
@@ -409,27 +404,17 @@ pub enum ProtocolConfig {
     Udp,
     Tcp,
     #[cfg(feature = "dns-over-tls")]
-    Tls {
-        /// The server name to use in the TLS handshake.
-        server_name: Option<Arc<str>>,
-    },
+    Tls,
     #[cfg(feature = "dns-over-https")]
     Https {
-        /// The server name to use in the TLS handshake.
-        server_name: Option<Arc<str>>,
         /// The path (or endpoint) to use for the DNS query.
         path: Arc<str>,
         prefer: HttpsPrefer,
     },
     #[cfg(feature = "dns-over-quic")]
-    Quic {
-        /// The server name to use in the TLS handshake.
-        server_name: Option<Arc<str>>,
-    },
+    Quic,
     #[cfg(feature = "dns-over-h3")]
     H3 {
-        /// The server name to use in the TLS handshake.
-        server_name: Option<Arc<str>>,
         /// The path (or endpoint) to use for the DNS query.
         path: Arc<str>,
         /// Whether to disable sending "grease"
@@ -449,11 +434,11 @@ impl ProtocolConfig {
             ProtocolConfig::Udp => Some(Protocol::Udp),
             ProtocolConfig::Tcp => Some(Protocol::Tcp),
             #[cfg(feature = "dns-over-tls")]
-            ProtocolConfig::Tls { .. } => Some(Protocol::Tls),
+            ProtocolConfig::Tls => Some(Protocol::Tls),
             #[cfg(feature = "dns-over-https")]
             ProtocolConfig::Https { .. } => Some(Protocol::Https),
             #[cfg(feature = "dns-over-quic")]
-            ProtocolConfig::Quic { .. } => Some(Protocol::Quic),
+            ProtocolConfig::Quic => Some(Protocol::Quic),
             #[cfg(feature = "dns-over-h3")]
             ProtocolConfig::H3 { .. } => Some(Protocol::H3),
             _ => None,
@@ -481,34 +466,9 @@ impl ProtocolConfig {
         matches!(self.to_protocol(), Some(p) if p.is_stream())
     }
 
-    pub fn set_server_name<N: Into<Arc<str>>>(&mut self, server_name: N) {
-        let name = Some(server_name.into());
-        match self {
-            ProtocolConfig::Tls { server_name, .. } => {
-                *server_name = name;
-            }
-            ProtocolConfig::Https { server_name, .. } => {
-                *server_name = name;
-            }
-            ProtocolConfig::Quic { server_name, .. } => {
-                *server_name = name;
-            }
-            ProtocolConfig::H3 { server_name, .. } => {
-                *server_name = name;
-            }
-            _ => (),
-        }
-    }
-
     pub fn to_h3(&self) -> Option<Self> {
-        if let Self::Https {
-            server_name,
-            path,
-            prefer: _,
-        } = self
-        {
+        if let Self::Https { path, prefer: _ } = self {
             Some(Self::H3 {
-                server_name: server_name.clone(),
                 path: path.clone(),
                 disable_grease: false,
             })
@@ -522,11 +482,11 @@ impl ProtocolConfig {
             ProtocolConfig::Udp => "udp",
             ProtocolConfig::Tcp => "tcp",
             #[cfg(feature = "dns-over-tls")]
-            ProtocolConfig::Tls { .. } => "tls",
+            ProtocolConfig::Tls => "tls",
             #[cfg(feature = "dns-over-https")]
             ProtocolConfig::Https { .. } => "https",
             #[cfg(feature = "dns-over-quic")]
-            ProtocolConfig::Quic { .. } => "quic",
+            ProtocolConfig::Quic => "quic",
             #[cfg(feature = "dns-over-h3")]
             ProtocolConfig::H3 { .. } => "h3",
             ProtocolConfig::System => "system",
@@ -556,21 +516,17 @@ impl From<Protocol> for ProtocolConfig {
             Udp => Self::Udp,
             Tcp => Self::Tcp,
             #[cfg(feature = "dns-over-tls")]
-            Tls => Self::Tls {
-                server_name: Default::default(),
-            },
+            Tls => Self::Tls,
             #[cfg(feature = "dns-over-quic")]
-            Quic => Self::Quic { server_name: None },
+            Quic => Self::Quic,
 
             #[cfg(feature = "dns-over-https")]
             Https => Self::Https {
-                server_name: None,
                 path: DEFAULT_DNS_QUERY_PATH.into(),
                 prefer: Default::default(),
             },
             #[cfg(feature = "dns-over-h3")]
             H3 => Self::H3 {
-                server_name: None,
                 path: DEFAULT_DNS_QUERY_PATH.into(),
                 disable_grease: Default::default(),
             },
@@ -752,13 +708,11 @@ mod tests {
     fn test_parse_tls_3() {
         let url = DnsUrl::from_str("tls://8.8.8.8:953?host=dns.google").unwrap();
         assert_eq!(url.proto, Protocol::Tls);
-        assert_eq!(url.host.to_string(), "dns.google");
+        assert_eq!(url.name().as_ref(), "dns.google");
         assert_eq!(url.port(), 953);
-        let ProtocolConfig::Tls { server_name } = &url.proto else {
+        let ProtocolConfig::Tls = &url.proto else {
             panic!("expected tls protocol config")
         };
-
-        assert_eq!(server_name, &Some("dns.google".into()));
 
         assert_eq!(url.to_string(), "tls://dns.google:953?ip=8.8.8.8");
         assert_eq!(url.ip(), "8.8.8.8".parse().ok())
@@ -771,18 +725,12 @@ mod tests {
 
         let url = DnsUrl::from_str("https://dns.google/dns-query").unwrap();
         assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host().to_string(), "dns.google");
+        assert_eq!(url.name().as_ref(), "dns.google");
         assert_eq!(url.port(), 443);
-        let ProtocolConfig::Https {
-            server_name,
-            path,
-            prefer,
-        } = &url.proto
-        else {
+        let ProtocolConfig::Https { path, prefer } = &url.proto else {
             panic!("expected https protocol config")
         };
 
-        assert_eq!(server_name.as_deref(), Some("dns.google"));
         assert_eq!(path.deref(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
         assert_eq!(*prefer, HttpsPrefer::Auto);
@@ -796,19 +744,13 @@ mod tests {
 
         let url = DnsUrl::from_str("https://dns.google/dns-query1#h2").unwrap();
         assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host().to_string(), "dns.google");
+        assert_eq!(url.name().to_string(), "dns.google");
         assert_eq!(url.port(), 443);
 
-        let ProtocolConfig::Https {
-            server_name,
-            path,
-            prefer,
-        } = &url.proto
-        else {
+        let ProtocolConfig::Https { path, prefer } = &url.proto else {
             panic!("expected https protocol config")
         };
 
-        assert_eq!(server_name.as_deref(), Some("dns.google"));
         assert_eq!(path.deref(), "/dns-query1");
 
         assert_eq!(url.to_string(), "https://dns.google/dns-query1#h2");
@@ -822,18 +764,12 @@ mod tests {
         let url = DnsUrl::from_str("https://dns.google").unwrap();
 
         assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host().to_string(), "dns.google");
+        assert_eq!(url.name().to_string(), "dns.google");
         assert_eq!(url.port(), 443);
-        let ProtocolConfig::Https {
-            server_name,
-            path,
-            prefer,
-        } = &url.proto
-        else {
+        let ProtocolConfig::Https { path, prefer } = &url.proto else {
             panic!("expected https protocol config")
         };
 
-        assert_eq!(server_name.as_deref(), Some("dns.google"));
         assert_eq!(path.deref(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.google/dns-query");
         assert!(url.ip().is_none());
@@ -859,17 +795,15 @@ mod tests {
         let url = DnsUrl::from_str("h3://dns.adguard-dns.com#disable_grease").unwrap();
 
         assert_eq!(url.proto, Protocol::H3);
-        assert_eq!(url.host().to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.name().to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
         let ProtocolConfig::H3 {
-            server_name,
             path,
             disable_grease,
         } = &url.proto
         else {
             panic!("expected https protocol config")
         };
-        assert_eq!(server_name.as_deref(), Some("dns.adguard-dns.com"));
 
         assert_eq!(path.deref(), "/dns-query");
         assert_eq!(
@@ -886,18 +820,12 @@ mod tests {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/dns-query#h3").unwrap();
 
         assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host().to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.name().to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        let ProtocolConfig::Https {
-            server_name,
-            path,
-            prefer,
-        } = &url.proto
-        else {
+        let ProtocolConfig::Https { path, prefer } = &url.proto else {
             panic!("expected https protocol config")
         };
 
-        assert_eq!(server_name.as_deref(), Some("dns.adguard-dns.com"));
         assert_eq!(path.deref(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert_eq!(*prefer, HttpsPrefer::H3);
@@ -912,18 +840,12 @@ mod tests {
         let url = DnsUrl::from_str("https://dns.adguard-dns.com/#h3").unwrap();
 
         assert_eq!(url.proto, Protocol::Https);
-        assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
+        assert_eq!(url.name().to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        let ProtocolConfig::Https {
-            server_name,
-            path,
-            prefer,
-        } = &url.proto
-        else {
+        let ProtocolConfig::Https { path, prefer } = &url.proto else {
             panic!("expected https protocol config")
         };
 
-        assert_eq!(server_name.as_deref(), Some("dns.adguard-dns.com"));
         assert_eq!(path.deref(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
         assert_eq!(*prefer, HttpsPrefer::H3);
@@ -939,16 +861,9 @@ mod tests {
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
 
-        let ProtocolConfig::Https {
-            server_name,
-            path,
-            prefer,
-        } = &url.proto
-        else {
+        let ProtocolConfig::Https { path, prefer } = &url.proto else {
             panic!("expected https protocol config")
         };
-
-        assert_eq!(*server_name, Some("dns.adguard-dns.com".into()));
 
         assert_eq!(path.deref(), "/dns-query");
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/dns-query#h3");
@@ -964,16 +879,10 @@ mod tests {
         assert_eq!(url.proto, Protocol::Https);
         assert_eq!(url.host.to_string(), "dns.adguard-dns.com");
         assert_eq!(url.port(), 443);
-        let ProtocolConfig::Https {
-            server_name,
-            path,
-            prefer,
-        } = &url.proto
-        else {
+        let ProtocolConfig::Https { path, prefer } = &url.proto else {
             panic!("expected https protocol config")
         };
 
-        assert_eq!(*server_name, Some("dns.adguard-dns.com".into()));
         assert_eq!(path.deref(), "/2dns-query");
         assert_eq!(url.to_string(), "https://dns.adguard-dns.com/2dns-query#h3");
         assert_eq!(*prefer, HttpsPrefer::H3);
