@@ -1,5 +1,6 @@
 use crate::dns_client::{BootstrapResolver, GenericResolverExt};
 use crate::dns_url::{DnsUrl, Host, HttpsPrefer, ProtocolConfig};
+use crate::libdns::custom::warmup::DnsHandleWarmpup;
 use crate::log;
 use crate::proxy::{self, ProxyConfig};
 use crate::proxy::{TcpStream, UdpSocket};
@@ -23,10 +24,7 @@ use crate::libdns::{
             QuicSocketBinder, RuntimeProvider as _, Spawn, TokioHandle, TokioTime,
             iocompat::AsyncIoTokioAsStd,
         },
-        xfer::{
-            DnsExchange, DnsExchangeConnect, DnsHandle, DnsMultiplexer, DnsMultiplexerConnect,
-            FirstAnswer,
-        },
+        xfer::{DnsExchange, DnsExchangeConnect, DnsMultiplexer, DnsMultiplexerConnect},
     },
     resolver::config::{ConnectionConfig, ResolverOpts},
 };
@@ -41,19 +39,6 @@ type ConnectionFuture = Pin<Box<dyn Send + Future<Output = Result<DnsExchange, P
 
 static FAKE_SERVER_CONFIG: std::sync::LazyLock<NameServerConfig> =
     std::sync::LazyLock::new(|| NameServerConfig::udp(Ipv4Addr::UNSPECIFIED.into()));
-
-static DEFAULT_QUERY: std::sync::LazyLock<crate::libdns::proto::xfer::DnsRequest> =
-    std::sync::LazyLock::new(|| {
-        use crate::libdns::proto::{
-            op::{Message, Query},
-            rr::RecordType,
-            xfer::DnsRequest,
-        };
-        let query = Query::query("example.com.".parse().unwrap(), RecordType::A);
-        let mut message = Message::query();
-        message.add_query(query);
-        DnsRequest::new(message, Default::default())
-    });
 
 #[derive(Clone)]
 pub struct ConnectionProvider {
@@ -181,7 +166,7 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                 async move {
                     let conn = new_connection(&server, server_addr, bind_addr, &options, runtime_proviver).await?;
 
-                    let ok = conn.send(DEFAULT_QUERY.clone()).first_answer().await.is_ok();
+                    let ok = conn.warmup().await.is_ok();
 
                     if !ok {
                         tokio::time::sleep(Duration::from_secs(1)).await;
