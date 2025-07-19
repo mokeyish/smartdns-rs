@@ -1,5 +1,3 @@
-use std::net::Ipv4Addr;
-
 use crate::dns_client::LookupOptions;
 use crate::dns_url::{DnsUrl, ProtocolConfig};
 use crate::libdns::{
@@ -10,57 +8,35 @@ use crate::libdns::{
     },
 };
 
-impl From<&ProtocolConfig> for LibdnsProtocolConfig {
-    fn from(value: &ProtocolConfig) -> Self {
-        match value.clone() {
+impl From<&DnsUrl> for LibdnsConnectionConfig {
+    fn from(url: &DnsUrl) -> Self {
+        let server_name = url.name().clone();
+
+        let proto = match url.proto().clone() {
             ProtocolConfig::Udp => LibdnsProtocolConfig::Udp,
             ProtocolConfig::Tcp => LibdnsProtocolConfig::Tcp,
             #[cfg(feature = "dns-over-tls")]
-            ProtocolConfig::Tls { server_name } => LibdnsProtocolConfig::Tls {
-                server_name: server_name.unwrap_or_default(),
-            },
+            ProtocolConfig::Tls => LibdnsProtocolConfig::Tls { server_name },
             #[cfg(feature = "dns-over-quic")]
-            ProtocolConfig::Quic { server_name } => LibdnsProtocolConfig::Quic {
-                server_name: server_name.unwrap_or_default(),
-            },
+            ProtocolConfig::Quic => LibdnsProtocolConfig::Quic { server_name },
             #[cfg(feature = "dns-over-https")]
-            ProtocolConfig::Https {
-                server_name, path, ..
-            } => LibdnsProtocolConfig::Https {
-                server_name: server_name.unwrap_or_default(),
-                path,
-            },
+            ProtocolConfig::Https { path, .. } => LibdnsProtocolConfig::Https { server_name, path },
             #[cfg(feature = "dns-over-h3")]
             ProtocolConfig::H3 {
-                server_name,
                 path,
                 disable_grease,
             } => LibdnsProtocolConfig::H3 {
-                server_name: server_name.unwrap_or_default(),
+                server_name,
                 path,
                 disable_grease,
             },
             ProtocolConfig::System => LibdnsProtocolConfig::Udp,
             ProtocolConfig::Dhcp { .. } => LibdnsProtocolConfig::Udp,
-        }
-    }
-}
+        };
 
-impl From<&DnsUrl> for LibdnsConnectionConfig {
-    fn from(url: &DnsUrl) -> Self {
-        let mut conn = LibdnsConnectionConfig::new(url.proto().into());
+        let mut conn = LibdnsConnectionConfig::new(proto);
         conn.port = url.port();
         conn
-    }
-}
-
-impl From<&DnsUrl> for LibdnsNameServerConfig {
-    fn from(url: &DnsUrl) -> Self {
-        LibdnsNameServerConfig::new(
-            url.ip().unwrap_or_else(|| Ipv4Addr::LOCALHOST.into()),
-            true,
-            vec![url.into()],
-        )
     }
 }
 
@@ -70,5 +46,51 @@ impl From<RecordType> for LookupOptions {
             record_type,
             ..Default::default()
         }
+    }
+}
+
+impl From<&LibdnsNameServerConfig> for DnsUrl {
+    fn from(config: &LibdnsNameServerConfig) -> Self {
+        let mut url: Self = config.ip.into();
+        if let Some(conn_config) = config.connections.first() {
+            url.set_port(conn_config.port);
+
+            match conn_config.protocol.clone() {
+                LibdnsProtocolConfig::Udp => {
+                    url.set_proto(ProtocolConfig::Udp);
+                }
+                LibdnsProtocolConfig::Tcp => {
+                    url.set_proto(ProtocolConfig::Tcp);
+                }
+                LibdnsProtocolConfig::Tls { server_name } => {
+                    url.set_name(server_name);
+                    url.set_proto(ProtocolConfig::Tls);
+                }
+                LibdnsProtocolConfig::Https { server_name, path } => {
+                    url.set_name(server_name);
+                    url.set_proto(ProtocolConfig::Https {
+                        path,
+                        prefer: Default::default(),
+                    });
+                }
+                LibdnsProtocolConfig::Quic { server_name } => {
+                    url.set_name(server_name);
+                    url.set_proto(ProtocolConfig::Quic);
+                }
+                LibdnsProtocolConfig::H3 {
+                    server_name,
+                    path,
+                    disable_grease,
+                } => {
+                    url.set_name(server_name);
+                    url.set_proto(ProtocolConfig::H3 {
+                        path,
+                        disable_grease,
+                    });
+                }
+            };
+        }
+
+        url
     }
 }

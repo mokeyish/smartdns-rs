@@ -1,12 +1,15 @@
+use crate::dns_client::{BootstrapResolver, GenericResolverExt};
+use crate::dns_url::{DnsUrl, Host, HttpsPrefer, ProtocolConfig};
 use crate::log;
 use crate::proxy::{self, ProxyConfig};
 use crate::proxy::{TcpStream, UdpSocket};
 use crate::third_ext::FutureTimeoutExt;
 use async_trait::async_trait;
 use futures::FutureExt;
-
+use hickory_resolver::config::NameServerConfig;
+use smallvec::{SmallVec, smallvec, smallvec_inline};
 use std::future::Future;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::task::Poll;
 use std::task::ready;
@@ -15,17 +18,19 @@ use std::{io, net::SocketAddr, pin::Pin};
 
 use crate::libdns::{
     proto::{
-        self, ProtoError,
+        self, ProtoError, ProtoErrorKind,
         runtime::{
             QuicSocketBinder, RuntimeProvider as _, Spawn, TokioHandle, TokioTime,
             iocompat::AsyncIoTokioAsStd,
         },
-        xfer::{DnsExchange, DnsExchangeConnect, DnsMultiplexer, DnsMultiplexerConnect},
+        xfer::{
+            DnsExchange, DnsExchangeConnect, DnsHandle, DnsMultiplexer, DnsMultiplexerConnect,
+            FirstAnswer,
+        },
     },
     resolver::config::{ConnectionConfig, ResolverOpts},
 };
 
-pub type RawNameServerConfig = crate::libdns::resolver::config::NameServerConfig;
 pub type Connection = crate::libdns::resolver::name_server::NameServer<ConnectionProvider>;
 type RuntimeProvider = TokioRuntimeProvider;
 type Handle = TokioHandle;
@@ -34,16 +39,52 @@ type Tcp = AsyncIoTokioAsStd<TcpStream>;
 type Udp = UdpSocket;
 type ConnectionFuture = Pin<Box<dyn Send + Future<Output = Result<DnsExchange, ProtoError>>>>;
 
-#[derive(Clone, Default)]
+static FAKE_SERVER_CONFIG: std::sync::LazyLock<NameServerConfig> =
+    std::sync::LazyLock::new(|| NameServerConfig::udp(Ipv4Addr::UNSPECIFIED.into()));
+
+static DEFAULT_QUERY: std::sync::LazyLock<crate::libdns::proto::xfer::DnsRequest> =
+    std::sync::LazyLock::new(|| {
+        use crate::libdns::proto::{
+            op::{Message, Query},
+            rr::RecordType,
+            xfer::DnsRequest,
+        };
+        let query = Query::query("example.com.".parse().unwrap(), RecordType::A);
+        let mut message = Message::query();
+        message.add_query(query);
+        DnsRequest::new(message, Default::default())
+    });
+
+#[derive(Clone)]
 pub struct ConnectionProvider {
-    inner: RuntimeProvider,
+    server: DnsUrl,
+    resolver: Option<Arc<BootstrapResolver>>,
+    options: Arc<ResolverOpts>,
+    runtime_provider: RuntimeProvider,
 }
 
 impl ConnectionProvider {
-    pub fn new(proxy: Option<ProxyConfig>, so_mark: Option<u32>, device: Option<String>) -> Self {
-        Self {
-            inner: TokioRuntimeProvider::new(proxy, so_mark, device),
-        }
+    pub fn new(
+        server: DnsUrl,
+        options: Arc<ResolverOpts>,
+        resolver: Option<Arc<BootstrapResolver>>,
+        proxy: Option<ProxyConfig>,
+        so_mark: Option<u32>,
+        device: Option<String>,
+    ) -> Connection {
+        let config = (&server).into();
+
+        Connection::new(
+            &FAKE_SERVER_CONFIG, // use ip and trust_negative_responses
+            config,              // use protocol
+            options.clone(),
+            Self {
+                server,
+                resolver,
+                options,
+                runtime_provider: TokioRuntimeProvider::new(proxy, so_mark, device),
+            },
+        )
     }
 }
 
@@ -56,19 +97,112 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
 
     fn new_connection(
         &self,
-        ip: IpAddr,
-        config: &ConnectionConfig,
-        options: &ResolverOpts,
+        _ip: IpAddr,
+        _config: &ConnectionConfig,
+        _options: &ResolverOpts,
     ) -> Result<Self::FutureConn, io::Error> {
-        let config = config.clone();
-        let options = options.clone();
-        let runtime_proviver = self.inner.clone();
+        let server = self.server.clone();
+        let options = self.options.clone();
+        let runtime_proviver = self.runtime_provider.clone();
+        let resolver = self.resolver.clone();
+        type StackVec<T> = SmallVec<[T; 2]>;
+        type Stack2xVec<T> = SmallVec<[T; 4]>;
 
         Ok(async move {
-            // TODO:// resolve the ip address
-            let remote_addr = SocketAddr::new(ip, config.port);
+            let bind_addr = None;
 
-            let conn = new_connection(remote_addr, &config, &options, runtime_proviver).await?;
+            let ip_addrs = match server.host() {
+                Host::Domain(domain) => {
+                    match server.get_param::<IpAddr>("ip") {
+                        Some(ip) => smallvec![ip],
+                        None => {
+                            // TODO:// resolve the ip address
+
+                            let Some(resolver) = resolver.as_ref() else {
+                                log::warn!("resolver must be set when using domain name");
+                                return Err(ProtoErrorKind::NoConnections.into());
+                            };
+
+                            let ip_addrs = match resolver.lookup_ip(domain).await {
+                                Ok(lookup_ip) => lookup_ip.ip_addrs().into_iter().collect(),
+                                Err(err) => {
+                                    log::warn!("lookup ip: {domain} failed, {err}");
+                                    StackVec::new()
+                                }
+                            };
+
+                            if ip_addrs.is_empty() {
+                                return Err(ProtoErrorKind::NoConnections.into());
+                            }
+                            ip_addrs
+                        }
+                    }
+                }
+                Host::Ipv4(ipv4_addr) => smallvec![(*ipv4_addr).into()],
+                Host::Ipv6(ipv6_addr) => smallvec![(*ipv6_addr).into()],
+            };
+
+            let server_addrs = ip_addrs
+                .into_iter()
+                .map(|ip| SocketAddr::new(ip, server.port()))
+                .collect::<StackVec<_>>();
+
+            if server_addrs.len() == 1 && !matches!(server.proto(), ProtocolConfig::Https{ prefer, ..} if *prefer != HttpsPrefer::H2) {
+                let server_addr = server_addrs[0];
+                let conn =
+                    new_connection(&server, server_addr, bind_addr, &options, runtime_proviver)
+                        .await?;
+                return Ok(conn);
+            }
+
+            let server_addrs: Stack2xVec<_> = if let ProtocolConfig::Https { prefer, path, .. } = server.proto() {
+                let h3_proto = ProtocolConfig::H3 {
+                    path: path.clone(),
+                    disable_grease: false,
+                };
+                let delay_h2 = *prefer == HttpsPrefer::H3;
+                server_addrs.into_iter().flat_map(|server_addr|{
+                    let h2_server = server.clone();
+                    let mut h3_server = server.clone();
+                    h3_server.set_proto(h3_proto.clone());
+                    smallvec_inline![
+                        (h3_server, server_addr, false),
+                        (h2_server, server_addr, delay_h2),
+                    ]
+                }).collect()
+            } else {
+                server_addrs.into_iter().map(|server_addr|(server.clone(), server_addr, false)).collect()
+            };
+
+            let conns = server_addrs.into_iter().map(|(server, server_addr, delay)| {
+                let server = server.clone();
+                let options = options.clone();
+                let runtime_proviver = runtime_proviver.clone();
+                async move {
+                    let conn = new_connection(&server, server_addr, bind_addr, &options, runtime_proviver).await?;
+
+                    let ok = conn.send(DEFAULT_QUERY.clone()).first_answer().await.is_ok();
+
+                    if !ok {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+
+                    if delay {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+
+                    Ok(conn)
+                }
+                .boxed()
+            });
+
+            let conn = match futures::future::select_ok(conns).await {
+                Ok((conn, _)) => conn,
+                Err(err) => {
+                    log::error!("Failed to connect to any nameserver: {} {}", server, err);
+                    return Err(err);
+                }
+            };
 
             Ok(conn)
         }
@@ -77,14 +211,14 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
 }
 
 async fn new_connection(
-    remote_addr: SocketAddr,
-    config: &ConnectionConfig,
+    server: &DnsUrl,
+    server_addr: SocketAddr,
+    bind_addr: Option<SocketAddr>,
     options: &ResolverOpts,
     runtime_proviver: RuntimeProvider,
 ) -> Result<DnsExchange, ProtoError> {
-    use crate::libdns::resolver::config::ProtocolConfig;
     let mut spawner = runtime_proviver.create_handle();
-    let conn = match (&config.protocol, runtime_proviver.quic_binder()) {
+    let conn = match (&server.proto(), runtime_proviver.quic_binder()) {
         (ProtocolConfig::Udp, _) => {
             #[cfg(feature = "mdns")]
             {
@@ -98,14 +232,14 @@ async fn new_connection(
                     Time,
                 >;
 
-                if remote_addr == *MDNS_IPV4 {
+                if server_addr == *MDNS_IPV4 {
                     let timeout = options.timeout;
 
                     // let (stream, handle) =
                     //     MdnsClientStream::new(socket_addr, MdnsQueryType::OneShot, None, None, Some(32));
 
                     let (stream, handle) = MdnsClientStream::new(
-                        remote_addr,
+                        server_addr,
                         MdnsQueryType::OneShotJoin,
                         None,
                         None,
@@ -132,11 +266,11 @@ async fn new_connection(
                 Time,
             >;
             let provider_handle = runtime_proviver.clone();
-            let stream = UdpClientStream::builder(remote_addr, provider_handle)
+            let stream = UdpClientStream::builder(server_addr, provider_handle)
                 .with_timeout(Some(options.timeout))
                 .with_os_port_selection(options.os_port_selection)
                 .avoid_local_ports(options.avoid_local_udp_ports.clone())
-                .with_bind_addr(config.bind_addr)
+                .with_bind_addr(bind_addr)
                 .build();
             let exchange: Connecting = DnsExchange::connect(stream);
             let (conn, bg) = exchange.await?;
@@ -156,8 +290,8 @@ async fn new_connection(
             >;
 
             let (future, handle) = TcpClientStream::new(
-                remote_addr,
-                config.bind_addr,
+                server_addr,
+                bind_addr,
                 Some(options.timeout),
                 runtime_proviver,
             );
@@ -171,7 +305,7 @@ async fn new_connection(
             conn
         }
         #[cfg(feature = "dns-over-tls")]
-        (ProtocolConfig::Tls { server_name }, _) => {
+        (ProtocolConfig::Tls, _) => {
             use crate::libdns::proto::rustls::TlsClientStream;
             use crate::libdns::proto::rustls::tls_client_stream::tls_client_connect_with_future;
             use rustls::pki_types::ServerName;
@@ -191,9 +325,11 @@ async fn new_connection(
             >;
 
             let timeout = options.timeout;
-            let tcp_future = runtime_proviver.connect_tcp(remote_addr, None, None);
+            let tcp_future = runtime_proviver.connect_tcp(server_addr, None, None);
 
-            let Ok(server_name) = ServerName::try_from(&**server_name) else {
+            let server_name = server.host().to_string();
+
+            let Ok(server_name) = ServerName::try_from(server_name.as_str()) else {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("invalid server name: {server_name}"),
@@ -206,7 +342,7 @@ async fn new_connection(
 
             let (stream, handle) = tls_client_connect_with_future(
                 tcp_future,
-                remote_addr,
+                server_addr,
                 server_name.to_owned(),
                 Arc::new(tls_config),
             );
@@ -220,15 +356,17 @@ async fn new_connection(
             conn
         }
         #[cfg(feature = "dns-over-https")]
-        (ProtocolConfig::Https { server_name, path }, _) => {
+        (ProtocolConfig::Https { path, .. }, _) => {
             use crate::libdns::proto::h2::HttpsClientConnect;
             use crate::libdns::proto::h2::HttpsClientStream;
             type Connecting = DnsExchangeConnect<HttpsClientConnect<Tcp>, HttpsClientStream, Time>;
 
+            let server_name = server.name();
+
             let exchange: Connecting = DnsExchange::connect(HttpsClientConnect::new(
-                runtime_proviver.connect_tcp(remote_addr, None, None),
+                runtime_proviver.connect_tcp(server_addr, None, None),
                 Arc::new(options.tls_config.clone()),
-                remote_addr,
+                server_addr,
                 server_name.clone(),
                 path.clone(),
             ));
@@ -239,23 +377,25 @@ async fn new_connection(
             conn
         }
         #[cfg(feature = "dns-over-quic")]
-        (ProtocolConfig::Quic { server_name }, Some(binder)) => {
+        (ProtocolConfig::Quic, Some(binder)) => {
             use crate::libdns::proto::quic::QuicClientConnect;
             use crate::libdns::proto::quic::QuicClientStream;
             use std::net::Ipv4Addr;
             use std::net::Ipv6Addr;
             type Connecting = DnsExchangeConnect<QuicClientConnect, QuicClientStream, Time>;
-            let bind_addr = config.bind_addr.unwrap_or(match remote_addr {
+            let bind_addr = bind_addr.unwrap_or(match server_addr {
                 SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
                 SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
             });
+
+            let server_name = server.name();
 
             let exchange: Connecting = DnsExchange::connect(
                 QuicClientStream::builder()
                     .crypto_config(options.tls_config.clone())
                     .build_with_future(
-                        binder.bind_quic(bind_addr, remote_addr)?,
-                        remote_addr,
+                        binder.bind_quic(bind_addr, server_addr)?,
+                        server_addr,
                         server_name.clone(),
                     ),
             );
@@ -268,9 +408,9 @@ async fn new_connection(
         #[cfg(feature = "dns-over-h3")]
         (
             ProtocolConfig::H3 {
-                server_name,
                 path,
                 disable_grease,
+                ..
             },
             Some(binder),
         ) => {
@@ -279,18 +419,20 @@ async fn new_connection(
             use std::net::Ipv4Addr;
             use std::net::Ipv6Addr;
             type Connecting = DnsExchangeConnect<H3ClientConnect, H3ClientStream, Time>;
-            let bind_addr = config.bind_addr.unwrap_or(match remote_addr {
+            let bind_addr = bind_addr.unwrap_or(match server_addr {
                 SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
                 SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0),
             });
+
+            let server_name = server.name();
 
             let exchange: Connecting = DnsExchange::connect(
                 H3ClientStream::builder()
                     .crypto_config(options.tls_config.clone())
                     .disable_grease(*disable_grease)
                     .build_with_future(
-                        binder.bind_quic(bind_addr, remote_addr)?,
-                        remote_addr,
+                        binder.bind_quic(bind_addr, server_addr)?,
+                        server_addr,
                         server_name.clone(),
                         path.clone(),
                     ),
@@ -302,7 +444,7 @@ async fn new_connection(
             conn
         }
         #[cfg(feature = "dns-over-quic")]
-        (ProtocolConfig::Quic { .. }, None) => Err(io::Error::new(
+        (ProtocolConfig::Quic, None) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "runtime provider does not support QUIC",
         ))?,
@@ -310,6 +452,10 @@ async fn new_connection(
         (ProtocolConfig::H3 { .. }, None) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "runtime provider does not support QUIC",
+        ))?,
+        (p, _) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsupported protocol configuration: {p:?}"),
         ))?,
     };
     Ok(conn)
