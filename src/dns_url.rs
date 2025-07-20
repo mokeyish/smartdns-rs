@@ -69,6 +69,11 @@ impl DnsUrl {
         .or_else(|| self.get_param::<IpAddr>("ip"))
     }
 
+    pub fn has_ip(&self) -> bool {
+        use ProtocolConfig::*;
+        matches!(self.proto(), System | Dhcp { .. }) || self.ip().is_some()
+    }
+
     pub fn set_name<N: Into<Arc<str>>>(&mut self, name: N) {
         self.name = name.into();
     }
