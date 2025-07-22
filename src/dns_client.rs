@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::{Ipv4Addr, SocketAddr},
     ops::Deref,
     path::PathBuf,
     slice::Iter,
