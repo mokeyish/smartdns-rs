@@ -97,6 +97,7 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
             let bind_addr = None;
 
             let ip_addrs: StackVec<_> = match server.host() {
+                _ if matches!(server.proto(), ProtocolConfig::System | ProtocolConfig::Dhcp { .. }) => SmallVec::new(),
                 Host::Domain(domain) => {
                     match server.get_param::<IpAddr>("ip") {
                         Some(ip) => smallvec![ip],
@@ -157,6 +158,19 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                         ]
                     }).collect()
                 },
+                ProtocolConfig::System => {
+                    let (resolv_conf, _) = crate::libdns::resolver::system_conf::read_system_conf()?;
+                    if resolv_conf.name_servers.is_empty() {
+                        return Err(ProtoErrorKind::NoConnections.into());
+                    }
+                    resolv_conf.name_servers.iter().map(|conf| {
+                        let mut url = DnsUrl::from(conf);
+                        *url = (*server).clone(); // params
+                        let server_addr = SocketAddr::new(conf.ip, url.port());
+                        (url, server_addr, false)
+                    }).collect()
+                }
+                ProtocolConfig::Dhcp { .. } => return Err(ProtoErrorKind::NoConnections.into()), // TODO
                 _ => server_addrs.into_iter().map(|server_addr|(server.clone(), server_addr, false)).collect()
             };
 
