@@ -216,6 +216,17 @@ mod tests {
                 }
             ))
         );
+
+        assert_eq!(
+            NameServerInfo::parse("server system"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("system").unwrap(),
+                    ..name_server_default()
+                }
+            ))
+        );
     }
 
     #[test]
@@ -248,6 +259,31 @@ mod tests {
                     server: DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap(),
                     group: vec!["alidns".to_string()],
                     exclude_default_group: true,
+                    ..name_server_default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_server_dhcp() {
+        assert_eq!(
+            NameServerInfo::parse("server dhcp"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("dhcp").unwrap(),
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        assert_eq!(
+            NameServerInfo::parse("server dhcp://eth0"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("dhcp://eth0").unwrap(),
                     ..name_server_default()
                 }
             ))
