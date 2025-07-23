@@ -9,67 +9,38 @@ use super::*;
 impl NomParser for NameServerInfo {
     fn parse(input: &str) -> IResult<&str, Self> {
         let dns_url = |default_proto| {
-            let proto = map(
-                opt(alt((
-                    tag_no_case("udp://"),
-                    tag_no_case("tcp://"),
-                    #[cfg(feature = "dns-over-tls")]
-                    tag_no_case("tls://"),
-                    #[cfg(feature = "dns-over-https")]
-                    tag_no_case("https://"),
-                    #[cfg(feature = "dns-over-quic")]
-                    tag_no_case("quic://"),
-                    #[cfg(feature = "dns-over-h3")]
-                    tag_no_case("h3://"),
-                ))),
-                move |p| p.unwrap_or(default_proto),
-            );
-
-            map_res(
-                pair(proto, take_till1(|c: char| c.is_whitespace())),
-                |(a, b)| {
-                    let url: String = [a, b].concat();
-                    match DnsUrl::from_str(&url) {
-                        Ok(url) => Ok(url),
-                        Err(err) => {
-                            let url: String = [a, "[", b, "]"].concat();
-                            match DnsUrl::from_str(&url) {
-                                Ok(url) => Ok(url),
-                                _ => Err(err),
-                            }
-                        }
-                    }
-                },
-            )
+            map_res(take_till1(|c: char| c.is_whitespace()), move |url: &str| {
+                let (a, b) = match (url.split_once("://"), url) {
+                    (Some(parts), _) => parts,
+                    (None, "system" | "dhcp") => return DnsUrl::from_str(url),
+                    (None, _) => (default_proto, url),
+                };
+                let url: String = [a, "://", b].concat();
+                DnsUrl::from_str(&url).or_else(|err| {
+                    let url: String = [a, "://", "[", b, "]"].concat();
+                    DnsUrl::from_str(&url).map_err(|_| err)
+                })
+            })
         };
 
         let (input, url) = alt((
-            preceded(
-                tag_no_case("server-udp"),
-                preceded(space1, dns_url("udp://")),
-            ),
-            preceded(
-                tag_no_case("server-tcp"),
-                preceded(space1, dns_url("tcp://")),
-            ),
+            preceded(tag_no_case("server-udp"), preceded(space1, dns_url("udp"))),
+            preceded(tag_no_case("server-tcp"), preceded(space1, dns_url("tcp"))),
             #[cfg(feature = "dns-over-tls")]
-            preceded(
-                tag_no_case("server-tls"),
-                preceded(space1, dns_url("tls://")),
-            ),
+            preceded(tag_no_case("server-tls"), preceded(space1, dns_url("tls"))),
             #[cfg(feature = "dns-over-https")]
             preceded(
                 tag_no_case("server-https"),
-                preceded(space1, dns_url("https://")),
+                preceded(space1, dns_url("https")),
             ),
             #[cfg(feature = "dns-over-h3")]
-            preceded(tag_no_case("server-h3"), preceded(space1, dns_url("h3://"))),
+            preceded(tag_no_case("server-h3"), preceded(space1, dns_url("h3"))),
             #[cfg(feature = "dns-over-quic")]
             preceded(
                 tag_no_case("server-quic"),
-                preceded(space1, dns_url("quic://")),
+                preceded(space1, dns_url("quic")),
             ),
-            preceded(tag_no_case("server"), preceded(space1, dns_url("udp://"))),
+            preceded(tag_no_case("server"), preceded(space1, dns_url("udp"))),
         ))
         .parse(input)?;
 
@@ -245,6 +216,17 @@ mod tests {
                 }
             ))
         );
+
+        assert_eq!(
+            NameServerInfo::parse("server system"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("system").unwrap(),
+                    ..name_server_default()
+                }
+            ))
+        );
     }
 
     #[test]
@@ -277,6 +259,31 @@ mod tests {
                     server: DnsUrl::from_str("https://dns.alidns.com/dns-query").unwrap(),
                     group: vec!["alidns".to_string()],
                     exclude_default_group: true,
+                    ..name_server_default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_server_dhcp() {
+        assert_eq!(
+            NameServerInfo::parse("server dhcp"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("dhcp").unwrap(),
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        assert_eq!(
+            NameServerInfo::parse("server dhcp://eth0"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("dhcp://eth0").unwrap(),
                     ..name_server_default()
                 }
             ))

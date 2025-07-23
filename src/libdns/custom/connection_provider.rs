@@ -28,6 +28,7 @@ use crate::libdns::{
     },
     resolver::config::{ConnectionConfig, ResolverOpts},
 };
+use std::borrow::Cow;
 
 pub type Connection = crate::libdns::resolver::name_server::NameServer<ConnectionProvider>;
 type RuntimeProvider = TokioRuntimeProvider;
@@ -96,10 +97,22 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
         Ok(async move {
             let bind_addr = None;
 
-            let ip_addrs: StackVec<_> = match server.host() {
-                Host::Domain(domain) => {
+            let ip_addrs: StackVec<(_, StackVec<_>)> = match (server.host(), server.proto()) {
+                (_, ProtocolConfig::System) => {
+                    let (resolv_conf, _) = crate::libdns::resolver::system_conf::read_system_conf()?;
+                    if resolv_conf.name_servers.is_empty() {
+                        return Err(ProtoErrorKind::NoConnections.into());
+                    }
+                    resolv_conf.name_servers.iter().map(|conf| {
+                        let mut url = DnsUrl::from(conf);
+                        *url = (*server).clone(); // params
+                        (Cow::Owned(url), smallvec![conf.ip])
+                    }).collect()
+                },
+                (_, ProtocolConfig::Dhcp { .. }) => return Err(ProtoErrorKind::NoConnections.into()), // TODO
+                (Host::Domain(domain), _) => {
                     match server.get_param::<IpAddr>("ip") {
-                        Some(ip) => smallvec![ip],
+                        Some(ip) => smallvec![(Cow::Borrowed(&server), smallvec![ip])],
                         None => {
                             // TODO:// resolve the ip address
 
@@ -119,53 +132,63 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                             if ip_addrs.is_empty() {
                                 return Err(ProtoErrorKind::NoConnections.into());
                             }
-                            ip_addrs
+                            smallvec![(Cow::Borrowed(&server), ip_addrs)]
                         }
                     }
                 }
-                Host::Ipv4(ipv4_addr) => smallvec![(*ipv4_addr).into()],
-                Host::Ipv6(ipv6_addr) => smallvec![(*ipv6_addr).into()],
+                (Host::Ipv4(ipv4_addr), _) => {
+                    smallvec![(Cow::Borrowed(&server), smallvec![(*ipv4_addr).into()])]
+                }
+                (Host::Ipv6(ipv6_addr), _) => {
+                    smallvec![(Cow::Borrowed(&server), smallvec![(*ipv6_addr).into()])]
+                }
             };
 
-            let server_addrs = ip_addrs
+            let server_addrs: StackVec<(_, StackVec<_>)> = ip_addrs
                 .into_iter()
-                .map(|ip| SocketAddr::new(ip, server.port()))
-                .collect::<StackVec<_>>();
+                .map(|(server, ip)| {
+                    let port = server.port();
+                    (server, ip.into_iter().map(|ip| SocketAddr::new(ip, port)).collect())
+                })
+                .collect();
 
-            if server_addrs.len() == 1 && !matches!(server.proto(), ProtocolConfig::Https{ prefer, ..} if *prefer != HttpsPrefer::H2) {
-                let server_addr = server_addrs[0];
-                let conn =
-                    new_connection(&server, server_addr, bind_addr, &options, runtime_proviver)
-                        .await?;
-                return Ok(conn);
+            if let [(server, server_addrs)] = &*server_addrs
+                && let [server_addr] = &**server_addrs
+                && !matches!(server.proto(), ProtocolConfig::Https { prefer, .. } if *prefer != HttpsPrefer::H2)
+            {
+                return new_connection(server, *server_addr, bind_addr, &options, runtime_proviver).await;
             }
 
-            let server_addrs: Stack2xVec<_> = match server.proto() {
-                ProtocolConfig::Https { prefer, path, .. } if *prefer != HttpsPrefer::H2 => {
-                    let h3_proto = ProtocolConfig::H3 {
-                        path: path.clone(),
-                        disable_grease: false,
-                    };
-                    let delay_h2 = *prefer == HttpsPrefer::H3;
-                    server_addrs.into_iter().flat_map(|server_addr|{
-                        let h2_server = server.clone();
-                        let mut h3_server = server.clone();
-                        h3_server.set_proto(h3_proto.clone());
-                        smallvec_inline![
-                            (h3_server, server_addr, false),
-                            (h2_server, server_addr, delay_h2),
-                        ]
-                    }).collect()
-                },
-                _ => server_addrs.into_iter().map(|server_addr|(server.clone(), server_addr, false)).collect()
-            };
+            let mut h3_server_addrs = Stack2xVec::<(Cow<DnsUrl>, _, _)>::new();
+            for (server, server_addrs) in &server_addrs {
+                let server = Cow::Borrowed(&**server);
+                match server.proto() {
+                    ProtocolConfig::Https { prefer, path, .. } if *prefer != HttpsPrefer::H2 => {
+                        let h3_proto = ProtocolConfig::H3 {
+                            path: path.clone(),
+                            disable_grease: false,
+                        };
+                        let delay_h2 = *prefer == HttpsPrefer::H3;
+                        h3_server_addrs.extend(server_addrs.iter().flat_map(|server_addr| {
+                            let h2_server = server.clone();
+                            let mut h3_server = server.clone();
+                            h3_server.to_mut().set_proto(h3_proto.clone());
+                            smallvec_inline![
+                                (h3_server, server_addr, false),
+                                (h2_server, server_addr, delay_h2),
+                            ]
+                        }));
+                    },
+                    _ => h3_server_addrs.extend(server_addrs.iter().map(|server_addr| (server.clone(), server_addr, false)))
+                }
+            }
+            let server_addrs = h3_server_addrs;
 
             let conns = server_addrs.into_iter().map(|(server, server_addr, delay)| {
-                let server = server.clone();
                 let options = options.clone();
                 let runtime_proviver = runtime_proviver.clone();
                 async move {
-                    let conn = new_connection(&server, server_addr, bind_addr, &options, runtime_proviver).await?;
+                    let conn = new_connection(&server, *server_addr, bind_addr, &options, runtime_proviver).await?;
 
                     let ok = conn.warmup().await.is_ok();
 
