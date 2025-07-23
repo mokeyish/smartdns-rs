@@ -151,7 +151,7 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                     (server, ip.into_iter().map(|ip| SocketAddr::new(ip, port)).collect())
                 })
                 .collect();
-            
+
             if let [(server, server_addrs)] = &*server_addrs
                 && let [server_addr] = &**server_addrs
                 && !matches!(server.proto(), ProtocolConfig::Https { prefer, .. } if *prefer != HttpsPrefer::H2)
