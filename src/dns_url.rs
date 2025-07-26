@@ -33,9 +33,20 @@ pub struct DnsUrl {
     host: Host,
     port: Option<u16>,
     params: Params,
+    options: Params,
 }
 
 impl DnsUrl {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            proto: Default::default(),
+            host: Host::Ipv4(Ipv4Addr::UNSPECIFIED),
+            port: Default::default(),
+            params: Default::default(),
+            options: Default::default(),
+        }
+    }
     /// The server name to use in the TLS handshake.
     pub fn name(&self) -> &Arc<str> {
         &self.name
@@ -119,8 +130,7 @@ impl FromStr for DnsUrl {
                     name: url.clone().into(),
                     proto: ProtocolConfig::System,
                     host: Host::Domain(url),
-                    port: Default::default(),
-                    params: Default::default(),
+                    ..Self::default()
                 });
             }
             "dhcp" => {
@@ -130,8 +140,7 @@ impl FromStr for DnsUrl {
                         interface: Default::default(),
                     },
                     host: Host::Domain(url),
-                    port: Default::default(),
-                    params: Default::default(),
+                    ..Self::default()
                 });
             }
             _ => (),
@@ -171,8 +180,8 @@ impl FromStr for DnsUrl {
                         interface: host.map(|s| s.to_string().into()),
                     },
                     host: Host::Domain(proto.to_string()),
-                    port: Default::default(),
-                    params: Default::default(),
+
+                    ..Self::default()
                 });
             }
             "udp" => Udp,
@@ -191,14 +200,9 @@ impl FromStr for DnsUrl {
             return Err(DnsUrlParseErr::HostUnspecified);
         };
 
-        let mut params = Params(
-            url.query_pairs()
-                .into_iter()
-                .map(|(n, v)| (n.into(), v.into()))
-                .collect(),
-        );
+        let mut params = Params::from(url.query().unwrap_or_default());
 
-        let fragment = url.fragment();
+        let options = Params::from(url.fragment().unwrap_or_default());
 
         let server_name: Arc<str> = if let Host::Domain(domain) = &host {
             Some(domain.to_string())
@@ -235,10 +239,14 @@ impl FromStr for DnsUrl {
                     path: path
                         .unwrap_or_else(|| DEFAULT_DNS_QUERY_PATH.to_string())
                         .into(),
-                    prefer: match fragment {
-                        Some(fragment) if fragment.contains("h2") => HttpsPrefer::H2,
-                        Some(fragment) if fragment.contains("h3") => HttpsPrefer::H3,
-                        _ => HttpsPrefer::Auto,
+                    prefer: {
+                        if options.is_set("h2") {
+                            HttpsPrefer::H2
+                        } else if options.is_set("h3") {
+                            HttpsPrefer::H3
+                        } else {
+                            HttpsPrefer::Auto
+                        }
                     },
                 },
                 #[cfg(feature = "dns-over-quic")]
@@ -248,13 +256,14 @@ impl FromStr for DnsUrl {
                     path: path
                         .unwrap_or_else(|| DEFAULT_DNS_QUERY_PATH.to_string())
                         .into(),
-                    disable_grease: matches!(fragment, Some(fragment) if fragment.contains("disable_grease")),
+                    disable_grease: options.is_set("disable_grease"),
                 },
                 _ => unimplemented!(),
             },
             host,
             port,
             params,
+            options,
         })
     }
 }
@@ -285,34 +294,23 @@ impl std::fmt::Display for DnsUrl {
         }
 
         match &self.proto {
-            ProtocolConfig::Https { path, prefer, .. } => {
+            ProtocolConfig::Https { path, .. } => {
                 write!(f, "{path}")?;
-
-                // fragment
-                if !matches!(prefer, HttpsPrefer::Auto) {
-                    write!(f, "#{prefer}")?;
-                }
             }
-            ProtocolConfig::H3 {
-                path,
-                disable_grease,
-                ..
-            } => {
+            ProtocolConfig::H3 { path, .. } => {
                 write!(f, "{path}")?;
-
-                // fragment
-                if *disable_grease {
-                    write!(f, "#disable_grease")?;
-                }
             }
             _ => (),
         }
 
         // query
         if !self.params.is_empty() {
-            for (i, (n, v)) in self.params.iter().enumerate() {
-                write!(f, "{}{}={}", if i == 0 { '?' } else { '&' }, n, v)?;
-            }
+            write!(f, "?{}", self.params)?;
+        }
+
+        // fragment
+        if !self.options.is_empty() {
+            write!(f, "#{}", self.options)?;
         }
 
         Ok(())
@@ -590,6 +588,10 @@ impl Params {
             .unwrap_or_default()
     }
 
+    pub fn is_set(&self, name: &str) -> bool {
+        self.0.get(name).is_some()
+    }
+
     pub fn set_sni_on(&mut self, value: bool) {
         self.set_param("sni", value)
     }
@@ -615,6 +617,35 @@ impl Params {
 
     pub fn set_ssl_verify(&mut self, verify: bool) {
         self.set_param("ssl_verify", verify)
+    }
+}
+
+impl From<&str> for Params {
+    fn from(value: &str) -> Self {
+        Self(
+            url::form_urlencoded::parse(value.as_bytes())
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        )
+    }
+}
+
+impl std::fmt::Display for Params {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.is_empty() {
+            return Ok(());
+        }
+        let mut encoded = url::form_urlencoded::Serializer::new(String::new());
+        for (k, v) in self.0.iter() {
+            if v.is_empty() {
+                encoded.append_key_only(k);
+            } else {
+                encoded.append_pair(k, v);
+            }
+        }
+        write!(f, "{}", encoded.finish())?;
+        Ok(())
     }
 }
 
