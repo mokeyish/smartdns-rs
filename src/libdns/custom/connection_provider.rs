@@ -114,8 +114,6 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                     match server.get_param::<IpAddr>("ip") {
                         Some(ip) => smallvec![(Cow::Borrowed(&server), smallvec![ip])],
                         None => {
-                            // TODO:// resolve the ip address
-
                             let Some(resolver) = resolver.as_ref() else {
                                 log::warn!("resolver must be set when using domain name");
                                 return Err(ProtoErrorKind::NoConnections.into());
@@ -166,7 +164,7 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                     ProtocolConfig::Https { prefer, path, .. } if *prefer != HttpsPrefer::H2 => {
                         let h3_proto = ProtocolConfig::H3 {
                             path: path.clone(),
-                            disable_grease: false,
+                            disable_grease: server.is_set("disable_grease"),
                         };
                         let delay_h2 = *prefer == HttpsPrefer::H3;
                         h3_server_addrs.extend(server_addrs.iter().flat_map(|server_addr| {
@@ -192,12 +190,8 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
 
                     let ok = conn.warmup().await.is_ok();
 
-                    if !ok {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
-
-                    if delay {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    if !ok || delay {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
                     }
 
                     Ok(conn)
