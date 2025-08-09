@@ -589,7 +589,7 @@ impl Params {
     }
 
     pub fn is_set(&self, name: &str) -> bool {
-        self.0.get(name).is_some()
+        self.0.contains_key(name)
     }
 
     pub fn set_sni_on(&mut self, value: bool) {
