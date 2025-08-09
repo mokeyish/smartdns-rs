@@ -87,7 +87,7 @@ fn setup_socket<'a, T: Into<SockRef<'a>>>(
     // https://github.com/pymumu/smartdns/blob/e26ecf6a52851f88e2937448019f74b753c0e6dc/src/dns_server/server_socket.c#L111
     if sock_typ == Type::STREAM {
         // enable TCP_FASTOPEN
-        sock_ref.set_nodelay(true)?;
+        sock_ref.set_tcp_nodelay(true)?;
     }
 
     sock_ref.set_reuse_address(true)?;

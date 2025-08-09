@@ -366,7 +366,7 @@ mod name_server_group {
             }
         }
         #[inline]
-        pub fn iter(&self) -> Iter<Arc<NameServer>> {
+        pub fn iter(&self) -> Iter<'_, Arc<NameServer>> {
             self.servers.iter()
         }
 

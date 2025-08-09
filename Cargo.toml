@@ -166,7 +166,7 @@ tokio = { version = "1.46", features = [
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
 tokio-util = "0.7.12"
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 http = "1"
 reqwest = { version = "0.12", optional = true, default-features = false, features = [
   "blocking",
@@ -202,7 +202,7 @@ rustls-native-certs = "0.8"
 lru = { version = "0.14", default-features = false }
 # time = "0.3"
 chrono = { version = "0.4.38", default-features = false, features = ["serde", "clock"]}
-surge-ping = "0.8.1"
+surge-ping = { version = "0.8", git = "https://github.com/mokeyish/surge-ping.git", rev = "4a88f6f"}
 rand = "0.9.1"
 smallvec = "1.13.2"
 csv = "1.1"
