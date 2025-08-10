@@ -1,7 +1,7 @@
 use clap::Parser;
 use clap::Subcommand;
 use clap_verbosity_flag::{InfoLevel, Verbosity};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::str::FromStr;
 
 use crate::log::{self, warn};
@@ -29,6 +29,10 @@ impl Cli {
             return ResolveCommand::parse().into();
         }
 
+        if std::env::args().any(|arg| arg == "help" || arg == "--help") {
+            Self::try_parse().unwrap_err().exit(); // Force clap to show help
+        }
+
         match Self::try_parse() {
             Ok(cli) => cli,
             Err(e) => {
@@ -51,9 +55,16 @@ impl Cli {
     pub fn parse_from<I, T>(itr: I) -> Self
     where
         I: IntoIterator<Item = T>,
-        T: Into<OsString> + Clone,
+        T: Into<OsString> + Clone + AsRef<OsStr>,
     {
         let itr = itr.into_iter().collect::<Vec<_>>();
+        // New check for "help" argument
+        if itr.iter().any(|arg| {
+            arg.as_ref().to_string_lossy() == "help" || arg.as_ref().to_string_lossy() == "--help"
+        }) {
+            Self::try_parse_from(itr).unwrap_err().exit(); // Force clap to show help
+        }
+
         match Self::try_parse_from(itr.clone()) {
             Ok(cli) => cli,
             Err(e) => {
