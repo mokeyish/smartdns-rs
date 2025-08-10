@@ -18,7 +18,7 @@ use crate::{
 };
 
 use crate::libdns::proto::rr::domain::usage::LOCAL;
-use crate::libdns::proto::{AuthorityData, rr::rdata::opt::EdnsCode};
+use crate::libdns::proto::{AuthorityData, op::ResponseCode, rr::rdata::opt::EdnsCode};
 use futures::FutureExt;
 use rr::rdata::opt::EdnsOption;
 use tokio::time::sleep;
@@ -424,9 +424,13 @@ async fn lookup_ip(
             let mut last_error = None;
             loop {
                 let (res, _idx, rest) = select_all(query_tasks).await;
-                if rest.is_empty()
-                    || matches!(&res, Ok(res) if res.answers().iter().any(|r| r.record_type() == options.record_type))
-                {
+                if let Ok(response) = &res {
+                    if response.response_code() == ResponseCode::NoError {
+                        return res;
+                    }
+                }
+
+                if rest.is_empty() {
                     return res;
                 }
 
