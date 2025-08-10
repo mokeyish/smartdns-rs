@@ -47,7 +47,7 @@ async fn create(
     let Some(managed_dir) = cfg.managed_dir() else {
         return Err(ApiError::NotFound("managed_dir not found".to_string()));
     };
-    if managed_dir.exists() {
+    if !managed_dir.exists() {
         std::fs::create_dir_all(managed_dir)?;
     }
     let file = managed_dir.join("address.conf");
