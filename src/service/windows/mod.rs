@@ -26,6 +26,10 @@ pub(super) fn create_service_definition() -> ServiceDefinition {
         .install_current_exe_to(BIN_PATH)
         .add_item((CONF_DIR, RemoveIfEmpty))
         .add_item((CONF_PATH, crate::DEFAULT_CONF, Preserve, Keep))
+        .add_item((
+            std::path::PathBuf::from(CONF_DIR).join("managed"),
+            RemoveIfEmpty,
+        ))
         .build();
 
     let mut bin_path = OsString::new();
