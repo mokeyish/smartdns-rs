@@ -88,7 +88,7 @@ Please refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md
   1. Get help
 
      ```shell
-     ./smartdns help
+     ./smartdns --help
      ```
 
   2. Run as foreground, easy to check the running status
@@ -104,7 +104,7 @@ Please refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md
      Get help of service management commands.
 
      ```shell
-     ./smartdns service help
+     ./smartdns service --help
      ```
 
      *Note: Installed as a system service, administrator / root permissions are required.*
