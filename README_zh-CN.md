@@ -88,7 +88,7 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/s
   1. 查看帮助
 
      ```shell
-     ./smartdns help
+     ./smartdns --help
      ```
 
   2. 前台运行，方便查看运行状况
@@ -104,7 +104,7 @@ SmartDNS-rs 🐋 一个是受 [C 语言版 SmartDNS](https://github.com/pymumu/s
      查看服务管理命令：
 
      ```shell
-     ./smartdns service help
+     ./smartdns service --help
      ```
 
      *注意：安装成系统服务，需要 administrator / root 权限。*
