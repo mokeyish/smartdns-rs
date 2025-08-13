@@ -411,7 +411,7 @@ impl RuntimeConfig {
     }
     /// dualstack-ip-selection-threshold [num] (0~1000)
     #[inline]
-    pub fn dualstack_ip_selection_threshold(&self) -> u16 {
+    pub fn dualstack_ip_selection_threshold(&self) -> u64 {
         self.dualstack_ip_selection_threshold.unwrap_or(10)
     }
 
