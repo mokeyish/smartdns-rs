@@ -160,7 +160,7 @@ async fn which_faster(
     let that_faster = match which_faster {
         Either::Right((Some((_, that_dura)), this_ping)) => match this_ping.await {
             Some((_, this_dura)) => {
-                that_dura > this_dura && (that_dura - this_dura) > selection_threshold
+                this_dura > that_dura && (this_dura - that_dura) > selection_threshold
             }
             None => true,
         },
