@@ -106,16 +106,14 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError>
                     let that = that.timeout(selection_threshold).await;
 
                     if let Ok(Ok(that)) = that {
-                        if !prefer_that {
-                            let that_faster = matches!(
-                                which_faster(&this, &that, &speed_check_mode, selection_threshold)
-                                    .await,
-                                Either::Right(_)
-                            );
+                        let that_faster = matches!(
+                            which_faster(&this, &that, &speed_check_mode, selection_threshold)
+                                .await,
+                            Either::Right(_)
+                        );
 
-                            if that_faster {
-                                return this_no_records();
-                            }
+                        if that_faster && (prefer_that || matches!(query_type, AAAA)) {
+                            return this_no_records();
                         }
                     }
 
@@ -124,33 +122,21 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError>
                 Err(err) => Err(err),
             },
             Either::Right((res, this)) => match res {
-                Ok(that) => {
-                    if !prefer_that {
-                        match this.await {
-                            Ok(this) => {
-                                let that_faster = matches!(
-                                    which_faster(
-                                        &this,
-                                        &that,
-                                        &speed_check_mode,
-                                        selection_threshold
-                                    )
-                                    .await,
-                                    Either::Right(_)
-                                );
+                Ok(that) => match this.await {
+                    Ok(this) => {
+                        let that_faster = matches!(
+                            which_faster(&this, &that, &speed_check_mode, selection_threshold)
+                                .await,
+                            Either::Right(_)
+                        );
 
-                                if that_faster {
-                                    return this_no_records();
-                                }
-
-                                Ok(this)
-                            }
-                            Err(err) => Err(err),
+                        if that_faster && (prefer_that || matches!(query_type, AAAA)) {
+                            return this_no_records();
                         }
-                    } else {
-                        return this_no_records();
+                        Ok(this)
                     }
-                }
+                    Err(err) => Err(err),
+                },
                 Err(_) => this.await,
             },
         }
@@ -174,7 +160,7 @@ async fn which_faster(
     let that_faster = match which_faster {
         Either::Right((Some((_, that_dura)), this_ping)) => match this_ping.await {
             Some((_, this_dura)) => {
-                that_dura > this_dura && (that_dura - this_dura) > selection_threshold
+                this_dura > that_dura && (this_dura - that_dura) > selection_threshold
             }
             None => true,
         },

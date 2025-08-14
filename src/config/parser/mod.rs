@@ -113,7 +113,7 @@ pub enum ConfigItem {
     DomainSetProvider(DomainSetProvider),
     DualstackIpAllowForceAAAA(bool),
     DualstackIpSelection(bool),
-    DualstackIpSelectionThreshold(u16),
+    DualstackIpSelectionThreshold(u64),
     EdnsClientSubnet(IpNet),
     ExpandPtrFromAddress(bool),
     ForceAAAASOA(bool),
@@ -353,6 +353,10 @@ fn parse_line<'a>(input: &'a str) -> IResult<&'a str, ConfigLine<'a>> {
             config("dualstack-ip-selection"),
             ConfigItem::DualstackIpSelection,
         ),
+        map(
+            config("dualstack-ip-selection-threshold"),
+            ConfigItem::DualstackIpSelectionThreshold,
+        ),
         map(config("edns-client-subnet"), ConfigItem::EdnsClientSubnet),
         map(
             config("expand-ptr-from-address"),
@@ -369,10 +373,10 @@ fn parse_line<'a>(input: &'a str) -> IResult<&'a str, ConfigLine<'a>> {
         map(config("num-workers"), ConfigItem::NumWorkers),
         map(config("domain"), ConfigItem::Domain),
         map(config("hosts-file"), ConfigItem::HostsFile),
-        map(config("https-record"), ConfigItem::HttpsRecord),
     ));
 
     let group3 = alt((
+        map(config("https-record"), ConfigItem::HttpsRecord),
         map(config("ignore-ip"), ConfigItem::IgnoreIp),
         map(config("local-ttl"), ConfigItem::LocalTtl),
         map(config("log-console"), ConfigItem::LogConsole),
@@ -391,10 +395,10 @@ fn parse_line<'a>(input: &'a str) -> IResult<&'a str, ConfigLine<'a>> {
         map(config("rr-ttl-max"), ConfigItem::RrTtlMax),
         map(config("rr-ttl"), ConfigItem::RrTtl),
         map(config("resolv-file"), ConfigItem::ResolvFile),
-        map(config("resolv-hostanme"), ConfigItem::ResolvHostname),
     ));
 
     let group4 = alt((
+        map(config("resolv-hostanme"), ConfigItem::ResolvHostname),
         map(config("response-mode"), ConfigItem::ResponseMode),
         map(config("server-name"), ConfigItem::ServerName),
         map(config("speed-check-mode"), ConfigItem::SpeedMode),

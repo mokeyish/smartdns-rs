@@ -165,7 +165,7 @@ pub struct Config {
     /// dualstack-ip-selection [yes|no]
     pub dualstack_ip_selection: Option<bool>,
     /// dualstack-ip-selection-threshold [num] (0~1000)
-    pub dualstack_ip_selection_threshold: Option<u16>,
+    pub dualstack_ip_selection_threshold: Option<u64>,
     /// dualstack-ip-allow-force-AAAA [yes|no]
     pub dualstack_ip_allow_force_aaaa: Option<bool>,
 
