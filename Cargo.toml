@@ -139,7 +139,7 @@ either = { version = "1.12.0", optional = true }
 # webapi
 axum = { version = "0.8.1" }
 axum-h3 = "0.0.3"
-h3-util = { version = "0.0.3", default-features = false, features = ["quinn"]}
+h3-util = { version = "0.0.4", default-features = false, features = ["quinn"]}
 hyper = { version = "1.1.0", default-features = false }
 hyper-util = { version = "0.1.14", features = ["http2"]}
 tower = { version = "0.5.2", default-features = false }
