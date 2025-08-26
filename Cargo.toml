@@ -126,7 +126,7 @@ self_update = { git = "https://github.com/mokeyish/self_update.git", rev = "0.42
 [dependencies]
 cfg-if = "1"
 clap = { version = "4.5", features = ["derive"] }
-clap-verbosity-flag = "3.0.2"
+clap-verbosity-flag = "3.0.4"
 thiserror = "2.0"
 anyhow = "1.0"
 once_cell = "1.16.0"
