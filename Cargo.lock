@@ -286,14 +286,14 @@ dependencies = [
 
 [[package]]
 name = "axum-h3"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f734ad750ac04711db93582e340bc2effb3cf0ba3e12621869e81585153b99d"
+checksum = "86e5fd39b742bd4e945a071e17518f1352bb7e51c5c53510104108ed000449be"
 dependencies = [
  "axum 0.8.4",
  "futures",
  "h3",
- "h3-util",
+ "h3-util 0.0.4",
  "hyper",
  "hyper-util",
  "tokio",
@@ -1249,6 +1249,20 @@ dependencies = [
  "futures",
  "h3",
  "h3-quinn",
+ "hyper",
+ "tokio",
+ "tower 0.5.2",
+ "tracing",
+]
+
+[[package]]
+name = "h3-util"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d921fa17891644c97a6a2c3a3548dfcb6fe5520c83d696010ec3c675529e4c12"
+dependencies = [
+ "futures",
+ "h3",
  "hyper",
  "tokio",
  "tower 0.5.2",
@@ -3071,7 +3085,7 @@ dependencies = [
  "futures-intrusive",
  "futures-util",
  "glob",
- "h3-util",
+ "h3-util 0.0.3",
  "hickory-proto",
  "hickory-resolver",
  "hostname",
