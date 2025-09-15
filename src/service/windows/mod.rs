@@ -14,6 +14,7 @@ use super::{
 mod shell_escape;
 mod windows_service;
 
+const BIN_DIR: &str = "C:\\Program Files\\SmartDNS";
 pub const BIN_PATH: &str = "C:\\Program Files\\SmartDNS\\smartdns.exe";
 pub const CONF_DIR: &str = "C:\\ProgramData\\smartdns";
 pub const CONF_PATH: &str = "C:\\ProgramData\\smartdns\\smartdns.conf";
@@ -23,6 +24,7 @@ pub use self::windows_service::run;
 #[inline]
 pub(super) fn create_service_definition() -> ServiceDefinition {
     let installer = Installer::builder()
+        .add_item((BIN_DIR, RemoveIfEmpty))
         .install_current_exe_to(BIN_PATH)
         .add_item((CONF_DIR, RemoveIfEmpty))
         .add_item((CONF_PATH, crate::DEFAULT_CONF, Preserve, Keep))
