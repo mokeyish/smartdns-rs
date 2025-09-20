@@ -192,6 +192,8 @@ hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = 
   "system-config",
 ] }
 quinn = { version = "0.11.2", default-features = false }
+dhcproto = "0.13.0"
+netdev = "0.37.1"
 
 # ssl
 webpki-roots = "1.0"

@@ -60,7 +60,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError>
         }
 
         let selection_threshold =
-            Duration::from_millis(ctx.cfg().dualstack_ip_selection_threshold().into());
+            Duration::from_millis(ctx.cfg().dualstack_ip_selection_threshold());
 
         let speed_check_mode = ctx
             .domain_rule
