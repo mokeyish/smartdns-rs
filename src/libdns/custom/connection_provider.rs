@@ -109,7 +109,25 @@ impl crate::libdns::resolver::name_server::ConnectionProvider for ConnectionProv
                         (Cow::Owned(url), smallvec![conf.ip])
                     }).collect()
                 },
-                (_, ProtocolConfig::Dhcp { .. }) => return Err(ProtoErrorKind::NoConnections.into()), // TODO
+                (_, ProtocolConfig::Dhcp { interface }) => {
+                    use crate::infra::dhcp::{discover_v4, DhcpMessageExt};
+                    let interface = interface.as_deref();
+
+                    let msg = discover_v4(interface).await.map_err(|err| {
+                        log::warn!("dhcp discover failed: {}", err);
+                        io::Error::other("dhcp discover failed")
+                    })?;
+
+                    let nameservers = msg.nameservers();
+
+                    if nameservers.is_empty() {
+                        return Err(ProtoErrorKind::NoConnections.into());
+                    }
+
+                    nameservers.into_iter().map(|ip| {
+                        (Cow::Owned(DnsUrl::from(ip)), smallvec![ip])
+                    }).collect()
+                },
                 (Host::Domain(domain), _) => {
                     match server.get_param::<IpAddr>("ip") {
                         Some(ip) => smallvec![(Cow::Borrowed(&server), smallvec![ip])],
