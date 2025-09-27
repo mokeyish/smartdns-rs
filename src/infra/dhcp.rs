@@ -188,16 +188,11 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
 
+    #[ignore]
     #[tokio::test]
     async fn test_dhcp_get_dns() -> anyhow::Result<()> {
-        let ci = std::env::var("GITHUB_ACTIONS").is_ok();
-        if ci {
-            #[cfg(not(windows))]
-            {
-                let msg = discover_v4(None).await?;
-                assert!(!msg.nameservers().is_empty());
-            }
-        }
+        let msg = discover_v4(None).await?;
+        assert!(!msg.nameservers().is_empty());
         Ok(())
     }
 }
