@@ -126,7 +126,7 @@ jobs:
             dist/*sha256sum.txt
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2.3.2
+        uses: softprops/action-gh-release@v2.4.2
         if: ${{ startsWith(inputs.version, 'v') }}
         with:
           draft: false
