@@ -420,30 +420,19 @@ async fn lookup_ip(
                     .map(|(ip, _)| ip),
             }
         }
-        FastestResponse => {
-            let mut last_error = None;
-            loop {
-                let (res, _idx, rest) = select_all(query_tasks).await;
-                if let Ok(response) = &res {
-                    if response.response_code() == ResponseCode::NoError {
-                        return res;
-                    }
-                }
-
-                if rest.is_empty() {
+        FastestResponse => loop {
+            let (res, _idx, rest) = select_all(query_tasks).await;
+            if let Ok(response) = &res {
+                if response.response_code() == ResponseCode::NoError {
                     return res;
                 }
-
-                if let Err(err) = res {
-                    if matches!(last_error, Some(e) if e == err) {
-                        return Err(err);
-                    } else {
-                        last_error = Some(err);
-                    }
-                }
-                query_tasks = rest;
             }
-        }
+
+            if rest.is_empty() {
+                return res;
+            }
+            query_tasks = rest;
+        },
     };
 
     if let Some(selected_ip) = selected_ip {
