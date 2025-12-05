@@ -8,6 +8,7 @@ use std::{
 
 use tokio::sync::RwLock;
 
+use crate::third_ext::FutureJoinAllExt;
 use crate::{
     dns::DnsResponse,
     dns_conf::NameServerInfo,
@@ -219,9 +220,7 @@ impl DnsClientBuilder {
             }
         }
 
-        for s in server_groups.values() {
-            s.warmup().await;
-        }
+        server_groups.values().map(|s| s.warmup()).join_all().await;
 
         DnsClient {
             default: default_group_servers,
@@ -361,9 +360,10 @@ mod name_server_group {
 
     impl NameServerGroup {
         pub async fn warmup(&self) {
-            for server in self.servers.iter() {
-                let _ = server.warmup().await;
-            }
+            let futures = self.servers.iter().map(|server| {
+                tokio::time::timeout(std::time::Duration::from_secs(5), server.warmup())
+            });
+            futures.join_all().await;
         }
         #[inline]
         pub fn iter(&self) -> Iter<'_, Arc<NameServer>> {
