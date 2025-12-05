@@ -448,11 +448,14 @@ async fn lookup_ip(
 
     if let Some(selected_ip) = selected_ip {
         for mut res in ok_tasks {
-            let record = res
+            if let Some(mut record) = res
                 .take_answers()
                 .into_iter()
-                .find(|r| matches!(r.data().ip_addr(), Some(ip) if ip == selected_ip));
-            if let Some(record) = record {
+                .find(|r| matches!(r.data().ip_addr(), Some(ip) if ip == selected_ip))
+            {
+                if record.name() != &name {
+                    record.set_name(name.clone());
+                }
                 res.add_answer(record);
                 return Ok(res);
             }
