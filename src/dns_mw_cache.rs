@@ -535,12 +535,36 @@ impl DnsCache {
 
         cache.get_mut(query).map(|value| {
             value.stats.hit();
+            let mut res = value.data.clone();
+
+            // For CNAME query, the cached response might only contain A/AAAA records
+            // with the final name of the CNAME chain. If so, we should rewrite
+            // the record names to match the original query name.
+            // We detect this by checking if there are no CNAME records in the
+            // response, all records are IP records, and there are records with a
+            // name different from the query name.
+            let has_cname = res
+                .answers()
+                .iter()
+                .any(|r| r.record_type() == RecordType::CNAME);
+
+            let all_ip_records = !res.answers().is_empty()
+                && res.answers().iter().all(|r| r.record_type().is_ip_addr());
+
+            if !has_cname
+                && all_ip_records
+                && res.answers().iter().any(|r| r.name() != query.name())
+            {
+                let query_name = query.name().clone();
+                for record in res.answers_mut() {
+                    record.set_name(query_name.clone());
+                }
+            }
+
             if value.is_current(now) {
-                let mut res = value.data.clone();
                 res.set_max_ttl(value.ttl(now).as_secs() as u32);
                 (res, CacheStatus::Valid)
             } else {
-                let mut res = value.data.clone();
                 res.set_max_ttl(self.expired_reply_ttl as u32);
                 (res, CacheStatus::Expired)
             }
