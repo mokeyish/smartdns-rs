@@ -83,7 +83,8 @@ async fn create(
 
         std::fs::write(&file, format!("{config}"))?;
     } else {
-        std::fs::write(&file, format!("{rule}"))?;
+        let config = ConfigItem::Address(rule);
+        std::fs::write(&file, format!("{config}"))?;
     }
 
     Ok(StatusCode::CREATED)
