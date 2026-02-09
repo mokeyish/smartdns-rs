@@ -33,9 +33,13 @@ pub fn make_dispatch<P: AsRef<Path>>(
     mode: Option<u32>,
     to_console: bool,
 ) -> Dispatch {
-    let level = level
-        .or_else(|| INIT_CONSOLE_LEVEL.get().cloned())
-        .unwrap_or(Level::ERROR);
+    let cli_level = INIT_CONSOLE_LEVEL.get().cloned();
+    let level = match (level, cli_level) {
+        (Some(cfg), Some(cli)) => cfg.max(cli),
+        (Some(cfg), None) => cfg,
+        (None, Some(cli)) => cli,
+        (None, None) => Level::ERROR,
+    };
 
     let file = MappedFile::open(path.as_ref(), size, Some(num as usize), mode);
 
@@ -52,9 +56,9 @@ pub fn make_dispatch<P: AsRef<Path>>(
             });
 
     let console_level = if to_console {
-        *INIT_CONSOLE_LEVEL.get_or_init(|| level)
+        level
     } else {
-        Level::ERROR
+        cli_level.unwrap_or(Level::ERROR)
     };
 
     let console_writer = io::stdout.with_max_level(console_level);
