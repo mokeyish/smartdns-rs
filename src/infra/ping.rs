@@ -417,6 +417,28 @@ mod icmp {
         }
     }
 
+    use once_cell::sync::Lazy;
+
+    static IPV4_CLIENT: Lazy<Result<Client, PingError>> = Lazy::new(|| {
+        Client::new(
+            &Config::builder()
+                .kind(ICMP::V4)
+                .sock_type_hint(auto_sock_type::detect(ICMP::V4))
+                .build(),
+        )
+        .map_err(PingError::from)
+    });
+
+    static IPV6_CLIENT: Lazy<Result<Client, PingError>> = Lazy::new(|| {
+        Client::new(
+            &Config::builder()
+                .kind(ICMP::V6)
+                .sock_type_hint(auto_sock_type::detect(ICMP::V6))
+                .build(),
+        )
+        .map_err(PingError::from)
+    });
+
     pub async fn ping(ipaddr: IpAddr, opts: PingOptions) -> Result<PingOutput, PingError> {
         let PingOptions {
             times,
@@ -428,19 +450,9 @@ mod icmp {
         let mut durations = Vec::new();
 
         let client = match ipaddr {
-            IpAddr::V4(_) => Client::new(
-                &Config::builder()
-                    .kind(ICMP::V4)
-                    .sock_type_hint(auto_sock_type::detect(ICMP::V4))
-                    .build(),
-            ),
-            IpAddr::V6(_) => Client::new(
-                &Config::builder()
-                    .kind(ICMP::V6)
-                    .sock_type_hint(auto_sock_type::detect(ICMP::V6))
-                    .build(),
-            ),
-        }?;
+            IpAddr::V4(_) => IPV4_CLIENT.as_ref().map_err(|e| e.clone())?,
+            IpAddr::V6(_) => IPV6_CLIENT.as_ref().map_err(|e| e.clone())?,
+        };
 
         let mut pinger = client.pinger(ipaddr, PingIdentifier(random())).await;
         pinger.timeout(timeout);
