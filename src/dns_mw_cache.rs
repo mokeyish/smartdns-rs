@@ -130,8 +130,13 @@ impl DnsCacheMiddleware {
                     };
 
                     if !expired.is_empty() {
-                        for query in expired {
-                            let client = client.clone();
+                        for (query, group) in expired {
+                            let opts = ServerOpts {
+                                is_background: true,
+                                rule_group: group,
+                                ..Default::default()
+                            };
+                            let client = client.with_new_opt(opts);
                             tokio::spawn(async move {
                                 let now = Instant::now();
                                 client.send(query.clone()).await;
@@ -189,7 +194,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                         CacheStatus::Valid => {
                             // start backgroud query ?
                             {
-                                let client = self.client.clone();
+                                let mut opts = ctx.server_opts.clone();
+                                opts.is_background = true;
+                                let client = self.client.with_new_opt(opts);
                                 let query = query.clone();
                                 tokio::spawn(async move {
                                     client.send(query).await;
@@ -208,7 +215,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                         CacheStatus::Expired if ctx.cfg().serve_expired() && !no_serve_expired => {
                             // start backgroud query
                             {
-                                let client = self.client.clone();
+                                let mut opts = ctx.server_opts.clone();
+                                opts.is_background = true;
+                                let client = self.client.with_new_opt(opts);
                                 let query = query.clone();
                                 tokio::spawn(async move {
                                     client.send(query).await;
@@ -575,7 +584,7 @@ impl DnsCache {
         &self,
         now: Instant,
         seconds_ahead: Option<u64>,
-    ) -> (Vec<Query>, Duration) {
+    ) -> (Vec<(Query, Option<String>)>, Duration) {
         let mut cache = self.cache.lock().await;
         let mut most_recent = Duration::from_secs(MAX_TTL as u64);
 
@@ -603,13 +612,20 @@ impl DnsCache {
 
                 entry.is_in_prefetching = true;
 
-                expired.push((query.to_owned(), entry.stats.hits));
+                expired.push((
+                    query.to_owned(),
+                    entry.stats.hits,
+                    entry.data.name_server_group().map(String::from),
+                ));
             }
             drop(cache);
 
-            expired.sort_by_key(|(_, hits)| std::cmp::Reverse(*hits));
+            expired.sort_by_key(|(_, hits, _)| std::cmp::Reverse(*hits));
 
-            (expired.into_iter().map(|(q, _)| q).collect(), most_recent)
+            (
+                expired.into_iter().map(|(q, _, g)| (q, g)).collect(),
+                most_recent,
+            )
         } else {
             (Vec::with_capacity(0), most_recent)
         }
@@ -703,19 +719,19 @@ impl BinEncodable for DnsCacheEntry<DnsResponse> {
 
         // valid_until
         encoder.emit_u8(2)?;
-        let valid_until_bytes = unsafe {
-            std::slice::from_raw_parts(
-                (&res.valid_until() as *const Instant) as *const u8,
-                ::std::mem::size_of::<Instant>(),
-            )
+        let now = Instant::now();
+        let ttl = if self.valid_until > now {
+            self.valid_until - now
+        } else {
+            Duration::ZERO
         };
-        encoder.emit_vec(valid_until_bytes)?;
+        encoder.emit_u32(ttl.as_secs() as u32)?;
 
         // group_name
         encoder.emit_u8(3)?;
         if let Some(group_name) = res.name_server_group().map(|n| n.as_bytes()) {
             encoder.emit_u16(group_name.len() as u16)?;
-            encoder.emit_vec(&group_name[0..(group_name.len() as u16 as usize)])?;
+            encoder.emit_vec(group_name)?;
         } else {
             encoder.emit_u16(0)?;
         }
@@ -739,10 +755,8 @@ impl<'r> BinDecodable<'r> for DnsCacheEntry {
         if !decoder.read_u8()?.verify(|v| *v == 2).is_valid() {
             return Err(DecodeError::InsufficientBytes.into());
         }
-        let valid_until_bytes = decoder
-            .read_slice(std::mem::size_of::<Instant>())?
-            .unverified();
-        let valid_until = unsafe { std::ptr::read(valid_until_bytes.as_ptr() as *const Instant) };
+        let ttl_secs = decoder.read_u32()?.unverified();
+        let valid_until = Instant::now() + Duration::from_secs(ttl_secs as u64);
 
         // group_name
         if !decoder.read_u8()?.verify(|v| *v == 3).is_valid() {
@@ -770,7 +784,6 @@ impl<'r> BinDecodable<'r> for DnsCacheEntry {
         if let Some(g) = group_name {
             res = res.with_name_server_group(g);
         }
-        let valid_until = res.valid_until();
         let mut entry = DnsCacheEntry::new(res, valid_until);
         entry.stats.hits = hits as usize;
 
