@@ -345,18 +345,13 @@ impl Default for InstallStrategy {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Default)]
 pub enum UninstallStrategy {
     Keep,
+    #[default]
     Remove,
     /// If directory is empty, remove it.
     RemoveIfEmpty,
-}
-
-impl Default for UninstallStrategy {
-    fn default() -> Self {
-        Self::Remove
-    }
 }
 
 impl Installer {
