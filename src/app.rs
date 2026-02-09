@@ -249,7 +249,7 @@ pub fn serve(cfg: Arc<RuntimeConfig>) {
 
             const BATCH_SIZE: usize = 256;
 
-            let background_concurrency = Arc::new(Semaphore::new(1));
+            let background_concurrency = Arc::new(Semaphore::new(16));
             let mut bg_batch = FuturesUnordered::new();
             let mut requests = Vec::with_capacity(BATCH_SIZE);
 
