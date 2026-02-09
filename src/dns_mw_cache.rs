@@ -58,11 +58,30 @@ impl DnsCacheMiddleware {
                 loop {
                     tokio::select! {
                         _ = tokio::time::sleep(interval) => {
-                            cache.lock().await.persist(cache_file.as_path());
-                            log::debug!("save DNS cache to file {}", cache_file.display());
+                            let entries: Vec<DnsCacheEntry> = {
+                                let cache = cache.lock().await;
+                                cache.iter().map(|(_, e)| e.clone()).collect()
+                            };
+                            let cache_file = cache_file.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let cache_to_file = || {
+                                    let mut file = File::options()
+                                        .create(true)
+                                        .truncate(true)
+                                        .write(true)
+                                        .open(&cache_file)?;
+                                    DnsCacheEntry::serialize_many(entries.iter(), &mut file)
+                                };
+
+                                match cache_to_file() {
+                                    Ok(_) => log::info!("save DNS cache to file {:?} successfully.", cache_file),
+                                    Err(err) => log::error!("failed to save DNS cache to file {}: {}", cache_file.display(), err),
+                                }
+                            });
                         }
                         _ = crate::signal::terminate() => {
-                            cache.lock().await.persist(cache_file.as_path());
+                            let cache = cache.lock().await;
+                            cache.persist(cache_file.as_path());
                             log::debug!("save DNS cache to file {}", cache_file.display());
                             break;
                         }
@@ -534,13 +553,7 @@ impl DnsCache {
 
     /// Based on the query, see if there are any records available
     async fn get(&self, query: &Query, now: Instant) -> Option<(DnsResponse, CacheStatus)> {
-        let mut cache = match self.cache.try_lock() {
-            Ok(t) => t,
-            Err(err) => {
-                debug!("Get dns cache lock to read failed, {:?}", err);
-                return None;
-            }
-        };
+        let mut cache = self.cache.lock().await;
 
         cache.get_mut(query).map(|value| {
             value.stats.hit();
@@ -648,6 +661,7 @@ pub struct CachedQueryRecord {
     records: Box<[Record]>,
 }
 
+#[derive(Clone)]
 struct DnsCacheEntry<T = DnsResponse> {
     data: T,
     valid_until: Instant,
@@ -685,6 +699,7 @@ impl<T> DnsCacheEntry<T> {
     }
 }
 
+#[derive(Clone)]
 struct DnsCacheStats {
     /// The number of lookups that have been performed
     hits: usize,
