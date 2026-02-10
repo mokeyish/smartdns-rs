@@ -400,11 +400,17 @@ mod response {
 
     static DEFAULT_QUERY: once_cell::sync::Lazy<Query> = once_cell::sync::Lazy::new(Query::default);
 
-    #[derive(Debug, Clone, Eq, PartialEq)]
+    #[derive(Debug, Clone, Eq)]
     pub struct DnsResponse {
         message: Message,
         valid_until: Instant,
         name_server_group: Option<String>,
+    }
+
+    impl PartialEq for DnsResponse {
+        fn eq(&self, other: &Self) -> bool {
+            self.message == other.message && self.name_server_group == other.name_server_group
+        }
     }
 
     impl DnsResponse {
