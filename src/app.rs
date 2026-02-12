@@ -499,7 +499,7 @@ fn build_middleware(
             ));
         }
 
-        if cfg.rule_groups().values().all(|x| !x.cnames.is_empty()) {
+        if cfg.rule_groups().values().any(|x| !x.cnames.is_empty()) {
             builder = builder.with(DnsCNameMiddleware);
         }
 
