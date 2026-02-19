@@ -208,7 +208,7 @@ impl DnsZoneMiddleware {
                     &client_mac(),
                 ),
             )),
-            "smartdns.bind." | "smartdns.info.records.bind." => Some(txt_records_response(
+            "smartdns.bind." => Some(txt_records_response(
                 query,
                 build_info_records_text(
                     &server_name,
@@ -249,17 +249,15 @@ impl DnsZoneMiddleware {
                     &client_mac(),
                 ),
             )),
-            "smartdns." | "records.smartdns." | "info.records.smartdns." => {
-                Some(txt_records_response(
-                    query,
-                    build_info_records_text(
-                        &server_name,
-                        crate::BUILD_VERSION,
-                        &client_ip,
-                        &client_mac(),
-                    ),
-                ))
-            }
+            "smartdns." => Some(txt_records_response(
+                query,
+                build_info_records_text(
+                    &server_name,
+                    crate::BUILD_VERSION,
+                    &client_ip,
+                    &client_mac(),
+                ),
+            )),
             _ => None,
         }
     }
@@ -554,25 +552,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_builtin_txt_multi_records_alias_query() {
-        let cfg = RuntimeConfig::builder()
-            .with("server-name smartdns-rs-test")
-            .build()
-            .unwrap();
-        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
-
-        let response = search_with_query(
-            &mock,
-            "records.smartdns",
-            RecordType::TXT,
-            DNSClass::CH,
-            "192.168.1.11:5300".parse().unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.answers().len(), 4);
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn test_builtin_txt_short_name_version_alias() {
         let cfg = RuntimeConfig::builder().build().unwrap();

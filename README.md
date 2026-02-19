@@ -180,12 +180,8 @@ dig @127.0.0.1 CH TXT smartdns +short
 # SmartDNS native short name (without `.bind`)
 dig @127.0.0.1 CH TXT version +short
 
-# SmartDNS native JSON and multi-record aliases
+# SmartDNS native JSON alias
 dig @127.0.0.1 CH TXT json.smartdns +short
-dig @127.0.0.1 CH TXT records.smartdns +short
-
-# compatibility alias
-dig @127.0.0.1 CH TXT smartdns.info.records.bind +short
 ```
 
 `whoami.mac.bind` depends on ARP visibility from the server host (typically same L2 network on Linux).
