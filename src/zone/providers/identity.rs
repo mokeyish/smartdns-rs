@@ -49,12 +49,8 @@ impl ZoneProvider for IdentityZoneProvider {
             // - BIND-compatible hostname.bind/version.bind/whoami.bind/whoami.mac.bind
             "hostname.bind." | "server-name." => Some(txt_response(query, server_name.clone())),
             "version.bind." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
-            "whoami.bind." | "client-ip." => {
-                Some(txt_response(query, client_ip.to_string()))
-            }
-            "whoami.mac.bind." | "client-mac." => {
-                Some(txt_response(query, client_mac()))
-            }
+            "whoami.bind." | "client-ip." => Some(txt_response(query, client_ip.to_string())),
+            "whoami.mac.bind." | "client-mac." => Some(txt_response(query, client_mac())),
 
             "json.smartdns." => Some(txt_response(
                 query,
