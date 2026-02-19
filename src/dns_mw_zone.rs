@@ -552,7 +552,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[tokio::test(flavor = "multi_thread")]
     async fn test_builtin_txt_short_name_version_alias() {
         let cfg = RuntimeConfig::builder().build().unwrap();
         let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
