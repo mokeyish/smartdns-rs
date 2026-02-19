@@ -281,6 +281,13 @@ fn parse_arp_command_output_mac(output: &str, target_ip: Ipv4Addr) -> Option<Str
     })
 }
 
+fn client_ipv4_for_arp(client_ip: IpAddr) -> Option<Ipv4Addr> {
+    match client_ip {
+        IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
+        _ => None,
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 fn run_arp_command(args: &[&str]) -> Option<String> {
     let output = std::process::Command::new("arp").args(args).output().ok()?;
@@ -292,50 +299,42 @@ fn run_arp_command(args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+#[cfg(not(target_os = "linux"))]
+fn lookup_mac_from_arp_command_output(client_ip: Ipv4Addr, args: &[&str]) -> Option<String> {
+    run_arp_command(args).and_then(|output| parse_arp_command_output_mac(&output, client_ip))
+}
+
 #[cfg(target_os = "linux")]
 fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
-    let client_ip = match client_ip {
-        IpAddr::V4(ip) if !ip.is_loopback() => ip,
-        _ => return None,
-    };
+    let client_ip = client_ipv4_for_arp(client_ip)?;
 
     std::fs::read_to_string("/proc/net/arp")
         .ok()
         .and_then(|table| parse_arp_table_mac(&table, client_ip))
 }
 
+#[cfg(all(not(target_os = "linux"), target_os = "windows"))]
+fn lookup_client_mac_from_arp_command(client_ip: Ipv4Addr) -> Option<String> {
+    let ip = client_ip.to_string();
+    lookup_mac_from_arp_command_output(client_ip, &["-a", ip.as_str()])
+}
+
+#[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
+fn lookup_client_mac_from_arp_command(client_ip: Ipv4Addr) -> Option<String> {
+    let ip = client_ip.to_string();
+    for args in [["-n", ip.as_str()], ["-an", ip.as_str()], ["-a", ip.as_str()]] {
+        if let Some(mac) = lookup_mac_from_arp_command_output(client_ip, &args) {
+            return Some(mac);
+        }
+    }
+    None
+}
+
 #[cfg(not(target_os = "linux"))]
 fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
-    let client_ip = match client_ip {
-        IpAddr::V4(ip) if !ip.is_loopback() => ip,
-        _ => return None,
-    };
+    let client_ip = client_ipv4_for_arp(client_ip)?;
 
-    let ip = client_ip.to_string();
-
-    #[cfg(target_os = "windows")]
-    for args in [["-a", ip.as_str()]] {
-        if let Some(output) = run_arp_command(&args)
-            && let Some(mac) = parse_arp_command_output_mac(&output, client_ip)
-        {
-            return Some(mac);
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    for args in [
-        ["-n", ip.as_str()],
-        ["-an", ip.as_str()],
-        ["-a", ip.as_str()],
-    ] {
-        if let Some(output) = run_arp_command(&args)
-            && let Some(mac) = parse_arp_command_output_mac(&output, client_ip)
-        {
-            return Some(mac);
-        }
-    }
-
-    None
+    lookup_client_mac_from_arp_command(client_ip)
 }
 
 #[cfg(test)]
