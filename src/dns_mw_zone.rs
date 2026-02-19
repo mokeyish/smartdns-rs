@@ -192,11 +192,21 @@ impl DnsZoneMiddleware {
             }
             "smartdns.info.bind." => Some(txt_response(
                 query,
-                build_info_kv_text(&server_name, crate::BUILD_VERSION, &client_ip, &client_mac()),
+                build_info_kv_text(
+                    &server_name,
+                    crate::BUILD_VERSION,
+                    &client_ip,
+                    &client_mac(),
+                ),
             )),
             "smartdns.info.json.bind." => Some(txt_response(
                 query,
-                build_info_json_text(&server_name, crate::BUILD_VERSION, &client_ip, &client_mac()),
+                build_info_json_text(
+                    &server_name,
+                    crate::BUILD_VERSION,
+                    &client_ip,
+                    &client_mac(),
+                ),
             )),
             "smartdns.info.records.bind." => Some(txt_records_response(
                 query,
@@ -223,11 +233,21 @@ impl DnsZoneMiddleware {
             }
             "info.smartdns." => Some(txt_response(
                 query,
-                build_info_kv_text(&server_name, crate::BUILD_VERSION, &client_ip, &client_mac()),
+                build_info_kv_text(
+                    &server_name,
+                    crate::BUILD_VERSION,
+                    &client_ip,
+                    &client_mac(),
+                ),
             )),
             "json.smartdns." | "info.json.smartdns." => Some(txt_response(
                 query,
-                build_info_json_text(&server_name, crate::BUILD_VERSION, &client_ip, &client_mac()),
+                build_info_json_text(
+                    &server_name,
+                    crate::BUILD_VERSION,
+                    &client_ip,
+                    &client_mac(),
+                ),
             )),
             "records.smartdns." | "info.records.smartdns." => Some(txt_records_response(
                 query,
@@ -287,7 +307,12 @@ fn txt_records_response(query: Query, values: Vec<String>) -> DnsResponse {
     DnsResponse::new_with_max_ttl(query, records)
 }
 
-fn build_info_kv_text(server_name: &str, version: &str, client_ip: &IpAddr, client_mac: &str) -> String {
+fn build_info_kv_text(
+    server_name: &str,
+    version: &str,
+    client_ip: &IpAddr,
+    client_mac: &str,
+) -> String {
     format!(
         "server_name={server_name};server_version={version};client_ip={client_ip};client_mac={client_mac}",
     )
@@ -307,7 +332,12 @@ fn build_info_records_text(
     ]
 }
 
-fn build_info_json_text(server_name: &str, version: &str, client_ip: &IpAddr, client_mac: &str) -> String {
+fn build_info_json_text(
+    server_name: &str,
+    version: &str,
+    client_ip: &IpAddr,
+    client_mac: &str,
+) -> String {
     let server_name = json_escape(server_name);
     let version = json_escape(version);
     let client_ip = json_escape(&client_ip.to_string());
