@@ -283,10 +283,7 @@ fn parse_arp_command_output_mac(output: &str, target_ip: Ipv4Addr) -> Option<Str
 
 #[cfg(not(target_os = "linux"))]
 fn run_arp_command(args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new("arp")
-        .args(args)
-        .output()
-        .ok()?;
+    let output = std::process::Command::new("arp").args(args).output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -326,7 +323,11 @@ fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
     }
 
     #[cfg(not(target_os = "windows"))]
-    for args in [["-n", ip.as_str()], ["-an", ip.as_str()], ["-a", ip.as_str()]] {
+    for args in [
+        ["-n", ip.as_str()],
+        ["-an", ip.as_str()],
+        ["-a", ip.as_str()],
+    ] {
         if let Some(output) = run_arp_command(&args)
             && let Some(mac) = parse_arp_command_output_mac(&output, client_ip)
         {
