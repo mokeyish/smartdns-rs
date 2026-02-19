@@ -322,7 +322,11 @@ fn lookup_client_mac_from_arp_command(client_ip: Ipv4Addr) -> Option<String> {
 #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
 fn lookup_client_mac_from_arp_command(client_ip: Ipv4Addr) -> Option<String> {
     let ip = client_ip.to_string();
-    for args in [["-n", ip.as_str()], ["-an", ip.as_str()], ["-a", ip.as_str()]] {
+    for args in [
+        ["-n", ip.as_str()],
+        ["-an", ip.as_str()],
+        ["-a", ip.as_str()],
+    ] {
         if let Some(mac) = lookup_mac_from_arp_command_output(client_ip, &args) {
             return Some(mac);
         }
