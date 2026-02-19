@@ -4,8 +4,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
 use crate::libdns::proto::op::Query;
-use crate::libdns::proto::rr::rdata::{PTR, TXT};
 use crate::libdns::proto::rr::DNSClass;
+use crate::libdns::proto::rr::rdata::{PTR, TXT};
 
 use crate::config::HttpsRecordRule;
 use crate::dns::*;
@@ -382,7 +382,12 @@ mod tests {
             "192.168.1.9:5300".parse().unwrap(),
         )
         .await;
-        assert!(ip_response.answers()[0].data().to_string().contains("192.168.1.9"));
+        assert!(
+            ip_response.answers()[0]
+                .data()
+                .to_string()
+                .contains("192.168.1.9")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -397,7 +402,12 @@ mod tests {
             "127.0.0.1:5300".parse().unwrap(),
         )
         .await;
-        assert!(response.answers()[0].data().to_string().contains(UNKNOWN_CLIENT_MAC));
+        assert!(
+            response.answers()[0]
+                .data()
+                .to_string()
+                .contains(UNKNOWN_CLIENT_MAC)
+        );
     }
 
     #[test]
