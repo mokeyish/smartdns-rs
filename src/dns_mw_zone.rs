@@ -300,7 +300,12 @@ mod tests {
             "192.168.1.13:5300".parse().unwrap(),
         )
         .await;
-        assert!(ip_response.answers()[0].data().to_string().contains("192.168.1.13"));
+        assert!(
+            ip_response.answers()[0]
+                .data()
+                .to_string()
+                .contains("192.168.1.13")
+        );
 
         let mac_response = search_with_query(
             &mock,
@@ -336,7 +341,10 @@ mod tests {
             .iter()
             .map(|record| record.data().to_string())
             .collect::<Vec<_>>();
-        assert!(txts.iter().any(|txt| txt.contains("server_name=smartdns-rs-test")));
+        assert!(
+            txts.iter()
+                .any(|txt| txt.contains("server_name=smartdns-rs-test"))
+        );
         assert!(txts.iter().any(|txt| txt.contains("server_version=")));
     }
 
