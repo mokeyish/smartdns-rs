@@ -201,7 +201,11 @@ impl DnsZoneMiddleware {
 }
 
 fn normalize_query_name(name: &Name) -> String {
-    name.to_string().to_ascii_lowercase()
+    let mut name = name.to_string().to_ascii_lowercase();
+    if !name.ends_with('.') {
+        name.push('.');
+    }
+    name
 }
 
 fn trim_fqdn_dot(name: String) -> String {
