@@ -2,9 +2,6 @@ use crate::dns::*;
 use crate::middleware::*;
 use crate::zone::{IdentityZoneProvider, LocalPtrZoneProvider, RuleZoneProvider, ZoneManager};
 
-#[cfg(test)]
-use crate::libdns::proto::op::Query;
-
 pub struct DnsZoneMiddleware {
     manager: ZoneManager,
     rule_provider: RuleZoneProvider,
@@ -46,6 +43,7 @@ mod tests {
 
     use super::*;
     use crate::infra::ipset::IpSet;
+    use crate::libdns::proto::op::Query;
     use crate::libdns::proto::rr::DNSClass;
     use crate::{dns_conf::RuntimeConfig, dns_mw::*};
     use std::net::SocketAddr;
