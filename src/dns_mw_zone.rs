@@ -340,7 +340,12 @@ mod tests {
             "127.0.0.1:5300".parse().unwrap(),
         )
         .await;
-        assert!(mac_response2.answers()[0].data().to_string().contains("N/A"));
+        assert!(
+            mac_response2.answers()[0]
+                .data()
+                .to_string()
+                .contains("N/A")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
