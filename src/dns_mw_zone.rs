@@ -310,4 +310,19 @@ mod tests {
                 .contains(crate::BUILD_VERSION)
         );
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_removed_hostname_alias_is_not_supported() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let mut query = Query::query("hostname".parse().unwrap(), RecordType::TXT);
+        query.set_query_class(DNSClass::CH);
+        let mut message = op::Message::query();
+        message.add_query(query);
+        let req = DnsRequest::new(message, "192.168.1.14:5300".parse().unwrap(), Protocol::Udp);
+
+        let res = mock.search(&req, &Default::default()).await;
+        assert!(matches!(res, Err(ref err) if err.is_soa()));
+    }
 }

@@ -159,11 +159,14 @@ SmartDNS-rs supports built-in `CHAOS TXT` queries for server/client diagnostics.
 # most common: full identity info (multi TXT records)
 dig @127.0.0.1 CH TXT whoami +short
 
+# full identity info (multi TXT records, alias)
+dig @127.0.0.1 CH TXT smartdns +short
+
 # server name
 dig @127.0.0.1 CH TXT server-name +short
 
 # server version
-dig @127.0.0.1 CH TXT version.bind +short
+dig @127.0.0.1 CH TXT version +short
 
 # client source IP seen by smartdns-rs
 dig @127.0.0.1 CH TXT client-ip +short
@@ -171,23 +174,12 @@ dig @127.0.0.1 CH TXT client-ip +short
 # client MAC from ARP table (LAN, ARP available)
 dig @127.0.0.1 CH TXT client-mac +short
 
-# combined output
-dig @127.0.0.1 CH TXT smartdns.info.bind +short
-
 # JSON output (single TXT record)
-dig @127.0.0.1 CH TXT smartdns.info.json.bind +short
-
-# multiple TXT records (default overview, one key-value per record)
-dig @127.0.0.1 CH TXT smartdns +short
-
-# SmartDNS native short name (without `.bind`)
-dig @127.0.0.1 CH TXT version +short
-
-# SmartDNS native JSON alias
 dig @127.0.0.1 CH TXT json.smartdns +short
 
 # BIND compatibility examples
 dig @127.0.0.1 CH TXT hostname.bind +short
+dig @127.0.0.1 CH TXT version.bind +short
 dig @127.0.0.1 CH TXT whoami.bind +short
 dig @127.0.0.1 CH TXT whoami.mac.bind +short
 ```

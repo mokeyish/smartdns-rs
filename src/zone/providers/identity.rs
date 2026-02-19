@@ -43,67 +43,20 @@ impl ZoneProvider for IdentityZoneProvider {
         };
 
         let res = match query_name.as_str() {
-            // BIND compatibility
-            "hostname.bind." | "id.server." => Some(txt_response(query, server_name.clone())),
+            // Public stable query set:
+            // - whoami/smartdns: full identity records
+            // - server-name/version/client-ip/client-mac: single values
+            // - BIND-compatible hostname.bind/version.bind/whoami.bind/whoami.mac.bind
+            "hostname.bind." | "server-name." => Some(txt_response(query, server_name.clone())),
             "version.bind." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
-            "whoami.bind." | "client.ip.bind." | "clientip.bind." => {
+            "whoami.bind." | "client-ip." => {
                 Some(txt_response(query, client_ip.to_string()))
             }
-            "whoami.mac.bind." | "client.mac.bind." | "clientmac.bind." => {
+            "whoami.mac.bind." | "client-mac." => {
                 Some(txt_response(query, client_mac()))
             }
-            "smartdns.info.bind." => Some(txt_response(
-                query,
-                build_info_kv_text(
-                    &server_name,
-                    crate::BUILD_VERSION,
-                    &client_ip,
-                    &client_mac(),
-                ),
-            )),
-            "smartdns.info.json.bind." => Some(txt_response(
-                query,
-                build_info_json_text(
-                    &server_name,
-                    crate::BUILD_VERSION,
-                    &client_ip,
-                    &client_mac(),
-                ),
-            )),
-            "smartdns.bind." => Some(txt_records_response(
-                query,
-                build_info_records_text(
-                    &server_name,
-                    crate::BUILD_VERSION,
-                    &client_ip,
-                    &client_mac(),
-                ),
-            )),
 
-            // SmartDNS native names (without `.bind`)
-            "hostname.smartdns." | "server-name.smartdns." | "server-name." => {
-                Some(txt_response(query, server_name.clone()))
-            }
-            "version.smartdns." | "server-version.smartdns." | "version." => {
-                Some(txt_response(query, crate::BUILD_VERSION.to_string()))
-            }
-            "client-ip.smartdns." | "clientip.smartdns." | "client-ip." => {
-                Some(txt_response(query, client_ip.to_string()))
-            }
-            "whoami-mac.smartdns."
-            | "client-mac.smartdns."
-            | "clientmac.smartdns."
-            | "client-mac." => Some(txt_response(query, client_mac())),
-            "info.smartdns." => Some(txt_response(
-                query,
-                build_info_kv_text(
-                    &server_name,
-                    crate::BUILD_VERSION,
-                    &client_ip,
-                    &client_mac(),
-                ),
-            )),
-            "json.smartdns." | "info.json.smartdns." => Some(txt_response(
+            "json.smartdns." => Some(txt_response(
                 query,
                 build_info_json_text(
                     &server_name,
@@ -112,7 +65,7 @@ impl ZoneProvider for IdentityZoneProvider {
                     &client_mac(),
                 ),
             )),
-            "whoami.smartdns." | "whoami." | "smartdns." => Some(txt_records_response(
+            "whoami." | "smartdns." => Some(txt_records_response(
                 query,
                 build_info_records_text(
                     &server_name,
@@ -121,6 +74,7 @@ impl ZoneProvider for IdentityZoneProvider {
                     &client_mac(),
                 ),
             )),
+            "version." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
             _ => None,
         };
 
@@ -170,17 +124,6 @@ fn txt_records_response(query: Query, values: Vec<String>) -> DnsResponse {
         .collect::<Vec<_>>();
 
     DnsResponse::new_with_max_ttl(query, records)
-}
-
-fn build_info_kv_text(
-    server_name: &str,
-    version: &str,
-    client_ip: &IpAddr,
-    client_mac: &str,
-) -> String {
-    format!(
-        "server_name={server_name};server_version={version};client_ip={client_ip};client_mac={client_mac}",
-    )
 }
 
 fn build_info_records_text(
