@@ -169,6 +169,19 @@ dig @127.0.0.1 CH TXT whoami.mac.bind +short
 
 # 聚合信息
 dig @127.0.0.1 CH TXT smartdns.info.bind +short
+
+# JSON 输出（单条 TXT）
+dig @127.0.0.1 CH TXT smartdns.info.json.bind +short
+
+# 多条 TXT 输出（每条一个键值）
+dig @127.0.0.1 CH TXT smartdns.info.records.bind +short
+
+# SmartDNS 自有短名称（去掉 `.bind`）
+dig @127.0.0.1 CH TXT version +short
+
+# SmartDNS 自有 JSON / 多记录别名
+dig @127.0.0.1 CH TXT json.smartdns +short
+dig @127.0.0.1 CH TXT records.smartdns +short
 ```
 
 `whoami.mac.bind` 依赖服务端主机对客户端的 ARP 可见性（通常要求同二层网络，Linux 下可用）。

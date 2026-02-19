@@ -170,6 +170,19 @@ dig @127.0.0.1 CH TXT whoami.mac.bind +short
 
 # combined output
 dig @127.0.0.1 CH TXT smartdns.info.bind +short
+
+# JSON output (single TXT record)
+dig @127.0.0.1 CH TXT smartdns.info.json.bind +short
+
+# multiple TXT records (one key-value per record)
+dig @127.0.0.1 CH TXT smartdns.info.records.bind +short
+
+# SmartDNS native short name (without `.bind`)
+dig @127.0.0.1 CH TXT version +short
+
+# SmartDNS native JSON and multi-record aliases
+dig @127.0.0.1 CH TXT json.smartdns +short
+dig @127.0.0.1 CH TXT records.smartdns +short
 ```
 
 `whoami.mac.bind` depends on ARP visibility from the server host (typically same L2 network on Linux).
