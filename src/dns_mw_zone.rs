@@ -248,6 +248,53 @@ fn parse_arp_table_mac(table: &str, target_ip: Ipv4Addr) -> Option<String> {
     })
 }
 
+fn normalize_mac_token(token: &str) -> Option<String> {
+    let token = token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ','));
+    let normalized = token.replace('-', ":").to_ascii_lowercase();
+
+    if normalized == "00:00:00:00:00:00" {
+        return None;
+    }
+
+    let parts = normalized.split(':').collect::<Vec<_>>();
+    if parts.len() != 6 {
+        return None;
+    }
+
+    if !parts
+        .iter()
+        .all(|part| part.len() == 2 && part.chars().all(|c| c.is_ascii_hexdigit()))
+    {
+        return None;
+    }
+
+    Some(normalized)
+}
+
+fn parse_arp_command_output_mac(output: &str, target_ip: Ipv4Addr) -> Option<String> {
+    let target_ip = target_ip.to_string();
+    output.lines().find_map(|line| {
+        if !line.contains(&target_ip) {
+            return None;
+        }
+        line.split_whitespace().find_map(normalize_mac_token)
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_arp_command(args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("arp")
+        .args(args)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 #[cfg(target_os = "linux")]
 fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
     let client_ip = match client_ip {
@@ -261,7 +308,32 @@ fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn lookup_client_mac_from_arp(_client_ip: IpAddr) -> Option<String> {
+fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
+    let client_ip = match client_ip {
+        IpAddr::V4(ip) if !ip.is_loopback() => ip,
+        _ => return None,
+    };
+
+    let ip = client_ip.to_string();
+
+    #[cfg(target_os = "windows")]
+    for args in [["-a", ip.as_str()]] {
+        if let Some(output) = run_arp_command(&args)
+            && let Some(mac) = parse_arp_command_output_mac(&output, client_ip)
+        {
+            return Some(mac);
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    for args in [["-n", ip.as_str()], ["-an", ip.as_str()], ["-a", ip.as_str()]] {
+        if let Some(output) = run_arp_command(&args)
+            && let Some(mac) = parse_arp_command_output_mac(&output, client_ip)
+        {
+            return Some(mac);
+        }
+    }
+
     None
 }
 
@@ -429,6 +501,26 @@ mod tests {
         assert_eq!(
             parse_arp_table_mac(table, "192.168.1.12".parse().unwrap()),
             None
+        );
+    }
+
+    #[test]
+    fn test_parse_arp_command_output_mac_unix() {
+        let output = "? (192.168.1.10) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]";
+        assert_eq!(
+            parse_arp_command_output_mac(output, "192.168.1.10".parse().unwrap()),
+            Some("aa:bb:cc:dd:ee:ff".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_arp_command_output_mac_windows() {
+        let output = "Interface: 192.168.1.1 --- 0x7\n\
+                      Internet Address      Physical Address      Type\n\
+                      192.168.1.10          aa-bb-cc-dd-ee-ff     dynamic";
+        assert_eq!(
+            parse_arp_command_output_mac(output, "192.168.1.10".parse().unwrap()),
+            Some("aa:bb:cc:dd:ee:ff".to_string())
         );
     }
 }
