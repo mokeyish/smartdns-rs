@@ -133,6 +133,25 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_server_name_alias() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+        let response = search_with_query(
+            &mock,
+            "server-name",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.8:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert!(response.answers()[0].data().to_string().contains("smartdns-rs-test"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_builtin_txt_version_and_client_ip() {
         let cfg = RuntimeConfig::builder().build().unwrap();
         let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
@@ -221,6 +240,35 @@ mod tests {
             RecordType::TXT,
             DNSClass::CH,
             "192.168.1.11:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.answers().len(), 4);
+        let txts = response
+            .answers()
+            .iter()
+            .map(|record| record.data().to_string())
+            .collect::<Vec<_>>();
+        assert!(txts.iter().any(|txt| txt.contains("server_name=")));
+        assert!(txts.iter().any(|txt| txt.contains("server_version=")));
+        assert!(txts.iter().any(|txt| txt.contains("client_ip=")));
+        assert!(txts.iter().any(|txt| txt.contains("client_mac=")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_whoami_multi_records_query() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let response = search_with_query(
+            &mock,
+            "whoami",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.13:5300".parse().unwrap(),
         )
         .await;
 

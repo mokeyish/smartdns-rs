@@ -155,17 +155,20 @@ server-quic 223.5.5.5
 SmartDNS-rs 支持通过 `CHAOS TXT` 查询内置诊断字段。
 
 ```shell
+# 最常用：一次返回完整身份信息（多条 TXT）
+dig @127.0.0.1 CH TXT whoami +short
+
 # 服务器名
-dig @127.0.0.1 CH TXT hostname.bind +short
+dig @127.0.0.1 CH TXT server-name +short
 
 # 服务器版本
 dig @127.0.0.1 CH TXT version.bind +short
 
 # 服务端看到的客户端源 IP
-dig @127.0.0.1 CH TXT whoami.bind +short
+dig @127.0.0.1 CH TXT client-ip +short
 
 # 客户端 MAC（局域网且服务端 ARP 表可见）
-dig @127.0.0.1 CH TXT whoami.mac.bind +short
+dig @127.0.0.1 CH TXT client-mac +short
 
 # 聚合信息
 dig @127.0.0.1 CH TXT smartdns.info.bind +short
@@ -181,6 +184,11 @@ dig @127.0.0.1 CH TXT version +short
 
 # SmartDNS 自有 JSON 别名
 dig @127.0.0.1 CH TXT json.smartdns +short
+
+# BIND 兼容示例
+dig @127.0.0.1 CH TXT hostname.bind +short
+dig @127.0.0.1 CH TXT whoami.bind +short
+dig @127.0.0.1 CH TXT whoami.mac.bind +short
 ```
 
 `whoami.mac.bind` 依赖服务端主机对客户端的 ARP 可见性（通常要求同二层网络，Linux 下可用）。

@@ -156,17 +156,20 @@ For more advanced configurations, please refer to [here](https://github.com/pymu
 SmartDNS-rs supports built-in `CHAOS TXT` queries for server/client diagnostics.
 
 ```shell
-# server hostname
-dig @127.0.0.1 CH TXT hostname.bind +short
+# most common: full identity info (multi TXT records)
+dig @127.0.0.1 CH TXT whoami +short
+
+# server name
+dig @127.0.0.1 CH TXT server-name +short
 
 # server version
 dig @127.0.0.1 CH TXT version.bind +short
 
 # client source IP seen by smartdns-rs
-dig @127.0.0.1 CH TXT whoami.bind +short
+dig @127.0.0.1 CH TXT client-ip +short
 
 # client MAC from ARP table (LAN, ARP available)
-dig @127.0.0.1 CH TXT whoami.mac.bind +short
+dig @127.0.0.1 CH TXT client-mac +short
 
 # combined output
 dig @127.0.0.1 CH TXT smartdns.info.bind +short
@@ -182,6 +185,11 @@ dig @127.0.0.1 CH TXT version +short
 
 # SmartDNS native JSON alias
 dig @127.0.0.1 CH TXT json.smartdns +short
+
+# BIND compatibility examples
+dig @127.0.0.1 CH TXT hostname.bind +short
+dig @127.0.0.1 CH TXT whoami.bind +short
+dig @127.0.0.1 CH TXT whoami.mac.bind +short
 ```
 
 `whoami.mac.bind` depends on ARP visibility from the server host (typically same L2 network on Linux).

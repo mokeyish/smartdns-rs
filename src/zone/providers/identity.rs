@@ -81,16 +81,16 @@ impl ZoneProvider for IdentityZoneProvider {
             )),
 
             // SmartDNS native names (without `.bind`)
-            "hostname.smartdns." | "server-name.smartdns." | "hostname." => {
+            "hostname.smartdns." | "server-name.smartdns." | "server-name." => {
                 Some(txt_response(query, server_name.clone()))
             }
             "version.smartdns." | "server-version.smartdns." | "version." => {
                 Some(txt_response(query, crate::BUILD_VERSION.to_string()))
             }
-            "whoami.smartdns." | "client-ip.smartdns." | "clientip.smartdns." | "whoami." => {
+            "client-ip.smartdns." | "clientip.smartdns." | "client-ip." => {
                 Some(txt_response(query, client_ip.to_string()))
             }
-            "whoami-mac.smartdns." | "client-mac.smartdns." | "clientmac.smartdns." => {
+            "whoami-mac.smartdns." | "client-mac.smartdns." | "clientmac.smartdns." | "client-mac." => {
                 Some(txt_response(query, client_mac()))
             }
             "info.smartdns." => Some(txt_response(
@@ -111,7 +111,7 @@ impl ZoneProvider for IdentityZoneProvider {
                     &client_mac(),
                 ),
             )),
-            "smartdns." => Some(txt_records_response(
+            "whoami.smartdns." | "whoami." | "smartdns." => Some(txt_records_response(
                 query,
                 build_info_records_text(
                     &server_name,
