@@ -36,29 +36,24 @@ impl ZoneProvider for IdentityZoneProvider {
         }
 
         let query_name = normalize_query_name(query.name());
+        let Some(canonical) = translate_query_name(&query_name) else {
+            return Ok(None);
+        };
+
         let client_ip = normalize_client_ip(req.src().ip());
         let server_name = trim_fqdn_dot(ctx.cfg().server_name().to_string());
         let client_mac = || {
             lookup_client_mac_from_arp(client_ip).unwrap_or_else(|| UNKNOWN_CLIENT_MAC.to_string())
         };
 
-        let res = match query_name.as_str() {
-            // Public stable query set:
-            // - whoami: full identity records (server + client)
-            // - smartdns/id.server: server identity records
-            // - server-name/version/client_ip/client_mac: single values
-            // - BIND-compatible hostname.bind/version.bind/whoami.bind/whoami.mac.bind
-            "hostname.bind." | "server-name." => Some(txt_response(query, server_name.clone())),
-            "version.bind." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
-            "whoami.bind." | "client_ip." | "client-ip." => {
-                Some(txt_response(query, client_ip.to_string()))
+        let res = match canonical {
+            CanonicalIdentityQuery::ServerName => txt_response(query, server_name.clone()),
+            CanonicalIdentityQuery::ServerVersion => {
+                txt_response(query, crate::BUILD_VERSION.to_string())
             }
-            "whoami.mac.bind." | "client_mac." | "client-mac." => {
-                Some(txt_response(query, client_mac()))
-            }
-            "version." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
-
-            "whoami.json." => Some(txt_response(
+            CanonicalIdentityQuery::ClientIp => txt_response(query, client_ip.to_string()),
+            CanonicalIdentityQuery::ClientMac => txt_response(query, client_mac()),
+            CanonicalIdentityQuery::WhoAmIJson => txt_response(
                 query,
                 build_info_json_text(
                     &server_name,
@@ -66,8 +61,8 @@ impl ZoneProvider for IdentityZoneProvider {
                     &client_ip,
                     &client_mac(),
                 ),
-            )),
-            "whoami." => Some(txt_records_response(
+            ),
+            CanonicalIdentityQuery::WhoAmIRecords => txt_records_response(
                 query,
                 build_info_records_text(
                     &server_name,
@@ -75,21 +70,67 @@ impl ZoneProvider for IdentityZoneProvider {
                     &client_ip,
                     &client_mac(),
                 ),
-            )),
-
-            "id.server." | "smartdns." => Some(txt_records_response(
+            ),
+            CanonicalIdentityQuery::ServerRecords => txt_records_response(
                 query,
                 build_server_records_text(&server_name, crate::BUILD_VERSION),
-            )),
-            "smartdns.json." => Some(txt_response(
+            ),
+            CanonicalIdentityQuery::ServerJson => txt_response(
                 query,
                 build_server_json_text(&server_name, crate::BUILD_VERSION),
-            )),
-            _ => None,
+            ),
         };
 
-        Ok(res)
+        Ok(Some(res))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanonicalIdentityQuery {
+    ServerName,
+    ServerVersion,
+    ClientIp,
+    ClientMac,
+    WhoAmIRecords,
+    WhoAmIJson,
+    ServerRecords,
+    ServerJson,
+}
+
+fn translate_query_name(name: &str) -> Option<CanonicalIdentityQuery> {
+    use CanonicalIdentityQuery::*;
+    Some(match name {
+        // server name
+        "server-name." | "hostname.bind." | "hostname.smartdns." | "server-name.smartdns." => {
+            ServerName
+        }
+        // server version
+        "version." | "version.bind." | "version.smartdns." | "server-version.smartdns." => {
+            ServerVersion
+        }
+        // client ip
+        "client_ip."
+        | "client-ip."
+        | "whoami.bind."
+        | "client_ip.smartdns."
+        | "client-ip.smartdns." => ClientIp,
+        // client mac
+        "client_mac."
+        | "client-mac."
+        | "whoami.mac.bind."
+        | "client_mac.smartdns."
+        | "client-mac.smartdns."
+        | "whoami-mac.smartdns." => ClientMac,
+        // full identity
+        "whoami." | "whoami.smartdns." => WhoAmIRecords,
+        "whoami.json." | "whoami.json.smartdns." => WhoAmIJson,
+        // server identity
+        "smartdns." | "id.server." | "smartdns.bind." => ServerRecords,
+        "smartdns.json." | "json.smartdns." | "id.server.json." | "smartdns.info.json.bind." => {
+            ServerJson
+        }
+        _ => return None,
+    })
 }
 
 fn normalize_query_name(name: &Name) -> String {
@@ -180,4 +221,46 @@ fn build_server_json_text(server_name: &str, version: &str) -> String {
 
 fn json_escape(value: &str) -> String {
     value.chars().flat_map(|c| c.escape_default()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_translate_query_name_aliases() {
+        assert_eq!(
+            translate_query_name("hostname.bind."),
+            Some(CanonicalIdentityQuery::ServerName)
+        );
+        assert_eq!(
+            translate_query_name("server-name."),
+            Some(CanonicalIdentityQuery::ServerName)
+        );
+        assert_eq!(
+            translate_query_name("version.bind."),
+            Some(CanonicalIdentityQuery::ServerVersion)
+        );
+        assert_eq!(
+            translate_query_name("client-ip."),
+            Some(CanonicalIdentityQuery::ClientIp)
+        );
+        assert_eq!(
+            translate_query_name("client-mac."),
+            Some(CanonicalIdentityQuery::ClientMac)
+        );
+        assert_eq!(
+            translate_query_name("whoami."),
+            Some(CanonicalIdentityQuery::WhoAmIRecords)
+        );
+        assert_eq!(
+            translate_query_name("smartdns."),
+            Some(CanonicalIdentityQuery::ServerRecords)
+        );
+        assert_eq!(
+            translate_query_name("smartdns.json."),
+            Some(CanonicalIdentityQuery::ServerJson)
+        );
+        assert_eq!(translate_query_name("unknown."), None);
+    }
 }
