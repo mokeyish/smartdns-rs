@@ -148,7 +148,12 @@ mod tests {
         )
         .await;
 
-        assert!(response.answers()[0].data().to_string().contains("smartdns-rs-test"));
+        assert!(
+            response.answers()[0]
+                .data()
+                .to_string()
+                .contains("smartdns-rs-test")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -90,9 +90,10 @@ impl ZoneProvider for IdentityZoneProvider {
             "client-ip.smartdns." | "clientip.smartdns." | "client-ip." => {
                 Some(txt_response(query, client_ip.to_string()))
             }
-            "whoami-mac.smartdns." | "client-mac.smartdns." | "clientmac.smartdns." | "client-mac." => {
-                Some(txt_response(query, client_mac()))
-            }
+            "whoami-mac.smartdns."
+            | "client-mac.smartdns."
+            | "clientmac.smartdns."
+            | "client-mac." => Some(txt_response(query, client_mac())),
             "info.smartdns." => Some(txt_response(
                 query,
                 build_info_kv_text(
