@@ -44,15 +44,17 @@ impl ZoneProvider for IdentityZoneProvider {
 
         let res = match query_name.as_str() {
             // Public stable query set:
-            // - whoami/smartdns: full identity records
-            // - server-name/version/client-ip/client-mac: single values
+            // - whoami: full identity records (server + client)
+            // - smartdns/id.server: server identity records
+            // - server-name/version/ip.whoami/mac.whoami: single values
             // - BIND-compatible hostname.bind/version.bind/whoami.bind/whoami.mac.bind
             "hostname.bind." | "server-name." => Some(txt_response(query, server_name.clone())),
             "version.bind." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
-            "whoami.bind." | "client-ip." => Some(txt_response(query, client_ip.to_string())),
-            "whoami.mac.bind." | "client-mac." => Some(txt_response(query, client_mac())),
+            "whoami.bind." | "ip.whoami." => Some(txt_response(query, client_ip.to_string())),
+            "whoami.mac.bind." | "mac.whoami." => Some(txt_response(query, client_mac())),
+            "version." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
 
-            "json.smartdns." => Some(txt_response(
+            "whoami.json." => Some(txt_response(
                 query,
                 build_info_json_text(
                     &server_name,
@@ -61,7 +63,7 @@ impl ZoneProvider for IdentityZoneProvider {
                     &client_mac(),
                 ),
             )),
-            "whoami." | "smartdns." => Some(txt_records_response(
+            "whoami." => Some(txt_records_response(
                 query,
                 build_info_records_text(
                     &server_name,
@@ -70,7 +72,15 @@ impl ZoneProvider for IdentityZoneProvider {
                     &client_mac(),
                 ),
             )),
-            "version." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
+
+            "id.server." | "smartdns." => Some(txt_records_response(
+                query,
+                build_server_records_text(&server_name, crate::BUILD_VERSION),
+            )),
+            "smartdns.json." => Some(txt_response(
+                query,
+                build_server_json_text(&server_name, crate::BUILD_VERSION),
+            )),
             _ => None,
         };
 
@@ -136,6 +146,13 @@ fn build_info_records_text(
     ]
 }
 
+fn build_server_records_text(server_name: &str, version: &str) -> Vec<String> {
+    vec![
+        format!("server_name={server_name}"),
+        format!("server_version={version}"),
+    ]
+}
+
 fn build_info_json_text(
     server_name: &str,
     version: &str,
@@ -149,6 +166,12 @@ fn build_info_json_text(
     format!(
         r#"{{"server_name":"{server_name}","server_version":"{version}","client_ip":"{client_ip}","client_mac":"{client_mac}"}}"#
     )
+}
+
+fn build_server_json_text(server_name: &str, version: &str) -> String {
+    let server_name = json_escape(server_name);
+    let version = json_escape(version);
+    format!(r#"{{"server_name":"{server_name}","server_version":"{version}"}}"#)
 }
 
 fn json_escape(value: &str) -> String {

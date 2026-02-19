@@ -217,7 +217,7 @@ mod tests {
 
         let response = search_with_query(
             &mock,
-            "json.smartdns",
+            "whoami.json",
             RecordType::TXT,
             DNSClass::CH,
             "192.168.1.10:5300".parse().unwrap(),
@@ -248,7 +248,7 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.answers().len(), 4);
+        assert_eq!(response.answers().len(), 2);
         let txts = response
             .answers()
             .iter()
@@ -256,8 +256,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(txts.iter().any(|txt| txt.contains("server_name=")));
         assert!(txts.iter().any(|txt| txt.contains("server_version=")));
-        assert!(txts.iter().any(|txt| txt.contains("client_ip=")));
-        assert!(txts.iter().any(|txt| txt.contains("client_mac=")));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -287,6 +285,59 @@ mod tests {
         assert!(txts.iter().any(|txt| txt.contains("server_version=")));
         assert!(txts.iter().any(|txt| txt.contains("client_ip=")));
         assert!(txts.iter().any(|txt| txt.contains("client_mac=")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_whoami_fields_query() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let ip_response = search_with_query(
+            &mock,
+            "ip.whoami",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.13:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(ip_response.answers()[0].data().to_string().contains("192.168.1.13"));
+
+        let mac_response = search_with_query(
+            &mock,
+            "mac.whoami",
+            RecordType::TXT,
+            DNSClass::CH,
+            "127.0.0.1:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(mac_response.answers()[0].data().to_string().contains("N/A"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_id_server_query() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let response = search_with_query(
+            &mock,
+            "id.server",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.15:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.answers().len(), 2);
+        let txts = response
+            .answers()
+            .iter()
+            .map(|record| record.data().to_string())
+            .collect::<Vec<_>>();
+        assert!(txts.iter().any(|txt| txt.contains("server_name=smartdns-rs-test")));
+        assert!(txts.iter().any(|txt| txt.contains("server_version=")));
     }
 
     #[tokio::test(flavor = "multi_thread")]
