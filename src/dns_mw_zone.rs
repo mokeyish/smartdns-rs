@@ -1,14 +1,18 @@
 use std::borrow::Borrow;
 use std::collections::BTreeSet;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
-use crate::libdns::proto::rr::rdata::PTR;
+use crate::libdns::proto::op::Query;
+use crate::libdns::proto::rr::rdata::{PTR, TXT};
+use crate::libdns::proto::rr::DNSClass;
 
 use crate::config::HttpsRecordRule;
 use crate::dns::*;
 use crate::infra::ipset::IpSet;
 use crate::middleware::*;
+
+const UNKNOWN_CLIENT_MAC: &str = "N/A";
 
 pub struct DnsZoneMiddleware {
     server_net: IpSet,
@@ -48,6 +52,10 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
         let query = req.query();
         let name = query.name();
         let query_type = query.query_type();
+
+        if let Some(response) = self.handle_builtin_txt_query(ctx, req) {
+            return Ok(response);
+        }
 
         match query_type {
             RecordType::PTR => {
@@ -153,12 +161,131 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
     }
 }
 
+impl DnsZoneMiddleware {
+    fn handle_builtin_txt_query(&self, ctx: &DnsContext, req: &DnsRequest) -> Option<DnsResponse> {
+        let query = req.query().original().to_owned();
+
+        if query.query_type() != RecordType::TXT {
+            return None;
+        }
+
+        if !matches!(query.query_class(), DNSClass::CH | DNSClass::IN) {
+            return None;
+        }
+
+        let query_name = normalize_query_name(query.name());
+        let client_ip = normalize_client_ip(req.src().ip());
+        let server_name = trim_fqdn_dot(ctx.cfg().server_name().to_string());
+
+        let value = match query_name.as_str() {
+            "hostname.bind." | "id.server." => server_name.clone(),
+            "version.bind." => crate::BUILD_VERSION.to_string(),
+            "whoami.bind." | "client.ip.bind." | "clientip.bind." => client_ip.to_string(),
+            "whoami.mac.bind." | "client.mac.bind." | "clientmac.bind." => {
+                lookup_client_mac_from_arp(client_ip)
+                    .unwrap_or_else(|| UNKNOWN_CLIENT_MAC.to_string())
+            }
+            "smartdns.info.bind." => {
+                let client_mac = lookup_client_mac_from_arp(client_ip)
+                    .unwrap_or_else(|| UNKNOWN_CLIENT_MAC.to_string());
+                format!(
+                    "server_name={server_name};server_version={};client_ip={client_ip};client_mac={client_mac}",
+                    crate::BUILD_VERSION,
+                )
+            }
+            _ => return None,
+        };
+
+        Some(txt_response(query, value))
+    }
+}
+
+fn normalize_query_name(name: &Name) -> String {
+    name.to_string().to_ascii_lowercase()
+}
+
+fn trim_fqdn_dot(name: String) -> String {
+    name.trim_end_matches('.').to_string()
+}
+
+fn normalize_client_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(addr) => addr.to_ipv4_mapped().map_or(IpAddr::V6(addr), IpAddr::V4),
+        IpAddr::V4(addr) => IpAddr::V4(addr),
+    }
+}
+
+fn txt_response(query: Query, value: String) -> DnsResponse {
+    let mut record = Record::from_rdata(
+        query.name().to_owned(),
+        crate::dns_client::MAX_TTL,
+        RData::TXT(TXT::new(vec![value])),
+    );
+    record.set_dns_class(query.query_class());
+    DnsResponse::new_with_max_ttl(query, vec![record])
+}
+
+fn parse_arp_table_mac(table: &str, target_ip: Ipv4Addr) -> Option<String> {
+    let target_ip = target_ip.to_string();
+    table.lines().skip(1).find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let ip = fields.next()?;
+        let _hardware_type = fields.next()?;
+        let _flags = fields.next()?;
+        let mac = fields.next()?;
+
+        if ip != target_ip {
+            return None;
+        }
+
+        if mac == "00:00:00:00:00:00" {
+            return None;
+        }
+
+        Some(mac.to_ascii_lowercase())
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
+    let client_ip = match client_ip {
+        IpAddr::V4(ip) if !ip.is_loopback() => ip,
+        _ => return None,
+    };
+
+    std::fs::read_to_string("/proc/net/arp")
+        .ok()
+        .and_then(|table| parse_arp_table_mac(&table, client_ip))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn lookup_client_mac_from_arp(_client_ip: IpAddr) -> Option<String> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
     use crate::infra::ipset::IpSet;
+    use crate::libdns::proto::rr::DNSClass;
     use crate::{dns_conf::RuntimeConfig, dns_mw::*};
+    use std::net::SocketAddr;
+
+    async fn search_with_query(
+        mw: &DnsMiddlewareHandler,
+        name: &str,
+        query_type: RecordType,
+        query_class: DNSClass,
+        src: SocketAddr,
+    ) -> DnsResponse {
+        let mut query = Query::query(name.parse().unwrap(), query_type);
+        query.set_query_class(query_class);
+        let mut message = op::Message::query();
+        message.add_query(query);
+        let req = DnsRequest::new(message, src, Protocol::Udp);
+        mw.search(&req, &Default::default()).await.unwrap()
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_srv_record() {
@@ -204,5 +331,92 @@ mod tests {
         let net2 = name2.parse_arpa_name().unwrap();
 
         assert!(local_net.overlap(&net2));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_server_hostname() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+        let response = search_with_query(
+            &mock,
+            "hostname.bind",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.8:5300".parse().unwrap(),
+        )
+        .await;
+        let answer = response.answers().first().unwrap();
+        assert_eq!(answer.record_type(), RecordType::TXT);
+        assert_eq!(answer.dns_class(), DNSClass::CH);
+        assert!(answer.data().to_string().contains("smartdns-rs-test"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_version_and_client_ip() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let version_response = search_with_query(
+            &mock,
+            "version.bind",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.9:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(
+            version_response.answers()[0]
+                .data()
+                .to_string()
+                .contains(crate::BUILD_VERSION)
+        );
+
+        let ip_response = search_with_query(
+            &mock,
+            "whoami.bind",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.9:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(ip_response.answers()[0].data().to_string().contains("192.168.1.9"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_client_mac_for_loopback() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+        let response = search_with_query(
+            &mock,
+            "whoami.mac.bind",
+            RecordType::TXT,
+            DNSClass::CH,
+            "127.0.0.1:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(response.answers()[0].data().to_string().contains(UNKNOWN_CLIENT_MAC));
+    }
+
+    #[test]
+    fn test_parse_arp_table_mac() {
+        let table = "IP address       HW type     Flags       HW address            Mask     Device\n\
+                     192.168.1.10     0x1         0x2         aa:bb:cc:dd:ee:ff     *        eth0\n\
+                     192.168.1.11     0x1         0x2         00:00:00:00:00:00     *        eth0";
+
+        assert_eq!(
+            parse_arp_table_mac(table, "192.168.1.10".parse().unwrap()),
+            Some("aa:bb:cc:dd:ee:ff".to_string())
+        );
+        assert_eq!(
+            parse_arp_table_mac(table, "192.168.1.11".parse().unwrap()),
+            None
+        );
+        assert_eq!(
+            parse_arp_table_mac(table, "192.168.1.12".parse().unwrap()),
+            None
+        );
     }
 }

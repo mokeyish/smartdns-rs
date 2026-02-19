@@ -151,6 +151,29 @@ server-quic unfiltered.adguard-dns.com
 
 For more advanced configurations, please refer to [here](https://github.com/pymumu/smartdns/blob/doc/en/docs/configuration.md) , and refer to [TODO](https://github.com/mokeyish/smartdns-rs/blob/main/TODO.md) for the function coverage.
 
+## Built-in diagnostics via `dig`
+
+SmartDNS-rs supports built-in `CHAOS TXT` queries for server/client diagnostics.
+
+```shell
+# server hostname
+dig @127.0.0.1 CH TXT hostname.bind +short
+
+# server version
+dig @127.0.0.1 CH TXT version.bind +short
+
+# client source IP seen by smartdns-rs
+dig @127.0.0.1 CH TXT whoami.bind +short
+
+# client MAC from ARP table (LAN, ARP available)
+dig @127.0.0.1 CH TXT whoami.mac.bind +short
+
+# combined output
+dig @127.0.0.1 CH TXT smartdns.info.bind +short
+```
+
+`whoami.mac.bind` depends on ARP visibility from the server host (typically same L2 network on Linux).
+
 ## Building
 
 Assuming you have installed [Rust](https://www.rust-lang.org/learn/get-started), then you can open the terminal and execute these commands:

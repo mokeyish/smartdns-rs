@@ -150,6 +150,29 @@ server-quic 223.5.5.5
 
 更多高级的配置请参考 [这里](https://github.com/pymumu/smartdns/blob/doc/docs/configuration.md)
 
+## 使用 `dig` 查询内置诊断信息
+
+SmartDNS-rs 支持通过 `CHAOS TXT` 查询内置诊断字段。
+
+```shell
+# 服务器名
+dig @127.0.0.1 CH TXT hostname.bind +short
+
+# 服务器版本
+dig @127.0.0.1 CH TXT version.bind +short
+
+# 服务端看到的客户端源 IP
+dig @127.0.0.1 CH TXT whoami.bind +short
+
+# 客户端 MAC（局域网且服务端 ARP 表可见）
+dig @127.0.0.1 CH TXT whoami.mac.bind +short
+
+# 聚合信息
+dig @127.0.0.1 CH TXT smartdns.info.bind +short
+```
+
+`whoami.mac.bind` 依赖服务端主机对客户端的 ARP 可见性（通常要求同二层网络，Linux 下可用）。
+
 ## 从源码构建与运行
 
 假设你已经安装了 [Rust](https://www.rust-lang.org/learn/get-started)，那么你可以打开命令行界面，执行如下命令：
