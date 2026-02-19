@@ -288,13 +288,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_builtin_txt_whoami_fields_query() {
+    async fn test_builtin_txt_client_fields_query() {
         let cfg = RuntimeConfig::builder().build().unwrap();
         let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
 
         let ip_response = search_with_query(
             &mock,
-            "ip.whoami",
+            "client_ip",
             RecordType::TXT,
             DNSClass::CH,
             "192.168.1.13:5300".parse().unwrap(),
@@ -309,13 +309,38 @@ mod tests {
 
         let mac_response = search_with_query(
             &mock,
-            "mac.whoami",
+            "client_mac",
             RecordType::TXT,
             DNSClass::CH,
             "127.0.0.1:5300".parse().unwrap(),
         )
         .await;
         assert!(mac_response.answers()[0].data().to_string().contains("N/A"));
+
+        let ip_response2 = search_with_query(
+            &mock,
+            "client-ip",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.13:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(
+            ip_response2.answers()[0]
+                .data()
+                .to_string()
+                .contains("192.168.1.13")
+        );
+
+        let mac_response2 = search_with_query(
+            &mock,
+            "client-mac",
+            RecordType::TXT,
+            DNSClass::CH,
+            "127.0.0.1:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(mac_response2.answers()[0].data().to_string().contains("N/A"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

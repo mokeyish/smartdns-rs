@@ -46,12 +46,16 @@ impl ZoneProvider for IdentityZoneProvider {
             // Public stable query set:
             // - whoami: full identity records (server + client)
             // - smartdns/id.server: server identity records
-            // - server-name/version/ip.whoami/mac.whoami: single values
+            // - server-name/version/client_ip/client_mac: single values
             // - BIND-compatible hostname.bind/version.bind/whoami.bind/whoami.mac.bind
             "hostname.bind." | "server-name." => Some(txt_response(query, server_name.clone())),
             "version.bind." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
-            "whoami.bind." | "ip.whoami." => Some(txt_response(query, client_ip.to_string())),
-            "whoami.mac.bind." | "mac.whoami." => Some(txt_response(query, client_mac())),
+            "whoami.bind." | "client_ip." | "client-ip." => {
+                Some(txt_response(query, client_ip.to_string()))
+            }
+            "whoami.mac.bind." | "client_mac." | "client-mac." => {
+                Some(txt_response(query, client_mac()))
+            }
             "version." => Some(txt_response(query, crate::BUILD_VERSION.to_string())),
 
             "whoami.json." => Some(txt_response(

@@ -168,10 +168,12 @@ dig @127.0.0.1 CH TXT server-name +short
 dig @127.0.0.1 CH TXT version +short
 
 # 服务端看到的客户端源 IP
-dig @127.0.0.1 CH TXT ip.whoami +short
+dig @127.0.0.1 CH TXT client_ip +short
+dig @127.0.0.1 CH TXT client-ip +short
 
 # 客户端 MAC（局域网且服务端 ARP 表可见）
-dig @127.0.0.1 CH TXT mac.whoami +short
+dig @127.0.0.1 CH TXT client_mac +short
+dig @127.0.0.1 CH TXT client-mac +short
 
 # JSON 输出（后缀风格）
 dig @127.0.0.1 CH TXT whoami.json +short

@@ -169,10 +169,12 @@ dig @127.0.0.1 CH TXT server-name +short
 dig @127.0.0.1 CH TXT version +short
 
 # client source IP seen by smartdns-rs
-dig @127.0.0.1 CH TXT ip.whoami +short
+dig @127.0.0.1 CH TXT client_ip +short
+dig @127.0.0.1 CH TXT client-ip +short
 
 # client MAC from ARP table (LAN, ARP available)
-dig @127.0.0.1 CH TXT mac.whoami +short
+dig @127.0.0.1 CH TXT client_mac +short
+dig @127.0.0.1 CH TXT client-mac +short
 
 # JSON output with suffix style
 dig @127.0.0.1 CH TXT whoami.json +short
