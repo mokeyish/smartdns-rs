@@ -180,15 +180,11 @@ dig @127.0.0.1 CH TXT client-mac +short
 dig @127.0.0.1 CH TXT whoami.json +short
 dig @127.0.0.1 CH TXT smartdns.json +short
 
-# BIND compatibility examples
+# Compatibility examples
 dig @127.0.0.1 CH TXT hostname.bind +short
 dig @127.0.0.1 CH TXT version.bind +short
-dig @127.0.0.1 CH TXT whoami.bind +short
-dig @127.0.0.1 CH TXT whoami.mac.bind +short
 dig @127.0.0.1 CH TXT id.server +short
 ```
-
-`whoami.mac.bind` depends on ARP visibility from the server host (typically same L2 network on Linux).
 
 ## Building
 

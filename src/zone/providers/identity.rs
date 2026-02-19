@@ -101,34 +101,19 @@ fn translate_query_name(name: &str) -> Option<CanonicalIdentityQuery> {
     use CanonicalIdentityQuery::*;
     Some(match name {
         // server name
-        "server-name." | "hostname.bind." | "hostname.smartdns." | "server-name.smartdns." => {
-            ServerName
-        }
+        "server-name." | "hostname.bind." => ServerName,
         // server version
-        "version." | "version.bind." | "version.smartdns." | "server-version.smartdns." => {
-            ServerVersion
-        }
+        "version." | "version.bind." => ServerVersion,
         // client ip
-        "client_ip."
-        | "client-ip."
-        | "whoami.bind."
-        | "client_ip.smartdns."
-        | "client-ip.smartdns." => ClientIp,
+        "client_ip." | "client-ip." => ClientIp,
         // client mac
-        "client_mac."
-        | "client-mac."
-        | "whoami.mac.bind."
-        | "client_mac.smartdns."
-        | "client-mac.smartdns."
-        | "whoami-mac.smartdns." => ClientMac,
+        "client_mac." | "client-mac." => ClientMac,
         // full identity
-        "whoami." | "whoami.smartdns." => WhoAmIRecords,
-        "whoami.json." | "whoami.json.smartdns." => WhoAmIJson,
+        "whoami." => WhoAmIRecords,
+        "whoami.json." => WhoAmIJson,
         // server identity
-        "smartdns." | "id.server." | "smartdns.bind." => ServerRecords,
-        "smartdns.json." | "json.smartdns." | "id.server.json." | "smartdns.info.json.bind." => {
-            ServerJson
-        }
+        "smartdns." | "id.server." => ServerRecords,
+        "smartdns.json." => ServerJson,
         _ => return None,
     })
 }
@@ -261,6 +246,9 @@ mod tests {
             translate_query_name("smartdns.json."),
             Some(CanonicalIdentityQuery::ServerJson)
         );
+        assert_eq!(translate_query_name("whoami.bind."), None);
+        assert_eq!(translate_query_name("whoami.mac.bind."), None);
+        assert_eq!(translate_query_name("whoami-mac.smartdns."), None);
         assert_eq!(translate_query_name("unknown."), None);
     }
 }

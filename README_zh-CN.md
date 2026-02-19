@@ -179,15 +179,11 @@ dig @127.0.0.1 CH TXT client-mac +short
 dig @127.0.0.1 CH TXT whoami.json +short
 dig @127.0.0.1 CH TXT smartdns.json +short
 
-# BIND 兼容示例
+# 兼容性示例
 dig @127.0.0.1 CH TXT hostname.bind +short
 dig @127.0.0.1 CH TXT version.bind +short
-dig @127.0.0.1 CH TXT whoami.bind +short
-dig @127.0.0.1 CH TXT whoami.mac.bind +short
 dig @127.0.0.1 CH TXT id.server +short
 ```
-
-`whoami.mac.bind` 依赖服务端主机对客户端的 ARP 可见性（通常要求同二层网络，Linux 下可用）。
 
 ## 从源码构建与运行
 

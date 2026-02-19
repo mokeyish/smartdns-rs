@@ -178,7 +178,7 @@ mod tests {
 
         let ip_response = search_with_query(
             &mock,
-            "whoami.bind",
+            "client_ip",
             RecordType::TXT,
             DNSClass::CH,
             "192.168.1.9:5300".parse().unwrap(),
@@ -198,7 +198,7 @@ mod tests {
         let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
         let response = search_with_query(
             &mock,
-            "whoami.mac.bind",
+            "client_mac",
             RecordType::TXT,
             DNSClass::CH,
             "127.0.0.1:5300".parse().unwrap(),
@@ -413,5 +413,22 @@ mod tests {
 
         let res = mock.search(&req, &Default::default()).await;
         assert!(matches!(res, Err(ref err) if err.is_soa()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_removed_whoami_bind_aliases_are_not_supported() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        for name in ["whoami.bind", "whoami.mac.bind"] {
+            let mut query = Query::query(name.parse().unwrap(), RecordType::TXT);
+            query.set_query_class(DNSClass::CH);
+            let mut message = op::Message::query();
+            message.add_query(query);
+            let req = DnsRequest::new(message, "192.168.1.14:5300".parse().unwrap(), Protocol::Udp);
+
+            let res = mock.search(&req, &Default::default()).await;
+            assert!(matches!(res, Err(ref err) if err.is_soa()));
+        }
     }
 }
