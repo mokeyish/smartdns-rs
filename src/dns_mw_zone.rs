@@ -240,12 +240,7 @@ mod tests {
             "127.0.0.1:5300".parse().unwrap(),
         )
         .await;
-        assert!(
-            response.answers()[0]
-                .data()
-                .to_string()
-                .contains("N/A")
-        );
+        assert!(response.answers()[0].data().to_string().contains("N/A"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
