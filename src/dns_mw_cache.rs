@@ -157,16 +157,9 @@ impl DnsCacheMiddleware {
                                 ..Default::default()
                             };
                             let client = client.with_new_opt(opts);
-                            tokio::spawn(async move {
-                                let now = Instant::now();
-                                client.send(query.clone()).await;
-                                debug!(
-                                    "Prefetch domain {} {}, elapsed {:?}",
-                                    query.name(),
-                                    query.query_type(),
-                                    now.elapsed()
-                                );
-                            });
+                            if client.try_send_best_effort(query.clone()) {
+                                debug!("Prefetch domain {} {} queued", query.name(), query.query_type());
+                            }
                         }
                     }
                 } else {
@@ -218,9 +211,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                                 opts.is_background = true;
                                 let client = self.client.with_new_opt(opts);
                                 let query = query.clone();
-                                tokio::spawn(async move {
-                                    client.send(query).await;
-                                });
+                                client.try_send_best_effort(query);
                             }
 
                             debug!(
@@ -239,9 +230,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                                 opts.is_background = true;
                                 let client = self.client.with_new_opt(opts);
                                 let query = query.clone();
-                                tokio::spawn(async move {
-                                    client.send(query).await;
-                                });
+                                client.try_send_best_effort(query);
                             }
 
                             debug!(

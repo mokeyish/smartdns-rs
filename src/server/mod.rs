@@ -302,6 +302,13 @@ impl DnsHandle {
         match self.sender.try_send(outgoing) {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(outgoing)) => {
+                if self.opts.is_background {
+                    return refused_from_message(
+                        Some(outgoing.0),
+                        fallback_addr,
+                        fallback_protocol,
+                    );
+                }
                 match tokio::time::timeout(
                     DNS_HANDLE_ENQUEUE_TIMEOUT,
                     self.sender.send(outgoing),
@@ -334,6 +341,18 @@ impl DnsHandle {
                 response_message.into()
             }
         }
+    }
+
+    /// Best-effort enqueue without waiting for a response.
+    ///
+    /// Intended for background refresh/prefetch jobs where dropping under pressure
+    /// is preferable to increasing front-path latency.
+    pub fn try_send_best_effort<T: Into<SerialMessage>>(&self, message: T) -> bool {
+        let (tx, rx) = oneshot::channel();
+        drop(rx);
+        self.sender
+            .try_send((message.into(), self.opts.clone(), tx))
+            .is_ok()
     }
 
     pub fn with_new_opt(&self, opts: ServerOpts) -> Self {
