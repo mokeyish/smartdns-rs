@@ -212,13 +212,47 @@ fn read_hosts(pattern: &str) -> Hosts {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, str::FromStr, time::Duration};
+    use std::{
+        net::IpAddr,
+        path::{Path, PathBuf},
+        str::FromStr,
+        time::Duration,
+    };
 
     use crate::libdns::proto::rr::rdata::PTR;
 
     use super::*;
 
     use crate::{dns_conf::RuntimeConfig, dns_mw::*};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> anyhow::Result<Self> {
+            let path = std::env::temp_dir().join(format!(
+                "{}-{}-{}",
+                prefix,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&path)?;
+            Ok(Self { path })
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[tokio::test()]
     async fn test_query_ip() -> anyhow::Result<()> {
@@ -283,15 +317,8 @@ mod tests {
 
     #[tokio::test()]
     async fn test_hosts_cache_refresh_on_file_change() -> anyhow::Result<()> {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "smartdns-hosts-refresh-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&temp_dir)?;
-        let hosts_file = temp_dir.join("hosts");
+        let temp_dir = TempDirGuard::new("smartdns-hosts-refresh-test")?;
+        let hosts_file = temp_dir.path().join("hosts");
         std::fs::write(&hosts_file, "1.1.1.1 host-refresh\n")?;
 
         let config_line = format!("hosts-file {}", hosts_file.display());
@@ -321,8 +348,6 @@ mod tests {
             .flat_map(|r| r.data().ip_addr())
             .collect::<Vec<_>>();
         assert_eq!(ip_addrs, vec![IpAddr::from_str("2.2.2.2").unwrap()]);
-
-        let _ = std::fs::remove_dir_all(temp_dir);
         Ok(())
     }
 }

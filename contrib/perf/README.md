@@ -15,7 +15,7 @@ This directory contains a scenario-based performance suite that targets specific
 ## Local run
 
 ```bash
-cargo build --release --features disable_icmp_ping
+just build --release --features disable_icmp_ping
 
 python3 contrib/perf/run_perf_suite.py \
   --binary target/release/smartdns \

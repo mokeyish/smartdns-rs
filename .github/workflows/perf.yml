@@ -32,13 +32,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup
+        uses: ./.github/actions/setup.yml
         with:
-          toolchain: stable
+          rust_toolchain: stable
+          install_cross: "false"
+          install_wix: "false"
+          install_cargo_edit: "false"
+          install_patch_crate: "false"
 
       - name: Build smartdns release binary
-        run: cargo build --release --features disable_icmp_ping
+        run: just build --release --features disable_icmp_ping
 
       - name: Run performance suite
         run: |
