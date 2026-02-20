@@ -283,12 +283,20 @@ mod tests {
 
     #[tokio::test()]
     async fn test_hosts_cache_refresh_on_file_change() -> anyhow::Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let hosts_file = temp_dir.path().join("smartdns-hosts-refresh-test");
+        let temp_dir = std::env::temp_dir().join(format!(
+            "smartdns-hosts-refresh-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir)?;
+        let hosts_file = temp_dir.join("hosts");
         std::fs::write(&hosts_file, "1.1.1.1 host-refresh\n")?;
 
+        let config_line = format!("hosts-file {}", hosts_file.display());
         let cfg = RuntimeConfig::builder()
-            .with(format!("hosts-file {}", hosts_file.display()))
+            .with(config_line.as_str())
             .build()
             .unwrap();
 
@@ -314,6 +322,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(ip_addrs, vec![IpAddr::from_str("2.2.2.2").unwrap()]);
 
+        let _ = std::fs::remove_dir_all(temp_dir);
         Ok(())
     }
 }
