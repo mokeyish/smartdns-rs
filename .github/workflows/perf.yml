@@ -38,7 +38,7 @@ jobs:
           toolchain: stable
 
       - name: Build smartdns release binary
-        run: cargo build --release --no-default-features --features disable_icmp_ping
+        run: cargo build --release --features disable_icmp_ping
 
       - name: Run performance suite
         run: |
