@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr};
 
-use netdev::MacAddr;
+use mac_addr::MacAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ParsedArpEntry {
@@ -22,22 +22,11 @@ fn client_ipv4_for_arp(client_ip: IpAddr) -> Option<Ipv4Addr> {
 fn parse_arp_table_mac(table: &str, target_ip: Ipv4Addr) -> Option<String> {
     parse_arp_entries(table)
         .find(|entry| entry.ip == target_ip)
-        .map(|entry| format_mac(entry.mac))
-}
-
-fn normalize_mac_token(token: &str) -> Option<MacAddr> {
-    let token = token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ','));
-    let normalized = token.replace('-', ":").to_ascii_lowercase();
-    let mac: MacAddr = normalized.parse().ok()?;
-    if mac.octets() == [0; 6] {
-        return None;
-    }
-    Some(mac)
+        .map(|entry| entry.mac.to_string())
 }
 
 fn normalize_ip_token(token: &str) -> Option<Ipv4Addr> {
-    let normalized =
-        token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ',' | ';' | ':'));
+    let normalized = trim_arp_token(token);
     normalized.parse().ok()
 }
 
@@ -46,11 +35,22 @@ fn parse_arp_line_entry(line: &str) -> Option<ParsedArpEntry> {
     let mut mac = None;
 
     for token in line.split_whitespace() {
+        let token = trim_arp_token(token);
+
         if ip.is_none() {
             ip = normalize_ip_token(token);
         }
         if mac.is_none() {
-            mac = normalize_mac_token(token);
+            mac = token
+                .parse::<MacAddr>()
+                .ok()
+                .or_else(|| {
+                    token
+                        .contains('-')
+                        .then(|| token.replace('-', ":").parse::<MacAddr>().ok())
+                        .flatten()
+                })
+                .filter(|candidate| *candidate != MacAddr::zero());
         }
         if ip.is_some() && mac.is_some() {
             break;
@@ -68,15 +68,14 @@ fn parse_arp_entries(output: &str) -> impl Iterator<Item = ParsedArpEntry> + '_ 
     output.lines().filter_map(parse_arp_line_entry)
 }
 
-fn format_mac(mac: MacAddr) -> String {
-    let [a, b, c, d, e, f] = mac.octets();
-    format!("{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")
+fn trim_arp_token(token: &str) -> &str {
+    token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ',' | ';' | ':'))
 }
 
 fn parse_arp_command_output_mac(output: &str, target_ip: Ipv4Addr) -> Option<String> {
     parse_arp_entries(output)
         .find(|entry| entry.ip == target_ip)
-        .map(|entry| format_mac(entry.mac))
+        .map(|entry| entry.mac.to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -196,6 +195,6 @@ mod tests {
         let entries = parse_arp_entries(output).collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].ip, "192.168.1.10".parse::<Ipv4Addr>().unwrap());
-        assert_eq!(format_mac(entries[0].mac), "aa:bb:cc:dd:ee:ff");
+        assert_eq!(entries[0].mac.to_string(), "aa:bb:cc:dd:ee:ff");
     }
 }
