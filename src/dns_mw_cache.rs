@@ -454,7 +454,7 @@ impl DnsCache {
             entry.set_valid_until(valid_until);
             entry.stats.hit();
         } else {
-            cache.put(query, DnsCacheEntry::new(lookup.clone(), valid_until));
+            cache.put(query.clone(), DnsCacheEntry::new(lookup.clone(), valid_until));
         }
         drop(cache);
 
