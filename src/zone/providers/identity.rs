@@ -31,7 +31,7 @@ impl ZoneProvider for IdentityZoneProvider {
             return Ok(None);
         }
 
-        if !matches!(query.query_class(), DNSClass::CH | DNSClass::IN) {
+        if query.query_class() != DNSClass::CH {
             return Ok(None);
         }
 
@@ -189,28 +189,27 @@ fn build_info_json_text(
     client_ip: &IpAddr,
     client_mac: &str,
 ) -> String {
-    let server_name = json_escape(server_name);
-    let version = json_escape(version);
-    let client_ip = json_escape(&client_ip.to_string());
-    let client_mac = json_escape(client_mac);
-    format!(
-        r#"{{"server_name":"{server_name}","server_version":"{version}","client_ip":"{client_ip}","client_mac":"{client_mac}"}}"#
-    )
+    serde_json::json!({
+        "server_name": server_name,
+        "server_version": version,
+        "client_ip": client_ip.to_string(),
+        "client_mac": client_mac,
+    })
+    .to_string()
 }
 
 fn build_server_json_text(server_name: &str, version: &str) -> String {
-    let server_name = json_escape(server_name);
-    let version = json_escape(version);
-    format!(r#"{{"server_name":"{server_name}","server_version":"{version}"}}"#)
-}
-
-fn json_escape(value: &str) -> String {
-    value.chars().flat_map(|c| c.escape_default()).collect()
+    serde_json::json!({
+        "server_name": server_name,
+        "server_version": version,
+    })
+    .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     #[test]
     fn test_translate_query_name_aliases() {
@@ -250,5 +249,22 @@ mod tests {
         assert_eq!(translate_query_name("whoami.mac.bind."), None);
         assert_eq!(translate_query_name("whoami-mac.smartdns."), None);
         assert_eq!(translate_query_name("unknown."), None);
+    }
+
+    #[test]
+    fn test_json_output_is_valid() {
+        let client_ip: IpAddr = "192.168.1.10".parse().unwrap();
+        let info_json =
+            build_info_json_text("smartdns '测试'", "v1.0", &client_ip, "aa:bb:cc:dd:ee:ff");
+        let info: Value = serde_json::from_str(&info_json).unwrap();
+        assert_eq!(info["server_name"], "smartdns '测试'");
+        assert_eq!(info["server_version"], "v1.0");
+        assert_eq!(info["client_ip"], "192.168.1.10");
+        assert_eq!(info["client_mac"], "aa:bb:cc:dd:ee:ff");
+
+        let server_json = build_server_json_text("smartdns '测试'", "v1.0");
+        let server: Value = serde_json::from_str(&server_json).unwrap();
+        assert_eq!(server["server_name"], "smartdns '测试'");
+        assert_eq!(server["server_version"], "v1.0");
     }
 }

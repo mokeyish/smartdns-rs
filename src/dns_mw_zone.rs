@@ -429,4 +429,19 @@ mod tests {
             assert!(matches!(res, Err(ref err) if err.is_soa()));
         }
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_identity_txt_in_class_is_not_intercepted() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let mut query = Query::query("version".parse().unwrap(), RecordType::TXT);
+        query.set_query_class(DNSClass::IN);
+        let mut message = op::Message::query();
+        message.add_query(query);
+        let req = DnsRequest::new(message, "192.168.1.14:5300".parse().unwrap(), Protocol::Udp);
+
+        let res = mock.search(&req, &Default::default()).await;
+        assert!(matches!(res, Err(ref err) if err.is_soa()));
+    }
 }

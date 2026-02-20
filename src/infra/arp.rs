@@ -58,10 +58,17 @@ fn normalize_mac_token(token: &str) -> Option<String> {
 fn parse_arp_command_output_mac(output: &str, target_ip: Ipv4Addr) -> Option<String> {
     let target_ip = target_ip.to_string();
     output.lines().find_map(|line| {
-        if !line.contains(&target_ip) {
+        if !contains_exact_ip_token(line, &target_ip) {
             return None;
         }
         line.split_whitespace().find_map(normalize_mac_token)
+    })
+}
+
+fn contains_exact_ip_token(line: &str, target_ip: &str) -> bool {
+    line.split_whitespace().any(|token| {
+        token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ',' | ';' | ':'))
+            == target_ip
     })
 }
 
@@ -160,6 +167,15 @@ mod tests {
         assert_eq!(
             parse_arp_command_output_mac(output, "192.168.1.10".parse().unwrap()),
             Some("aa:bb:cc:dd:ee:ff".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_arp_command_output_mac_uses_exact_ip_match() {
+        let output = "? (192.168.1.10) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]";
+        assert_eq!(
+            parse_arp_command_output_mac(output, "192.168.1.1".parse().unwrap()),
+            None
         );
     }
 }
