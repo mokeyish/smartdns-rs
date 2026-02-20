@@ -195,7 +195,7 @@ mod tests {
 
         let entries = parse_arp_entries(output).collect::<Vec<_>>();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].ip, "192.168.1.10".parse().unwrap());
+        assert_eq!(entries[0].ip, "192.168.1.10".parse::<Ipv4Addr>().unwrap());
         assert_eq!(format_mac(entries[0].mac), "aa:bb:cc:dd:ee:ff");
     }
 }
