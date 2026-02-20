@@ -3,25 +3,16 @@ use super::*;
 impl NomParser for ClientRule {
     fn parse(input: &str) -> IResult<&str, Self> {
         let (input, client) = NomParser::parse(input)?;
-        let mut group = None;
-
-        let (input, _) = space1(input)?;
+        let mut group = String::new();
 
         let one = alt((map(
             options::parse_value(alt((tag_no_case("group"), tag("g"))), NomParser::parse),
             |v| {
-                group = Some(v);
+                group = v;
             },
         ),));
 
-        let (rest_input, _) = separated_list1(space1, one).parse(input)?;
-
-        let Some(group) = group else {
-            return Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                nom::error::ErrorKind::Tag,
-            )));
-        };
+        let (rest_input, _) = opt(preceded(space1, separated_list1(space1, one))).parse(input)?;
 
         Ok((rest_input, ClientRule { group, client }))
     }
@@ -63,6 +54,17 @@ mod tests {
                 ClientRule {
                     group: "a".to_string(),
                     client: Client::IpAddr("192.168.0.0/16".parse().unwrap())
+                }
+            ))
+        );
+
+        assert_eq!(
+            ClientRule::parse("192.168.100.0/24"),
+            Ok((
+                "",
+                ClientRule {
+                    group: "".to_string(),
+                    client: Client::IpAddr("192.168.100.0/24".parse().unwrap())
                 }
             ))
         );

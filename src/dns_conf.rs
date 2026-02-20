@@ -1064,7 +1064,16 @@ impl RuntimeConfigBuilder {
                         group.merge(rule_group);
                     }
                 }
-                ClientRule(client_rule) => self.client_rules.push(client_rule),
+                ClientRule(mut client_rule) => {
+                    if client_rule.group.is_empty() {
+                        client_rule.group = self
+                            .rule_group_stack
+                            .last()
+                            .map(|(name, _)| name.clone())
+                            .unwrap_or_else(|| DEFAULT_GROUP.to_string());
+                    }
+                    self.client_rules.push(client_rule)
+                }
             },
             Ok((_, None)) => (),
             Err(err) => {
@@ -1953,5 +1962,37 @@ mod tests {
                 v6: None
             }
         );
+    }
+
+    #[test]
+    fn test_client_rule_without_group_uses_current_rule_group() {
+        let cfg = RuntimeConfig::builder()
+            .with("client-rules 192.168.1.0/24")
+            .with("group-begin group-a")
+            .with("client-rules 192.168.100.0/24")
+            .with("group-end")
+            .build()
+            .unwrap();
+
+        assert_eq!(cfg.client_rules().len(), 2);
+        assert_eq!(cfg.client_rules()[0].group, DEFAULT_GROUP);
+        assert_eq!(cfg.client_rules()[1].group, "group-a");
+        assert_eq!(
+            cfg.client_rules()[1].client,
+            Client::IpAddr("192.168.100.0/24".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_client_rule_explicit_group_overrides_current_rule_group() {
+        let cfg = RuntimeConfig::builder()
+            .with("group-begin group-a")
+            .with("client-rules 192.168.100.0/24 -group office")
+            .with("group-end")
+            .build()
+            .unwrap();
+
+        assert_eq!(cfg.client_rules().len(), 1);
+        assert_eq!(cfg.client_rules()[0].group, "office");
     }
 }
