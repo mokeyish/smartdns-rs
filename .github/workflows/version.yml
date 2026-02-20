@@ -24,7 +24,7 @@ jobs:
         fetch-depth: 0 # otherwise, there would be errors pushing refs to the destination repository.
 
     - name: Setup
-      uses: ./.github/actions/setup.yml
+      uses: ./.github/actions/setup
 
     - name: Bump version ${{ github.event.inputs.bump }}
       run: |
@@ -62,7 +62,7 @@ jobs:
           ref: ${{ needs.bump.outputs.version }}
 
       - name: Setup
-        uses: ./.github/actions/setup.yml
+        uses: ./.github/actions/setup
 
       - name: Publish to crates.io
         continue-on-error: true

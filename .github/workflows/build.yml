@@ -102,7 +102,7 @@ jobs:
           ref: ${{ inputs.version }}
 
       - name: Setup
-        uses: ./.github/actions/setup.yml
+        uses: ./.github/actions/setup
         with:
           rust_target: ${{ matrix.target }}
 

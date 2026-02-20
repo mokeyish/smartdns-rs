@@ -1,35 +1,98 @@
-name: 'Setup'
-description: 'Install Rust Toolchain Components, just, and cross for building on multiple targets.'
+name: "Setup"
+description: "Install Rust toolchain and optional CI tools."
+
+inputs:
+  install_rust:
+    description: "Install Rust toolchain."
+    required: false
+    default: "true"
+  rust_toolchain:
+    description: "Rust toolchain channel/version."
+    required: false
+    default: "stable"
+  rust_target:
+    description: "Rust target triple to install."
+    required: false
+    default: ""
+  rust_components:
+    description: "Comma-separated rust components, e.g. rustfmt,clippy."
+    required: false
+    default: ""
+  install_just:
+    description: "Install just command runner."
+    required: false
+    default: "true"
+  install_cross:
+    description: "Install cross on Linux runners."
+    required: false
+    default: "true"
+  install_wix:
+    description: "Install Wix toolset on Windows runners."
+    required: false
+    default: "true"
+  install_cargo_edit:
+    description: "Install cargo-edit."
+    required: false
+    default: "true"
+  install_patch_crate:
+    description: "Install patch-crate."
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
   steps:
-    - name: Install Rust Toolchain Components
+    - name: Install Rust Toolchain (target + components)
+      if: ${{ inputs.install_rust == 'true' && inputs.rust_target != '' && inputs.rust_components != '' }}
       uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
-        target: ${{ matrix.target }}
+        toolchain: ${{ inputs.rust_toolchain }}
+        target: ${{ inputs.rust_target }}
+        components: ${{ inputs.rust_components }}
+
+    - name: Install Rust Toolchain (target only)
+      if: ${{ inputs.install_rust == 'true' && inputs.rust_target != '' && inputs.rust_components == '' }}
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.rust_toolchain }}
+        target: ${{ inputs.rust_target }}
+
+    - name: Install Rust Toolchain (components only)
+      if: ${{ inputs.install_rust == 'true' && inputs.rust_target == '' && inputs.rust_components != '' }}
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.rust_toolchain }}
+        components: ${{ inputs.rust_components }}
+
+    - name: Install Rust Toolchain (default)
+      if: ${{ inputs.install_rust == 'true' && inputs.rust_target == '' && inputs.rust_components == '' }}
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.rust_toolchain }}
 
     - name: Install just
+      if: ${{ inputs.install_just == 'true' }}
       uses: extractions/setup-just@v3
 
     - name: Install cross
+      if: ${{ inputs.install_cross == 'true' && runner.os == 'Linux' }}
       uses: taiki-e/install-action@v2
-      if: ${{ startsWith(matrix.os, 'ubuntu') }}
       with:
         tool: cross
 
-    - name: Install Wix Toolset 🛠
-      if: ${{ startsWith(matrix.os, 'windows') }}
+    - name: Install Wix Toolset
+      if: ${{ inputs.install_wix == 'true' && runner.os == 'Windows' }}
       shell: pwsh
       run: dotnet tool install --global wix
 
     - name: Install cargo-edit
+      if: ${{ inputs.install_cargo_edit == 'true' }}
       uses: baptiste0928/cargo-install@v3
       with:
         crate: cargo-edit
 
     - name: Install patch-crate
+      if: ${{ inputs.install_patch_crate == 'true' }}
       uses: baptiste0928/cargo-install@v3
       with:
         crate: patch-crate
