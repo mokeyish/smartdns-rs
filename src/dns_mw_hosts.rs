@@ -1,5 +1,8 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime},
+};
 
 use crate::libdns::proto::op::Query;
 use tokio::sync::RwLock;
@@ -8,15 +11,74 @@ use crate::libdns::resolver::Hosts;
 use crate::middleware::*;
 use crate::{dns::*, log};
 
-pub struct DnsHostsMiddleware(RwLock<Option<(Instant, Arc<Hosts>)>>);
+pub struct DnsHostsMiddleware(RwLock<Option<HostsCache>>);
+
+struct HostsCache {
+    hosts: Arc<Hosts>,
+    signature: HostsFileSignature,
+    checked_at: Instant,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostsFileSignature {
+    files: Vec<HostsFileMeta>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostsFileMeta {
+    path: PathBuf,
+    modified_at: Option<SystemTime>,
+}
 
 impl DnsHostsMiddleware {
     pub fn new() -> Self {
         Self(Default::default())
     }
+
+    async fn cached_hosts(&self, hosts_file_pattern: Option<&glob::Pattern>) -> Arc<Hosts> {
+        let now = Instant::now();
+
+        {
+            let cache = self.0.read().await;
+            if let Some(cache) = cache.as_ref()
+                && now.duration_since(cache.checked_at) < HOSTS_FILE_STAT_INTERVAL
+            {
+                return cache.hosts.clone();
+            }
+        }
+
+        let signature = collect_hosts_signature(hosts_file_pattern);
+
+        {
+            let mut cache = self.0.write().await;
+            if let Some(cache) = cache.as_mut() {
+                if now.duration_since(cache.checked_at) < HOSTS_FILE_STAT_INTERVAL {
+                    return cache.hosts.clone();
+                }
+
+                if cache.signature == signature {
+                    cache.checked_at = now;
+                    return cache.hosts.clone();
+                }
+            }
+        }
+
+        let refreshed_hosts = Arc::new(match hosts_file_pattern {
+            Some(pattern) => read_hosts(pattern.as_str()),
+            None => Hosts::default(),
+        });
+
+        let mut cache = self.0.write().await;
+        *cache = Some(HostsCache {
+            hosts: refreshed_hosts.clone(),
+            signature,
+            checked_at: now,
+        });
+        refreshed_hosts
+    }
 }
 
-const EXPIRES: Duration = Duration::from_secs(5);
+const HOSTS_FILE_STAT_INTERVAL: Duration = Duration::from_secs(2);
 
 #[async_trait::async_trait]
 impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddleware {
@@ -29,26 +91,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
         let query = req.query().original();
         let is_ptr = query.query_type() == RecordType::PTR && ctx.cfg().expand_ptr_from_address();
         if query.query_type().is_ip_addr() || is_ptr {
-            let hosts = self.0.read().await.as_ref().and_then(|(read_time, hosts)| {
-                if Instant::now() - *read_time < EXPIRES {
-                    Some(hosts.clone())
-                } else {
-                    None
-                }
-            });
-
-            let hosts = match hosts {
-                Some(v) => v,
-                None => {
-                    let hosts = match ctx.cfg().hosts_file() {
-                        Some(pattern) => read_hosts(pattern.as_str()),
-                        None => Hosts::default(), // read from system hosts file
-                    };
-                    let hosts = Arc::new(hosts);
-                    *self.0.write().await = Some((Instant::now(), hosts.clone()));
-                    hosts
-                }
-            };
+            let hosts = self.cached_hosts(ctx.cfg().hosts_file()).await;
 
             if let Some(lookup) = hosts.lookup_static_host(query).or_else(|| {
                 let mut name = query.name().clone();
@@ -65,6 +108,68 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
 
         next.run(ctx, req).await
     }
+}
+
+fn collect_hosts_signature(hosts_file_pattern: Option<&glob::Pattern>) -> HostsFileSignature {
+    let mut files = Vec::new();
+
+    if let Some(pattern) = hosts_file_pattern {
+        match glob::glob(pattern.as_str()) {
+            Ok(paths) => {
+                for entry in paths {
+                    match entry {
+                        Ok(path) => {
+                            append_hosts_file_meta(path.as_path(), &mut files);
+                        }
+                        Err(err) => {
+                            log::error!("{}", err);
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                log::error!("{}", err);
+            }
+        }
+    }
+
+    for path in system_hosts_paths() {
+        append_hosts_file_meta(Path::new(path), &mut files);
+    }
+
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    files.dedup_by(|a, b| a.path == b.path);
+    HostsFileSignature { files }
+}
+
+fn append_hosts_file_meta(path: &Path, files: &mut Vec<HostsFileMeta>) {
+    if !path.is_file() {
+        return;
+    }
+
+    let modified_at = std::fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok());
+
+    files.push(HostsFileMeta {
+        path: path.to_path_buf(),
+        modified_at,
+    });
+}
+
+#[cfg(unix)]
+fn system_hosts_paths() -> &'static [&'static str] {
+    &["/etc/hosts"]
+}
+
+#[cfg(windows)]
+fn system_hosts_paths() -> &'static [&'static str] {
+    &["C:\\Windows\\System32\\drivers\\etc\\hosts"]
+}
+
+#[cfg(not(any(unix, windows)))]
+fn system_hosts_paths() -> &'static [&'static str] {
+    &[]
 }
 
 fn read_hosts(pattern: &str) -> Hosts {
@@ -107,7 +212,7 @@ fn read_hosts(pattern: &str) -> Hosts {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, str::FromStr};
+    use std::{net::IpAddr, str::FromStr, time::Duration};
 
     use crate::libdns::proto::rr::rdata::PTR;
 
@@ -172,6 +277,42 @@ mod tests {
             .flat_map(|r| r.data().as_ptr())
             .collect::<Vec<_>>();
         assert_eq!(hostnames, vec![&PTR("hi.a2.".parse().unwrap())]);
+
+        Ok(())
+    }
+
+    #[tokio::test()]
+    async fn test_hosts_cache_refresh_on_file_change() -> anyhow::Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let hosts_file = temp_dir.path().join("smartdns-hosts-refresh-test");
+        std::fs::write(&hosts_file, "1.1.1.1 host-refresh\n")?;
+
+        let cfg = RuntimeConfig::builder()
+            .with(format!("hosts-file {}", hosts_file.display()))
+            .build()
+            .unwrap();
+
+        let mock = DnsMockMiddleware::mock(DnsHostsMiddleware::new()).build(cfg);
+
+        let lookup = mock.lookup("host-refresh", RecordType::A).await?;
+        let ip_addrs = lookup
+            .records()
+            .iter()
+            .flat_map(|r| r.data().ip_addr())
+            .collect::<Vec<_>>();
+        assert_eq!(ip_addrs, vec![IpAddr::from_str("1.1.1.1").unwrap()]);
+
+        tokio::time::sleep(HOSTS_FILE_STAT_INTERVAL + Duration::from_secs(1)).await;
+        std::fs::write(&hosts_file, "2.2.2.2 host-refresh\n")?;
+        tokio::time::sleep(HOSTS_FILE_STAT_INTERVAL + Duration::from_secs(1)).await;
+
+        let lookup = mock.lookup("host-refresh", RecordType::A).await?;
+        let ip_addrs = lookup
+            .records()
+            .iter()
+            .flat_map(|r| r.data().ip_addr())
+            .collect::<Vec<_>>();
+        assert_eq!(ip_addrs, vec![IpAddr::from_str("2.2.2.2").unwrap()]);
 
         Ok(())
     }
