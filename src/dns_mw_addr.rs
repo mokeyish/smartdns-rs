@@ -207,6 +207,7 @@ mod tests {
     use crate::{
         dns_conf::{AddressRuleValue, RuntimeConfig},
         dns_mw::*,
+        libdns::proto::op::{self, Query},
         libdns::proto::rr::rdata,
     };
 
@@ -281,6 +282,51 @@ mod tests {
                 .await
                 .unwrap()[0],
             RData::AAAA("::ffff:1.2.3.4".parse().unwrap())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_client_rule_without_explicit_group_returns_group_address() {
+        let cfg = RuntimeConfig::builder()
+            .with("address /wiki.lan/10.10.10.5")
+            .with("group-begin zerotier")
+            .with("client-rules 10.10.1.0/24")
+            .with("address /wiki.lan/10.10.1.5")
+            .with("group-end")
+            .build()
+            .unwrap();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware).build(cfg);
+
+        let mut query = Query::query("wiki.lan".parse().unwrap(), RecordType::A);
+        query.set_query_class(crate::libdns::proto::rr::DNSClass::IN);
+
+        let mut message = op::Message::query();
+        message.add_query(query.clone());
+        let req_zerotier = DnsRequest::new(
+            message,
+            "10.10.1.23:5300".parse().unwrap(),
+            crate::libdns::Protocol::Udp,
+        );
+
+        let mut message = op::Message::query();
+        message.add_query(query);
+        let req_lan = DnsRequest::new(
+            message,
+            "10.10.10.23:5300".parse().unwrap(),
+            crate::libdns::Protocol::Udp,
+        );
+
+        let res_zerotier = mock.search(&req_zerotier, &Default::default()).await.unwrap();
+        let res_lan = mock.search(&req_lan, &Default::default()).await.unwrap();
+
+        assert_eq!(
+            res_zerotier.records().first().unwrap().data(),
+            &RData::A("10.10.1.5".parse().unwrap())
+        );
+        assert_eq!(
+            res_lan.records().first().unwrap().data(),
+            &RData::A("10.10.10.5".parse().unwrap())
         );
     }
 
