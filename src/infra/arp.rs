@@ -1,5 +1,13 @@
 use std::net::{IpAddr, Ipv4Addr};
 
+use netdev::MacAddr;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParsedArpEntry {
+    ip: Ipv4Addr,
+    mac: MacAddr,
+}
+
 pub fn lookup_client_mac_from_arp(client_ip: IpAddr) -> Option<String> {
     client_ipv4_for_arp(client_ip).and_then(lookup_client_mac_from_arp_v4)
 }
@@ -12,64 +20,63 @@ fn client_ipv4_for_arp(client_ip: IpAddr) -> Option<Ipv4Addr> {
 }
 
 fn parse_arp_table_mac(table: &str, target_ip: Ipv4Addr) -> Option<String> {
-    let target_ip = target_ip.to_string();
-    table.lines().skip(1).find_map(|line| {
-        let mut fields = line.split_whitespace();
-        let ip = fields.next()?;
-        let _hardware_type = fields.next()?;
-        let _flags = fields.next()?;
-        let mac = fields.next()?;
-
-        if ip != target_ip {
-            return None;
-        }
-
-        if mac == "00:00:00:00:00:00" {
-            return None;
-        }
-
-        Some(mac.to_ascii_lowercase())
-    })
+    parse_arp_entries(table)
+        .find(|entry| entry.ip == target_ip)
+        .map(|entry| format_mac(entry.mac))
 }
 
-fn normalize_mac_token(token: &str) -> Option<String> {
+fn normalize_mac_token(token: &str) -> Option<MacAddr> {
     let token = token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ','));
     let normalized = token.replace('-', ":").to_ascii_lowercase();
-
-    if normalized == "00:00:00:00:00:00" {
+    let mac: MacAddr = normalized.parse().ok()?;
+    if mac.octets() == [0; 6] {
         return None;
     }
+    Some(mac)
+}
 
-    let parts = normalized.split(':').collect::<Vec<_>>();
-    if parts.len() != 6 {
-        return None;
+fn normalize_ip_token(token: &str) -> Option<Ipv4Addr> {
+    let normalized =
+        token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ',' | ';' | ':'));
+    normalized.parse().ok()
+}
+
+fn parse_arp_line_entry(line: &str) -> Option<ParsedArpEntry> {
+    let mut ip = None;
+    let mut mac = None;
+
+    for token in line.split_whitespace() {
+        if ip.is_none() {
+            ip = normalize_ip_token(token);
+        }
+        if mac.is_none() {
+            mac = normalize_mac_token(token);
+        }
+        if ip.is_some() && mac.is_some() {
+            break;
+        }
     }
 
-    if !parts
-        .iter()
-        .all(|part| part.len() == 2 && part.chars().all(|c| c.is_ascii_hexdigit()))
-    {
-        return None;
-    }
+    Some(ParsedArpEntry { ip: ip?, mac: mac? })
+}
 
-    Some(normalized)
+/// Lazily parses ARP-like text output line by line.
+///
+/// Today we extract only `(IPv4, MAC)`, which is enough for client MAC lookup.
+/// This can be extended to capture interface name, flags, and entry type if needed.
+fn parse_arp_entries(output: &str) -> impl Iterator<Item = ParsedArpEntry> + '_ {
+    output.lines().filter_map(parse_arp_line_entry)
+}
+
+fn format_mac(mac: MacAddr) -> String {
+    let [a, b, c, d, e, f] = mac.octets();
+    format!("{a:02x}:{b:02x}:{c:02x}:{d:02x}:{e:02x}:{f:02x}")
 }
 
 fn parse_arp_command_output_mac(output: &str, target_ip: Ipv4Addr) -> Option<String> {
-    let target_ip = target_ip.to_string();
-    output.lines().find_map(|line| {
-        if !contains_exact_ip_token(line, &target_ip) {
-            return None;
-        }
-        line.split_whitespace().find_map(normalize_mac_token)
-    })
-}
-
-fn contains_exact_ip_token(line: &str, target_ip: &str) -> bool {
-    line.split_whitespace().any(|token| {
-        token.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | ',' | ';' | ':'))
-            == target_ip
-    })
+    parse_arp_entries(output)
+        .find(|entry| entry.ip == target_ip)
+        .map(|entry| format_mac(entry.mac))
 }
 
 #[cfg(target_os = "linux")]
@@ -177,5 +184,18 @@ mod tests {
             parse_arp_command_output_mac(output, "192.168.1.1".parse().unwrap()),
             None
         );
+    }
+
+    #[test]
+    fn test_parse_arp_entries_lazily() {
+        let output = "Interface: 192.168.1.1 --- 0x7\n\
+                     Internet Address      Physical Address      Type\n\
+                     192.168.1.10          aa-bb-cc-dd-ee-ff     dynamic\n\
+                     192.168.1.11          00-00-00-00-00-00     invalid";
+
+        let entries = parse_arp_entries(output).collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].ip, "192.168.1.10".parse().unwrap());
+        assert_eq!(format_mac(entries[0].mac), "aa:bb:cc:dd:ee:ff");
     }
 }
