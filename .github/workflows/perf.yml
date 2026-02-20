@@ -1,0 +1,62 @@
+name: Performance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - release/**
+    paths:
+      - "Cargo.toml"
+      - "src/**"
+      - "contrib/perf/**"
+      - ".github/workflows/perf.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "Cargo.toml"
+      - "src/**"
+      - "contrib/perf/**"
+      - ".github/workflows/perf.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    name: perf (ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Build smartdns release binary
+        run: cargo build --release --no-default-features --features disable_icmp_ping
+
+      - name: Run performance suite
+        run: |
+          python3 contrib/perf/run_perf_suite.py \
+            --binary target/release/smartdns \
+            --duration-sec 8 \
+            --concurrency 64 \
+            --timeout-ms 500 \
+            --prefill-domains 3000 \
+            --output-json artifacts/perf/results.json \
+            --output-md artifacts/perf/summary.md
+
+      - name: Publish summary
+        run: cat artifacts/perf/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload perf artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: artifacts/perf/
+          if-no-files-found: error
