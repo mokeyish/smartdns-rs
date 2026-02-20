@@ -48,6 +48,7 @@ mod service;
 mod third_ext;
 #[cfg(feature = "self-update")]
 mod updater;
+mod zone;
 
 use error::Error;
 use infra::middleware;

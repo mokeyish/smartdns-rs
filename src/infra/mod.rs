@@ -1,3 +1,4 @@
+pub mod arp;
 pub mod dhcp;
 pub mod file_mode;
 pub mod http_client;

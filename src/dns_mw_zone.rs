@@ -1,38 +1,19 @@
-use std::borrow::Borrow;
-use std::collections::BTreeSet;
-use std::net::IpAddr;
-use std::str::FromStr;
-
-use crate::libdns::proto::rr::rdata::PTR;
-
-use crate::config::HttpsRecordRule;
 use crate::dns::*;
-use crate::infra::ipset::IpSet;
 use crate::middleware::*;
+use crate::zone::{IdentityZoneProvider, LocalPtrZoneProvider, RuleZoneProvider, ZoneManager};
 
 pub struct DnsZoneMiddleware {
-    server_net: IpSet,
-    server_names: BTreeSet<Name>,
+    manager: ZoneManager,
+    rule_provider: RuleZoneProvider,
 }
 
 impl DnsZoneMiddleware {
     pub fn new() -> Self {
-        let server_net = {
-            use local_ip_address::list_afinet_netifas;
-            let ips = list_afinet_netifas().unwrap_or_default();
-            IpSet::new(ips.into_iter().map(|(_, ip)| ip.into()))
-        };
-
-        let server_names = {
-            let mut set = BTreeSet::new();
-            set.insert(Name::from_str("smartdns.").unwrap());
-            set.insert(Name::from_str("whoami.").unwrap());
-            set
-        };
-
         Self {
-            server_net,
-            server_names,
+            manager: ZoneManager::new()
+                .with_provider(LocalPtrZoneProvider::new())
+                .with_provider(IdentityZoneProvider::new()),
+            rule_provider: RuleZoneProvider::new(),
         }
     }
 }
@@ -45,108 +26,12 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddle
         req: &DnsRequest,
         next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
     ) -> Result<DnsResponse, DnsError> {
-        let query = req.query();
-        let name = query.name();
-        let query_type = query.query_type();
+        if let Some(response) = self.manager.lookup(ctx, req).await? {
+            return Ok(response);
+        }
 
-        match query_type {
-            RecordType::PTR => {
-                let mut is_current_server = false;
-                let name: &Name = name.borrow();
-
-                if self.server_names.contains(name) {
-                    is_current_server = true;
-                } else if let Ok(net) = name.parse_arpa_name() {
-                    is_current_server = self.server_net.overlap(&net);
-
-                    if !is_current_server {
-                        let is_private_ip = match net.addr() {
-                            IpAddr::V4(ip) => ip.is_private(),
-                            IpAddr::V6(ip) => {
-                                const fn is_unique_local(ip: std::net::Ipv6Addr) -> bool {
-                                    (ip.segments()[0] & 0xfe00) == 0xfc00
-                                }
-                                is_unique_local(ip)
-                            }
-                        };
-
-                        if is_private_ip {
-                            let mut res = DnsResponse::empty();
-                            res.add_query(query.original().to_owned());
-                            return Ok(res);
-                        }
-                    }
-                }
-
-                if is_current_server {
-                    return Ok(DnsResponse::from_rdata(
-                        req.query().original().to_owned(),
-                        RData::PTR(PTR(ctx.cfg().server_name())),
-                    ));
-                }
-            }
-            RecordType::SRV => {
-                if let Some(srv) = ctx.domain_rule.get_ref(|r| r.srv.as_ref()) {
-                    return Ok(DnsResponse::from_rdata(
-                        req.query().original().to_owned(),
-                        RData::SRV(srv.clone()),
-                    ));
-                }
-            }
-            RecordType::HTTPS => {
-                if let Some(https_rule) = ctx.domain_rule.get_ref(|r| r.https.as_ref()) {
-                    match https_rule {
-                        HttpsRecordRule::Ignore => (),
-                        HttpsRecordRule::SOA => {
-                            return Ok(DnsResponse::from_rdata(
-                                req.query().original().to_owned(),
-                                RData::default_soa(),
-                            ));
-                        }
-                        HttpsRecordRule::Filter {
-                            no_ipv4_hint,
-                            no_ipv6_hint,
-                        } => {
-                            use crate::libdns::proto::rr::rdata::{SVCB, svcb::SvcParamKey};
-                            let no_ipv4_hint = *no_ipv4_hint;
-                            let no_ipv6_hint = *no_ipv6_hint;
-                            return match next.run(ctx, req).await {
-                                Ok(mut lookup) => {
-                                    for record in lookup.answers_mut() {
-                                        if let Some(https) = record.data_mut().as_https_mut() {
-                                            let svc_params = https
-                                                .svc_params()
-                                                .iter()
-                                                .filter(|(k, _)| match k {
-                                                    SvcParamKey::Ipv4Hint => !no_ipv4_hint,
-                                                    SvcParamKey::Ipv6Hint => !no_ipv6_hint,
-                                                    _ => true,
-                                                })
-                                                .cloned()
-                                                .collect();
-
-                                            https.0 = SVCB::new(
-                                                https.svc_priority(),
-                                                https.target_name().clone(),
-                                                svc_params,
-                                            );
-                                        }
-                                    }
-                                    Ok(lookup)
-                                }
-                                Err(err) => Err(err),
-                            };
-                        }
-                        HttpsRecordRule::RecordData(https) => {
-                            return Ok(DnsResponse::from_rdata(
-                                req.query().original().to_owned(),
-                                RData::HTTPS(https.clone()),
-                            ));
-                        }
-                    }
-                }
-            }
-            _ => (),
+        if let Some(response) = self.rule_provider.lookup(ctx, req, next.clone()).await? {
+            return Ok(response);
         }
 
         next.run(ctx, req).await
@@ -158,7 +43,25 @@ mod tests {
 
     use super::*;
     use crate::infra::ipset::IpSet;
+    use crate::libdns::proto::op::Query;
+    use crate::libdns::proto::rr::DNSClass;
     use crate::{dns_conf::RuntimeConfig, dns_mw::*};
+    use std::net::SocketAddr;
+
+    async fn search_with_query(
+        mw: &DnsMiddlewareHandler,
+        name: &str,
+        query_type: RecordType,
+        query_class: DNSClass,
+        src: SocketAddr,
+    ) -> DnsResponse {
+        let mut query = Query::query(name.parse().unwrap(), query_type);
+        query.set_query_class(query_class);
+        let mut message = op::Message::query();
+        message.add_query(query);
+        let req = DnsRequest::new(message, src, Protocol::Udp);
+        mw.search(&req, &Default::default()).await.unwrap()
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_srv_record() {
@@ -204,5 +107,341 @@ mod tests {
         let net2 = name2.parse_arpa_name().unwrap();
 
         assert!(local_net.overlap(&net2));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_server_hostname() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+        let response = search_with_query(
+            &mock,
+            "hostname.bind",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.8:5300".parse().unwrap(),
+        )
+        .await;
+        let answer = response.answers().first().unwrap();
+        assert_eq!(answer.record_type(), RecordType::TXT);
+        assert_eq!(answer.dns_class(), DNSClass::CH);
+        assert!(answer.data().to_string().contains("smartdns-rs-test"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_server_name_alias() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+        let response = search_with_query(
+            &mock,
+            "server-name",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.8:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert!(
+            response.answers()[0]
+                .data()
+                .to_string()
+                .contains("smartdns-rs-test")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_version_and_client_ip() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let version_response = search_with_query(
+            &mock,
+            "version.bind",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.9:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(
+            version_response.answers()[0]
+                .data()
+                .to_string()
+                .contains(crate::BUILD_VERSION)
+        );
+
+        let ip_response = search_with_query(
+            &mock,
+            "client_ip",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.9:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(
+            ip_response.answers()[0]
+                .data()
+                .to_string()
+                .contains("192.168.1.9")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_client_mac_for_loopback() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+        let response = search_with_query(
+            &mock,
+            "client_mac",
+            RecordType::TXT,
+            DNSClass::CH,
+            "127.0.0.1:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(response.answers()[0].data().to_string().contains("N/A"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_json_query() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let response = search_with_query(
+            &mock,
+            "whoami.json",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.10:5300".parse().unwrap(),
+        )
+        .await;
+
+        let out = response.answers()[0].data().to_string();
+        assert!(out.contains("\"server_name\""));
+        assert!(out.contains("\"server_version\""));
+        assert!(out.contains("\"client_ip\""));
+        assert!(out.contains("192.168.1.10"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_multi_records_query() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let response = search_with_query(
+            &mock,
+            "smartdns",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.11:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.answers().len(), 2);
+        let txts = response
+            .answers()
+            .iter()
+            .map(|record| record.data().to_string())
+            .collect::<Vec<_>>();
+        assert!(txts.iter().any(|txt| txt.contains("server_name=")));
+        assert!(txts.iter().any(|txt| txt.contains("server_version=")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_whoami_multi_records_query() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let response = search_with_query(
+            &mock,
+            "whoami",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.13:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.answers().len(), 4);
+        let txts = response
+            .answers()
+            .iter()
+            .map(|record| record.data().to_string())
+            .collect::<Vec<_>>();
+        assert!(txts.iter().any(|txt| txt.contains("server_name=")));
+        assert!(txts.iter().any(|txt| txt.contains("server_version=")));
+        assert!(txts.iter().any(|txt| txt.contains("client_ip=")));
+        assert!(txts.iter().any(|txt| txt.contains("client_mac=")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_client_fields_query() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let ip_response = search_with_query(
+            &mock,
+            "client_ip",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.13:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(
+            ip_response.answers()[0]
+                .data()
+                .to_string()
+                .contains("192.168.1.13")
+        );
+
+        let mac_response = search_with_query(
+            &mock,
+            "client_mac",
+            RecordType::TXT,
+            DNSClass::CH,
+            "127.0.0.1:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(mac_response.answers()[0].data().to_string().contains("N/A"));
+
+        let ip_response2 = search_with_query(
+            &mock,
+            "client-ip",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.13:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(
+            ip_response2.answers()[0]
+                .data()
+                .to_string()
+                .contains("192.168.1.13")
+        );
+
+        let mac_response2 = search_with_query(
+            &mock,
+            "client-mac",
+            RecordType::TXT,
+            DNSClass::CH,
+            "127.0.0.1:5300".parse().unwrap(),
+        )
+        .await;
+        assert!(
+            mac_response2.answers()[0]
+                .data()
+                .to_string()
+                .contains("N/A")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_id_server_query() {
+        let cfg = RuntimeConfig::builder()
+            .with("server-name smartdns-rs-test")
+            .build()
+            .unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let response = search_with_query(
+            &mock,
+            "id.server",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.15:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.answers().len(), 2);
+        let txts = response
+            .answers()
+            .iter()
+            .map(|record| record.data().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            txts.iter()
+                .any(|txt| txt.contains("server_name=smartdns-rs-test"))
+        );
+        assert!(txts.iter().any(|txt| txt.contains("server_version=")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_builtin_txt_short_name_version_alias() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let response = search_with_query(
+            &mock,
+            "version",
+            RecordType::TXT,
+            DNSClass::CH,
+            "192.168.1.12:5300".parse().unwrap(),
+        )
+        .await;
+
+        assert!(
+            response.answers()[0]
+                .data()
+                .to_string()
+                .contains(crate::BUILD_VERSION)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_removed_hostname_alias_is_not_supported() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let mut query = Query::query("hostname".parse().unwrap(), RecordType::TXT);
+        query.set_query_class(DNSClass::CH);
+        let mut message = op::Message::query();
+        message.add_query(query);
+        let req = DnsRequest::new(message, "192.168.1.14:5300".parse().unwrap(), Protocol::Udp);
+
+        let res = mock.search(&req, &Default::default()).await;
+        assert!(matches!(res, Err(ref err) if err.is_soa()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_removed_whoami_bind_aliases_are_not_supported() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        for name in ["whoami.bind", "whoami.mac.bind"] {
+            let mut query = Query::query(name.parse().unwrap(), RecordType::TXT);
+            query.set_query_class(DNSClass::CH);
+            let mut message = op::Message::query();
+            message.add_query(query);
+            let req = DnsRequest::new(message, "192.168.1.14:5300".parse().unwrap(), Protocol::Udp);
+
+            let res = mock.search(&req, &Default::default()).await;
+            assert!(matches!(res, Err(ref err) if err.is_soa()));
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_identity_txt_in_class_is_not_intercepted() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
+
+        let mut query = Query::query("version".parse().unwrap(), RecordType::TXT);
+        query.set_query_class(DNSClass::IN);
+        let mut message = op::Message::query();
+        message.add_query(query);
+        let req = DnsRequest::new(message, "192.168.1.14:5300".parse().unwrap(), Protocol::Udp);
+
+        let res = mock.search(&req, &Default::default()).await;
+        assert!(matches!(res, Err(ref err) if err.is_soa()));
     }
 }

@@ -1,0 +1,270 @@
+use std::net::IpAddr;
+
+use crate::dns::{DnsContext, DnsError, DnsRequest, DnsResponse, RData, Record};
+use crate::infra::arp::lookup_client_mac_from_arp;
+use crate::libdns::proto::op::Query;
+use crate::libdns::proto::rr::rdata::TXT;
+use crate::libdns::proto::rr::{DNSClass, Name, RecordType};
+
+use crate::zone::ZoneProvider;
+
+const UNKNOWN_CLIENT_MAC: &str = "N/A";
+
+pub struct IdentityZoneProvider;
+
+impl IdentityZoneProvider {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait::async_trait]
+impl ZoneProvider for IdentityZoneProvider {
+    async fn lookup(
+        &self,
+        ctx: &DnsContext,
+        req: &DnsRequest,
+    ) -> Result<Option<DnsResponse>, DnsError> {
+        let query = req.query().original().to_owned();
+
+        if query.query_type() != RecordType::TXT {
+            return Ok(None);
+        }
+
+        if query.query_class() != DNSClass::CH {
+            return Ok(None);
+        }
+
+        let query_name = normalize_query_name(query.name());
+        let Some(canonical) = translate_query_name(&query_name) else {
+            return Ok(None);
+        };
+
+        let client_ip = normalize_client_ip(req.src().ip());
+        let server_name = trim_fqdn_dot(ctx.cfg().server_name().to_string());
+        let client_mac = || {
+            lookup_client_mac_from_arp(client_ip).unwrap_or_else(|| UNKNOWN_CLIENT_MAC.to_string())
+        };
+
+        let res = match canonical {
+            CanonicalIdentityQuery::ServerName => txt_response(query, server_name.clone()),
+            CanonicalIdentityQuery::ServerVersion => {
+                txt_response(query, crate::BUILD_VERSION.to_string())
+            }
+            CanonicalIdentityQuery::ClientIp => txt_response(query, client_ip.to_string()),
+            CanonicalIdentityQuery::ClientMac => txt_response(query, client_mac()),
+            CanonicalIdentityQuery::WhoAmIJson => txt_response(
+                query,
+                build_info_json_text(
+                    &server_name,
+                    crate::BUILD_VERSION,
+                    &client_ip,
+                    &client_mac(),
+                ),
+            ),
+            CanonicalIdentityQuery::WhoAmIRecords => txt_records_response(
+                query,
+                build_info_records_text(
+                    &server_name,
+                    crate::BUILD_VERSION,
+                    &client_ip,
+                    &client_mac(),
+                ),
+            ),
+            CanonicalIdentityQuery::ServerRecords => txt_records_response(
+                query,
+                build_server_records_text(&server_name, crate::BUILD_VERSION),
+            ),
+            CanonicalIdentityQuery::ServerJson => txt_response(
+                query,
+                build_server_json_text(&server_name, crate::BUILD_VERSION),
+            ),
+        };
+
+        Ok(Some(res))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanonicalIdentityQuery {
+    ServerName,
+    ServerVersion,
+    ClientIp,
+    ClientMac,
+    WhoAmIRecords,
+    WhoAmIJson,
+    ServerRecords,
+    ServerJson,
+}
+
+fn translate_query_name(name: &str) -> Option<CanonicalIdentityQuery> {
+    use CanonicalIdentityQuery::*;
+    Some(match name {
+        // server name
+        "server-name." | "hostname.bind." => ServerName,
+        // server version
+        "version." | "version.bind." => ServerVersion,
+        // client ip
+        "client_ip." | "client-ip." => ClientIp,
+        // client mac
+        "client_mac." | "client-mac." => ClientMac,
+        // full identity
+        "whoami." => WhoAmIRecords,
+        "whoami.json." => WhoAmIJson,
+        // server identity
+        "smartdns." | "id.server." => ServerRecords,
+        "smartdns.json." => ServerJson,
+        _ => return None,
+    })
+}
+
+fn normalize_query_name(name: &Name) -> String {
+    let mut normalized = name.clone();
+    normalized.set_fqdn(true);
+    normalized.to_string().to_ascii_lowercase()
+}
+
+fn trim_fqdn_dot(name: String) -> String {
+    name.trim_end_matches('.').to_string()
+}
+
+fn normalize_client_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(addr) => addr.to_ipv4_mapped().map_or(IpAddr::V6(addr), IpAddr::V4),
+        IpAddr::V4(addr) => IpAddr::V4(addr),
+    }
+}
+
+fn txt_response(query: Query, value: String) -> DnsResponse {
+    let mut record = Record::from_rdata(
+        query.name().to_owned(),
+        crate::dns_client::MAX_TTL,
+        RData::TXT(TXT::new(vec![value])),
+    );
+    record.set_dns_class(query.query_class());
+    DnsResponse::new_with_max_ttl(query, vec![record])
+}
+
+fn txt_records_response(query: Query, values: Vec<String>) -> DnsResponse {
+    let records = values
+        .into_iter()
+        .map(|value| {
+            let mut record = Record::from_rdata(
+                query.name().to_owned(),
+                crate::dns_client::MAX_TTL,
+                RData::TXT(TXT::new(vec![value])),
+            );
+            record.set_dns_class(query.query_class());
+            record
+        })
+        .collect::<Vec<_>>();
+
+    DnsResponse::new_with_max_ttl(query, records)
+}
+
+fn build_info_records_text(
+    server_name: &str,
+    version: &str,
+    client_ip: &IpAddr,
+    client_mac: &str,
+) -> Vec<String> {
+    vec![
+        format!("server_name={server_name}"),
+        format!("server_version={version}"),
+        format!("client_ip={client_ip}"),
+        format!("client_mac={client_mac}"),
+    ]
+}
+
+fn build_server_records_text(server_name: &str, version: &str) -> Vec<String> {
+    vec![
+        format!("server_name={server_name}"),
+        format!("server_version={version}"),
+    ]
+}
+
+fn build_info_json_text(
+    server_name: &str,
+    version: &str,
+    client_ip: &IpAddr,
+    client_mac: &str,
+) -> String {
+    serde_json::json!({
+        "server_name": server_name,
+        "server_version": version,
+        "client_ip": client_ip.to_string(),
+        "client_mac": client_mac,
+    })
+    .to_string()
+}
+
+fn build_server_json_text(server_name: &str, version: &str) -> String {
+    serde_json::json!({
+        "server_name": server_name,
+        "server_version": version,
+    })
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn test_translate_query_name_aliases() {
+        assert_eq!(
+            translate_query_name("hostname.bind."),
+            Some(CanonicalIdentityQuery::ServerName)
+        );
+        assert_eq!(
+            translate_query_name("server-name."),
+            Some(CanonicalIdentityQuery::ServerName)
+        );
+        assert_eq!(
+            translate_query_name("version.bind."),
+            Some(CanonicalIdentityQuery::ServerVersion)
+        );
+        assert_eq!(
+            translate_query_name("client-ip."),
+            Some(CanonicalIdentityQuery::ClientIp)
+        );
+        assert_eq!(
+            translate_query_name("client-mac."),
+            Some(CanonicalIdentityQuery::ClientMac)
+        );
+        assert_eq!(
+            translate_query_name("whoami."),
+            Some(CanonicalIdentityQuery::WhoAmIRecords)
+        );
+        assert_eq!(
+            translate_query_name("smartdns."),
+            Some(CanonicalIdentityQuery::ServerRecords)
+        );
+        assert_eq!(
+            translate_query_name("smartdns.json."),
+            Some(CanonicalIdentityQuery::ServerJson)
+        );
+        assert_eq!(translate_query_name("whoami.bind."), None);
+        assert_eq!(translate_query_name("whoami.mac.bind."), None);
+        assert_eq!(translate_query_name("whoami-mac.smartdns."), None);
+        assert_eq!(translate_query_name("unknown."), None);
+    }
+
+    #[test]
+    fn test_json_output_is_valid() {
+        let client_ip: IpAddr = "192.168.1.10".parse().unwrap();
+        let info_json =
+            build_info_json_text("smartdns '测试'", "v1.0", &client_ip, "aa:bb:cc:dd:ee:ff");
+        let info: Value = serde_json::from_str(&info_json).unwrap();
+        assert_eq!(info["server_name"], "smartdns '测试'");
+        assert_eq!(info["server_version"], "v1.0");
+        assert_eq!(info["client_ip"], "192.168.1.10");
+        assert_eq!(info["client_mac"], "aa:bb:cc:dd:ee:ff");
+
+        let server_json = build_server_json_text("smartdns '测试'", "v1.0");
+        let server: Value = serde_json::from_str(&server_json).unwrap();
+        assert_eq!(server["server_name"], "smartdns '测试'");
+        assert_eq!(server["server_version"], "v1.0");
+    }
+}
