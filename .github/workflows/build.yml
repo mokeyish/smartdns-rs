@@ -35,17 +35,10 @@ jobs:
     steps:
       - name: Compute release label
         id: sanitize
-        shell: bash
-        env:
-          RAW_LABEL: ${{ inputs.version || github.ref_name }}
-        run: |
-          value="${RAW_LABEL}"
-          value="${value//[^A-Za-z0-9._-]/-}"
-          value="$(echo "$value" | sed -E 's/-+/-/g; s/^-+//; s/-+$//')"
-          if [ -z "$value" ]; then
-            value="${GITHUB_SHA::12}"
-          fi
-          echo "value=$value" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/sanitize-label
+        with:
+          raw_label: ${{ inputs.version || github.ref_name }}
+          fallback_sha: ${{ github.sha }}
 
   build:
     name: build ${{ matrix.target }} ${{ inputs.version }}
