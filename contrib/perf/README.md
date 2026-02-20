@@ -7,6 +7,7 @@ This directory contains a scenario-based performance suite that targets specific
 | Scenario | Covered functionality |
 |---|---|
 | `static_address_rule` | `AddressMiddleware` static response path, local UDP server path |
+| `hosts_file_lookup` | `DnsHostsMiddleware` hosts-file lookup path, hosts file mtime/signature cache |
 | `dnsmasq_lease_lookup` | `DnsmasqMiddleware` path, `LanClientStore` lease-file mtime cache |
 | `dns_cache_hit_path` | `DnsCacheMiddleware` insert/get + cache-hit path + bounded `DnsHandle` queue |
 | `prefetch_scheduler_active` | cache prefetch scheduling/index path with large cached domain set |
@@ -21,6 +22,7 @@ python3 contrib/perf/run_perf_suite.py \
   --duration-sec 8 \
   --concurrency 64 \
   --timeout-ms 500 \
+  --hosts-records 12000 \
   --lease-records 2000 \
   --prefill-domains 3000 \
   --repeats 1 \
@@ -35,6 +37,7 @@ The script prints the Markdown summary to stdout and writes:
 
 Useful knobs:
 
+- `--hosts-records`: scales hosts-file size for `DnsHostsMiddleware` cache-path sensitivity
 - `--lease-records`: scales dnsmasq lease-file size for cache-path sensitivity
 - `--prefill-domains`: scales cached-domain count for prefetch scheduler pressure
 - `--repeats`: repeats each scenario and uses median values to reduce run-to-run noise

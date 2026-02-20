@@ -365,6 +365,56 @@ def scenario_static_address(
     )
 
 
+def scenario_hosts_lookup(
+    binary: Path,
+    duration: float,
+    concurrency: int,
+    timeout_ms: int,
+    hosts_records: int,
+) -> ScenarioResult:
+    with tempfile.TemporaryDirectory(prefix="smartdns-perf-hosts-") as tmp:
+        tmpdir = Path(tmp)
+        port = random.randint(23001, 28000)
+        total_records = max(1, hosts_records)
+        qname = f"host-{total_records - 1}.perf"
+        hosts_file = tmpdir / "bench.hosts"
+        rows = [
+            f"10.20.{(i // 250) % 200}.{(i % 250) + 1} host-{i}.perf"
+            for i in range(total_records)
+        ]
+        hosts_file.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+        conf = tmpdir / "smartdns.conf"
+        write_config(
+            conf,
+            [
+                f"bind 127.0.0.1:{port}",
+                "log-num 0",
+                "cache-size 0",
+                f"hosts-file {hosts_file}",
+            ],
+        )
+
+        proc = start_smartdns(binary, conf)
+        try:
+            warmup_ready("127.0.0.1", port, qname)
+            metrics = run_udp_load("127.0.0.1", port, qname, duration, concurrency, timeout_ms)
+        finally:
+            stop_process(proc)
+
+    return ScenarioResult(
+        name="hosts_file_lookup",
+        description="DnsHostsMiddleware lookup with hosts file cache",
+        covered_items=[
+            "DnsHostsMiddleware static host lookup",
+            "hosts file mtime/signature cache optimization",
+        ],
+        metrics=metrics,
+        notes=["No upstream dependency", "Cache disabled", f"hosts records: {total_records}"],
+        runs=[metrics],
+    )
+
+
 def scenario_dnsmasq_lease_cache(
     binary: Path,
     duration: float,
@@ -570,6 +620,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration-sec", type=float, default=8.0, help="Per scenario load duration")
     parser.add_argument("--concurrency", type=int, default=64, help="Per scenario load concurrency")
     parser.add_argument("--timeout-ms", type=int, default=500, help="DNS query timeout in milliseconds")
+    parser.add_argument("--hosts-records", type=int, default=12000, help="Hosts records count for hosts scenario")
     parser.add_argument("--prefill-domains", type=int, default=3000, help="Prefill domain count for prefetch scenario")
     parser.add_argument("--lease-records", type=int, default=2000, help="Lease records count for dnsmasq scenario")
     parser.add_argument("--repeats", type=int, default=1, help="Repeat each scenario and use median metrics")
@@ -586,6 +637,13 @@ def main() -> int:
 
     scenarios: list[Callable[[], ScenarioResult]] = [
         lambda: scenario_static_address(binary, args.duration_sec, args.concurrency, args.timeout_ms),
+        lambda: scenario_hosts_lookup(
+            binary,
+            args.duration_sec,
+            args.concurrency,
+            args.timeout_ms,
+            args.hosts_records,
+        ),
         lambda: scenario_dnsmasq_lease_cache(
             binary,
             args.duration_sec,
