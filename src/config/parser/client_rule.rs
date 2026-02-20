@@ -59,12 +59,12 @@ mod tests {
         );
 
         assert_eq!(
-            ClientRule::parse("10.10.1.0/24"),
+            ClientRule::parse("192.168.100.0/24"),
             Ok((
                 "",
                 ClientRule {
                     group: "".to_string(),
-                    client: Client::IpAddr("10.10.1.0/24".parse().unwrap())
+                    client: Client::IpAddr("192.168.100.0/24".parse().unwrap())
                 }
             ))
         );

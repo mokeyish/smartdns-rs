@@ -1967,9 +1967,9 @@ mod tests {
     #[test]
     fn test_client_rule_without_group_uses_current_rule_group() {
         let cfg = RuntimeConfig::builder()
-            .with("client-rules 10.10.10.0/24")
+            .with("client-rules 192.168.1.0/24")
             .with("group-begin zerotier")
-            .with("client-rules 10.10.1.0/24")
+            .with("client-rules 192.168.100.0/24")
             .with("group-end")
             .build()
             .unwrap();
@@ -1979,7 +1979,7 @@ mod tests {
         assert_eq!(cfg.client_rules()[1].group, "zerotier");
         assert_eq!(
             cfg.client_rules()[1].client,
-            Client::IpAddr("10.10.1.0/24".parse().unwrap())
+            Client::IpAddr("192.168.100.0/24".parse().unwrap())
         );
     }
 
@@ -1987,7 +1987,7 @@ mod tests {
     fn test_client_rule_explicit_group_overrides_current_rule_group() {
         let cfg = RuntimeConfig::builder()
             .with("group-begin zerotier")
-            .with("client-rules 10.10.1.0/24 -group office")
+            .with("client-rules 192.168.100.0/24 -group office")
             .with("group-end")
             .build()
             .unwrap();

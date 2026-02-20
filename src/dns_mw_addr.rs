@@ -292,10 +292,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_client_rule_without_explicit_group_returns_group_address() {
         let cfg = RuntimeConfig::builder()
-            .with("address /wiki.lan/10.10.10.5")
+            .with("address /wiki.lan/192.168.1.5")
             .with("group-begin zerotier")
-            .with("client-rules 10.10.1.0/24")
-            .with("address /wiki.lan/10.10.1.5")
+            .with("client-rules 192.168.100.0/24")
+            .with("address /wiki.lan/192.168.100.5")
             .with("group-end")
             .build()
             .unwrap();
@@ -309,7 +309,7 @@ mod tests {
         message.add_query(query.clone());
         let req_zerotier = DnsRequest::new(
             message,
-            "10.10.1.23:5300".parse().unwrap(),
+            "192.168.100.23:5300".parse().unwrap(),
             crate::libdns::Protocol::Udp,
         );
 
@@ -317,7 +317,7 @@ mod tests {
         message.add_query(query);
         let req_lan = DnsRequest::new(
             message,
-            "10.10.10.23:5300".parse().unwrap(),
+            "192.168.1.23:5300".parse().unwrap(),
             crate::libdns::Protocol::Udp,
         );
 
@@ -326,21 +326,21 @@ mod tests {
 
         assert_eq!(
             res_zerotier.records().first().unwrap().data(),
-            &RData::A("10.10.1.5".parse().unwrap())
+            &RData::A("192.168.100.5".parse().unwrap())
         );
         assert_eq!(
             res_lan.records().first().unwrap().data(),
-            &RData::A("10.10.10.5".parse().unwrap())
+            &RData::A("192.168.1.5".parse().unwrap())
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_client_rule_uses_edns_client_subnet_for_group_matching() {
         let cfg = RuntimeConfig::builder()
-            .with("address /wiki.lan/10.10.10.5")
+            .with("address /wiki.lan/192.168.1.5")
             .with("group-begin zerotier")
-            .with("client-rules 10.10.1.0/24")
-            .with("address /wiki.lan/10.10.1.5")
+            .with("client-rules 192.168.100.0/24")
+            .with("address /wiki.lan/192.168.100.5")
             .with("group-end")
             .build()
             .unwrap();
@@ -352,14 +352,14 @@ mod tests {
 
         let mut edns = Edns::new();
         edns.options_mut().insert(EdnsOption::Subnet(
-            ClientSubnet::from_str("10.10.1.23/32").unwrap(),
+            ClientSubnet::from_str("192.168.100.23/32").unwrap(),
         ));
         message.set_edns(edns);
 
         // ECS subnet should take precedence over the source address branch.
         let req = DnsRequest::new(
             message,
-            "10.10.10.23:5300".parse().unwrap(),
+            "192.168.1.23:5300".parse().unwrap(),
             crate::libdns::Protocol::Udp,
         );
 
@@ -367,7 +367,7 @@ mod tests {
 
         assert_eq!(
             res.records().first().unwrap().data(),
-            &RData::A("10.10.1.5".parse().unwrap())
+            &RData::A("192.168.100.5".parse().unwrap())
         );
     }
 
