@@ -293,7 +293,7 @@ mod tests {
     async fn test_client_rule_without_explicit_group_returns_group_address() {
         let cfg = RuntimeConfig::builder()
             .with("address /wiki.lan/192.168.1.5")
-            .with("group-begin zerotier")
+            .with("group-begin group-a")
             .with("client-rules 192.168.100.0/24")
             .with("address /wiki.lan/192.168.100.5")
             .with("group-end")
@@ -307,7 +307,7 @@ mod tests {
 
         let mut message = op::Message::query();
         message.add_query(query.clone());
-        let req_zerotier = DnsRequest::new(
+        let req_group_a = DnsRequest::new(
             message,
             "192.168.100.23:5300".parse().unwrap(),
             crate::libdns::Protocol::Udp,
@@ -321,11 +321,11 @@ mod tests {
             crate::libdns::Protocol::Udp,
         );
 
-        let res_zerotier = mock.search(&req_zerotier, &Default::default()).await.unwrap();
+        let res_group_a = mock.search(&req_group_a, &Default::default()).await.unwrap();
         let res_lan = mock.search(&req_lan, &Default::default()).await.unwrap();
 
         assert_eq!(
-            res_zerotier.records().first().unwrap().data(),
+            res_group_a.records().first().unwrap().data(),
             &RData::A("192.168.100.5".parse().unwrap())
         );
         assert_eq!(
@@ -338,7 +338,7 @@ mod tests {
     async fn test_client_rule_uses_edns_client_subnet_for_group_matching() {
         let cfg = RuntimeConfig::builder()
             .with("address /wiki.lan/192.168.1.5")
-            .with("group-begin zerotier")
+            .with("group-begin group-a")
             .with("client-rules 192.168.100.0/24")
             .with("address /wiki.lan/192.168.100.5")
             .with("group-end")
