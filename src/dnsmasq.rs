@@ -4,6 +4,8 @@ use std::io::BufReader;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant, SystemTime};
 
 use std::io::BufRead;
 
@@ -15,22 +17,83 @@ use chrono::{DateTime, Local, NaiveDateTime};
 pub struct LanClientStore {
     zone: Option<Name>,
     file: PathBuf,
+    cache: RwLock<Option<LeaseCache>>,
 }
+
+struct LeaseCache {
+    clients: Arc<DomainMap<ClientInfo>>,
+    modified_at: Option<SystemTime>,
+    checked_at: Instant,
+}
+
+const LEASE_FILE_STAT_INTERVAL: Duration = Duration::from_secs(2);
 
 impl LanClientStore {
     pub fn new<P: AsRef<Path>>(file: P, zone: Option<Name>) -> Self {
         Self {
             zone,
             file: file.as_ref().to_owned(),
+            cache: Default::default(),
+        }
+    }
+
+    fn cached_clients(&self) -> Option<Arc<DomainMap<ClientInfo>>> {
+        let now = Instant::now();
+
+        {
+            let cache = self.cache.read().unwrap_or_else(|err| err.into_inner());
+            if let Some(cache) = cache.as_ref()
+                && now.duration_since(cache.checked_at) < LEASE_FILE_STAT_INTERVAL
+            {
+                return Some(cache.clients.clone());
+            }
+        }
+
+        let modified_at = std::fs::metadata(self.file.as_path())
+            .ok()
+            .and_then(|meta| meta.modified().ok());
+
+        {
+            let mut cache = self.cache.write().unwrap_or_else(|err| err.into_inner());
+            if let Some(cache) = cache.as_mut() {
+                if now.duration_since(cache.checked_at) < LEASE_FILE_STAT_INTERVAL {
+                    return Some(cache.clients.clone());
+                }
+
+                if cache.modified_at == modified_at {
+                    cache.checked_at = now;
+                    return Some(cache.clients.clone());
+                }
+            }
+        }
+
+        let refreshed = read_lease_file(self.file.as_path(), self.zone.as_ref())
+            .ok()
+            .map(Arc::new);
+
+        let mut cache = self.cache.write().unwrap_or_else(|err| err.into_inner());
+        if let Some(clients) = refreshed {
+            *cache = Some(LeaseCache {
+                clients: clients.clone(),
+                modified_at,
+                checked_at: now,
+            });
+            Some(clients)
+        } else if let Some(cache) = cache.as_mut() {
+            // read failed, keep existing cache and avoid hot-loop retries.
+            cache.checked_at = now;
+            Some(cache.clients.clone())
+        } else {
+            None
         }
     }
 
     pub fn lookup(&self, name: &Name, record_type: RecordType) -> Option<RData> {
         match record_type {
             RecordType::A | RecordType::AAAA => {
-                let store = match read_lease_file(self.file.as_path(), self.zone.as_ref()) {
-                    Ok(v) => v,
-                    Err(_) => return None,
+                let store = match self.cached_clients() {
+                    Some(v) => v,
+                    None => return None,
                 };
 
                 let mut name = name.clone();

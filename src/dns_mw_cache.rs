@@ -1,6 +1,7 @@
 use chrono::DateTime;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::num::NonZeroUsize;
@@ -444,20 +445,13 @@ impl DnsCache {
         let lookup = DnsResponse::new_with_deadline(query.clone(), records, valid_until)
             .with_name_server_group(name_server_group.to_string());
 
-        {
-            let cache = self.cache.clone();
-            let lookup = lookup.clone();
-            tokio::spawn(async move {
-                let mut cache = cache.lock().await;
-
-                if let Some(entry) = cache.get_mut(&query) {
-                    entry.data = lookup;
-                    entry.valid_until = valid_until;
-                    entry.stats.hit();
-                } else {
-                    cache.put(query, DnsCacheEntry::new(lookup, valid_until));
-                }
-            });
+        let mut cache = self.cache.lock().await;
+        if let Some(entry) = cache.get_mut(&query) {
+            entry.set_data(lookup.clone());
+            entry.set_valid_until(valid_until);
+            entry.stats.hit();
+        } else {
+            cache.put(query, DnsCacheEntry::new(lookup.clone(), valid_until));
         }
 
         lookup
@@ -482,38 +476,36 @@ impl DnsCache {
         name_server_group: &str,
     ) -> Option<DnsResponse> {
         let mut is_cname_query = false;
-        // collect all records by name
-        let records = records.fold(
-            Vec::<(Query, Vec<(Record, u32)>)>::new(),
-            |mut map, record| {
-                let mut query = Query::query(record.name().clone(), record.record_type());
-                query.set_query_class(record.dns_class());
+        // collect all records by name, preserving first-seen query ordering.
+        let mut grouped_records = Vec::<(Query, Vec<(Record, u32)>)>::new();
+        let mut grouped_indexes = HashMap::<Query, usize>::new();
+        for record in records {
+            let mut query = Query::query(record.name().clone(), record.record_type());
+            query.set_query_class(record.dns_class());
 
-                let ttl = record.ttl();
+            let ttl = record.ttl();
 
-                if original_query != query {
-                    is_cname_query = true;
-                }
+            if original_query != query {
+                is_cname_query = true;
+            }
 
-                let val = (record, ttl);
-                match map.iter_mut().find(|e| e.0 == query) {
-                    Some(entry) => entry.1.push(val),
-                    None => map.push((query, vec![val])),
-                }
-
-                map
-            },
-        );
+            if let Some(index) = grouped_indexes.get(&query).copied() {
+                grouped_records[index].1.push((record, ttl));
+            } else {
+                let index = grouped_records.len();
+                grouped_indexes.insert(query.clone(), index);
+                grouped_records.push((query, vec![(record, ttl)]));
+            }
+        }
 
         // now insert by record type and name
         let mut lookup = None;
 
         if is_cname_query {
-            let records = records
-                .clone()
-                .into_iter()
-                .flat_map(|(_, r)| r)
-                .collect::<Vec<_>>();
+            let mut records = Vec::new();
+            for (_, records_and_ttl) in &grouped_records {
+                records.extend(records_and_ttl.iter().cloned());
+            }
 
             lookup = Some(
                 self.insert(original_query.clone(), records, now, name_server_group)
@@ -521,7 +513,7 @@ impl DnsCache {
             )
         }
 
-        for (query, records_and_ttl) in records {
+        for (query, records_and_ttl) in grouped_records {
             let is_query = original_query == query;
             let inserted = self
                 .insert(query, records_and_ttl, now, name_server_group)
