@@ -115,10 +115,24 @@ jobs:
         run: just target=${{ matrix.target }} pack
         shell: bash
 
+      - name: Compute artifact suffix
+        id: artifact_suffix
+        shell: bash
+        env:
+          RAW_SUFFIX: ${{ inputs.version || github.ref_name }}
+        run: |
+          value="${RAW_SUFFIX}"
+          value="${value//[^A-Za-z0-9._-]/-}"
+          value="$(echo "$value" | sed -E 's/-+/-/g; s/^-+//; s/-+$//')"
+          if [ -z "$value" ]; then
+            value="${GITHUB_SHA::12}"
+          fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: smartdns-${{ matrix.target }}-${{ inputs.version || github.sha }}
+          name: smartdns-${{ matrix.target }}-${{ steps.artifact_suffix.outputs.value }}
           retention-days: 30
           path: |
             dist/*.zip
@@ -170,6 +184,19 @@ jobs:
       -
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Compute image tag
+        id: image_tag
+        shell: bash
+        env:
+          RAW_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          value="${RAW_TAG}"
+          value="${value//[^A-Za-z0-9._-]/-}"
+          value="$(echo "$value" | sed -E 's/-+/-/g; s/^-+//; s/-+$//')"
+          if [ -z "$value" ]; then
+            value="${GITHUB_SHA::12}"
+          fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
       - name: Build and push Docker image
         run: |
-          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version }} -t ghcr.io/mokeyish/smartdns-rs:${{ inputs.version || github.sha }} --push -f ./docker/Dockerfile .
+          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version }} -t ghcr.io/mokeyish/smartdns-rs:${{ steps.image_tag.outputs.value }} --push -f ./docker/Dockerfile .
