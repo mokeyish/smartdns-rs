@@ -202,13 +202,17 @@ fn handle_rule_addr(query_type: RecordType, ctx: &DnsContext) -> Option<Vec<RDat
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     use crate::{
         dns_conf::{AddressRuleValue, RuntimeConfig},
         dns_mw::*,
-        libdns::proto::op::{self, Query},
-        libdns::proto::rr::rdata,
+        libdns::proto::{
+            op::{self, Edns, Query},
+            rr::{rdata, rdata::opt::ClientSubnet, rdata::opt::EdnsOption},
+        },
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -327,6 +331,43 @@ mod tests {
         assert_eq!(
             res_lan.records().first().unwrap().data(),
             &RData::A("10.10.10.5".parse().unwrap())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_client_rule_uses_edns_client_subnet_for_group_matching() {
+        let cfg = RuntimeConfig::builder()
+            .with("address /wiki.lan/10.10.10.5")
+            .with("group-begin zerotier")
+            .with("client-rules 10.10.1.0/24")
+            .with("address /wiki.lan/10.10.1.5")
+            .with("group-end")
+            .build()
+            .unwrap();
+
+        let mock = DnsMockMiddleware::mock(AddressMiddleware).build(cfg);
+
+        let mut message = op::Message::query();
+        message.add_query(Query::query("wiki.lan".parse().unwrap(), RecordType::A));
+
+        let mut edns = Edns::new();
+        edns.options_mut().insert(EdnsOption::Subnet(
+            ClientSubnet::from_str("10.10.1.23/32").unwrap(),
+        ));
+        message.set_edns(edns);
+
+        // ECS subnet should take precedence over the source address branch.
+        let req = DnsRequest::new(
+            message,
+            "10.10.10.23:5300".parse().unwrap(),
+            crate::libdns::Protocol::Udp,
+        );
+
+        let res = mock.search(&req, &Default::default()).await.unwrap();
+
+        assert_eq!(
+            res.records().first().unwrap().data(),
+            &RData::A("10.10.1.5".parse().unwrap())
         );
     }
 
