@@ -141,6 +141,7 @@ class ScenarioResult:
     covered_items: list[str]
     metrics: LoadMetrics
     notes: list[str]
+    runs: list[LoadMetrics]
 
 
 def percentile(sorted_vals: list[float], p: float) -> float:
@@ -153,6 +154,50 @@ def percentile(sorted_vals: list[float], p: float) -> float:
     high = min(low + 1, len(sorted_vals) - 1)
     frac = rank - low
     return sorted_vals[low] * (1 - frac) + sorted_vals[high] * frac
+
+
+def median_float(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return statistics.median(values)
+
+
+def aggregate_metrics(runs: list[LoadMetrics]) -> LoadMetrics:
+    if not runs:
+        raise ValueError("no metrics to aggregate")
+    return LoadMetrics(
+        duration_sec=statistics.fmean(m.duration_sec for m in runs),
+        sent=int(round(statistics.fmean(m.sent for m in runs))),
+        succeeded=int(round(statistics.fmean(m.succeeded for m in runs))),
+        failed=int(round(statistics.fmean(m.failed for m in runs))),
+        timeouts=int(round(statistics.fmean(m.timeouts for m in runs))),
+        qps=median_float([m.qps for m in runs]),
+        latency_ms_p50=median_float([m.latency_ms_p50 for m in runs]),
+        latency_ms_p95=median_float([m.latency_ms_p95 for m in runs]),
+        latency_ms_p99=median_float([m.latency_ms_p99 for m in runs]),
+        latency_ms_avg=median_float([m.latency_ms_avg for m in runs]),
+        success_rate=median_float([m.success_rate for m in runs]),
+    )
+
+
+def run_scenario_repeated(run: Callable[[], ScenarioResult], repeats: int) -> ScenarioResult:
+    if repeats <= 0:
+        raise ValueError("repeats must be > 0")
+    results = [run() for _ in range(repeats)]
+    first = results[0]
+    run_metrics = [r.metrics for r in results]
+    aggregate = aggregate_metrics(run_metrics)
+    notes = list(first.notes)
+    notes.append(f"repeats: {repeats}")
+    notes.append("qps per run: " + ", ".join(f"{m.qps:.1f}" for m in run_metrics))
+    return ScenarioResult(
+        name=first.name,
+        description=first.description,
+        covered_items=first.covered_items,
+        metrics=aggregate,
+        notes=notes,
+        runs=run_metrics,
+    )
 
 
 def run_udp_load(
@@ -316,6 +361,7 @@ def scenario_static_address(
         covered_items=["AddressMiddleware static rule path", "server UDP request/response hot path"],
         metrics=metrics,
         notes=["No upstream dependency", "Cache disabled"],
+        runs=[metrics],
     )
 
 
@@ -324,6 +370,7 @@ def scenario_dnsmasq_lease_cache(
     duration: float,
     concurrency: int,
     timeout_ms: int,
+    lease_records: int,
 ) -> ScenarioResult:
     with tempfile.TemporaryDirectory(prefix="smartdns-perf-dnsmasq-") as tmp:
         tmpdir = Path(tmp)
@@ -331,10 +378,18 @@ def scenario_dnsmasq_lease_cache(
         qname = "host-perf.perf.lan"
         lease = tmpdir / "dhcp.leases"
         expires_at = int(time.time()) + 86400
-        lease.write_text(
-            f"{expires_at} aa:bb:cc:dd:ee:ff 192.168.100.16 host-perf 01:aa:bb:cc:dd:ee:ff\n",
-            encoding="utf-8",
+        total_records = max(1, lease_records)
+        rows = []
+        for i in range(total_records - 1):
+            host = f"host-{i}"
+            ip = f"192.168.{(i // 250) % 200}.{(i % 250) + 1}"
+            rows.append(
+                f"{expires_at} aa:bb:cc:dd:{i // 256:02x}:{i % 256:02x} {ip} {host} 01:aa:bb:cc:dd:00:01"
+            )
+        rows.append(
+            f"{expires_at} aa:bb:cc:dd:ee:ff 192.168.100.16 host-perf 01:aa:bb:cc:dd:ee:ff"
         )
+        lease.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
         conf = tmpdir / "smartdns.conf"
         write_config(
@@ -360,7 +415,8 @@ def scenario_dnsmasq_lease_cache(
         description="DnsmasqMiddleware and lease-file in-memory cache",
         covered_items=["DnsmasqMiddleware lookup", "LanClientStore file mtime cache optimization"],
         metrics=metrics,
-        notes=["No upstream dependency", "Cache disabled"],
+        notes=["No upstream dependency", "Cache disabled", f"lease records: {total_records}"],
+        runs=[metrics],
     )
 
 
@@ -405,6 +461,7 @@ def scenario_cache_hit(
         covered_items=["DnsCacheMiddleware insert/get", "cache hit fast path", "DnsHandle bounded queue path"],
         metrics=metrics,
         notes=["Local fake upstream", "Cache enabled"],
+        runs=[metrics],
     )
 
 
@@ -453,6 +510,7 @@ def scenario_prefetch_scheduler(
         covered_items=["cache prefetch scheduler index", "prefetch trigger pipeline", "cache + background query coexistence"],
         metrics=metrics,
         notes=[f"Prefill domains: {prefill_domains}", "Prefetch enabled"],
+        runs=[metrics],
     )
 
 
@@ -467,6 +525,7 @@ def to_jsonable(results: list[ScenarioResult]) -> dict:
                 "covered_items": r.covered_items,
                 "notes": r.notes,
                 "metrics": dataclasses.asdict(r.metrics),
+                "runs": [dataclasses.asdict(run) for run in r.runs],
             }
             for r in results
         ],
@@ -497,6 +556,8 @@ def build_markdown(results: list[ScenarioResult], binary: Path) -> str:
     for r in results:
         lines.append(f"### {r.name}")
         lines.append(f"- Description: {r.description}")
+        if len(r.runs) > 1:
+            lines.append("- Run metrics (QPS): " + ", ".join(f"{run.qps:.1f}" for run in r.runs))
         for note in r.notes:
             lines.append(f"- {note}")
         lines.append("")
@@ -510,6 +571,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--concurrency", type=int, default=64, help="Per scenario load concurrency")
     parser.add_argument("--timeout-ms", type=int, default=500, help="DNS query timeout in milliseconds")
     parser.add_argument("--prefill-domains", type=int, default=3000, help="Prefill domain count for prefetch scenario")
+    parser.add_argument("--lease-records", type=int, default=2000, help="Lease records count for dnsmasq scenario")
+    parser.add_argument("--repeats", type=int, default=1, help="Repeat each scenario and use median metrics")
     parser.add_argument("--output-json", required=True, help="Output JSON path")
     parser.add_argument("--output-md", required=True, help="Output markdown summary path")
     return parser.parse_args()
@@ -523,7 +586,13 @@ def main() -> int:
 
     scenarios: list[Callable[[], ScenarioResult]] = [
         lambda: scenario_static_address(binary, args.duration_sec, args.concurrency, args.timeout_ms),
-        lambda: scenario_dnsmasq_lease_cache(binary, args.duration_sec, args.concurrency, args.timeout_ms),
+        lambda: scenario_dnsmasq_lease_cache(
+            binary,
+            args.duration_sec,
+            args.concurrency,
+            args.timeout_ms,
+            args.lease_records,
+        ),
         lambda: scenario_cache_hit(binary, args.duration_sec, args.concurrency, args.timeout_ms),
         lambda: scenario_prefetch_scheduler(
             binary,
@@ -536,7 +605,7 @@ def main() -> int:
 
     results = []
     for run in scenarios:
-        results.append(run())
+        results.append(run_scenario_repeated(run, args.repeats))
 
     out_json = Path(args.output_json)
     out_md = Path(args.output_md)

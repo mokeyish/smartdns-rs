@@ -21,7 +21,9 @@ python3 contrib/perf/run_perf_suite.py \
   --duration-sec 8 \
   --concurrency 64 \
   --timeout-ms 500 \
+  --lease-records 2000 \
   --prefill-domains 3000 \
+  --repeats 1 \
   --output-json artifacts/perf/results.json \
   --output-md artifacts/perf/summary.md
 ```
@@ -30,6 +32,23 @@ The script prints the Markdown summary to stdout and writes:
 
 - JSON metrics: `artifacts/perf/results.json`
 - Markdown summary: `artifacts/perf/summary.md`
+
+Useful knobs:
+
+- `--lease-records`: scales dnsmasq lease-file size for cache-path sensitivity
+- `--prefill-domains`: scales cached-domain count for prefetch scheduler pressure
+- `--repeats`: repeats each scenario and uses median values to reduce run-to-run noise
+
+## Compare two branches (or binaries)
+
+```bash
+python3 contrib/perf/compare_perf.py \
+  --base artifacts/perf/main.json \
+  --target artifacts/perf/current.json \
+  --base-name main \
+  --target-name current \
+  --output-md artifacts/perf/compare.md
+```
 
 ## CI output
 

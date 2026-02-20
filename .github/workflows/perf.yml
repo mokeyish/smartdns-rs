@@ -47,7 +47,9 @@ jobs:
             --duration-sec 8 \
             --concurrency 64 \
             --timeout-ms 500 \
+            --lease-records 2000 \
             --prefill-domains 3000 \
+            --repeats 1 \
             --output-json artifacts/perf/results.json \
             --output-md artifacts/perf/summary.md
 
