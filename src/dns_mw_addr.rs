@@ -321,7 +321,10 @@ mod tests {
             crate::libdns::Protocol::Udp,
         );
 
-        let res_group_a = mock.search(&req_group_a, &Default::default()).await.unwrap();
+        let res_group_a = mock
+            .search(&req_group_a, &Default::default())
+            .await
+            .unwrap();
         let res_lan = mock.search(&req_lan, &Default::default()).await.unwrap();
 
         assert_eq!(
