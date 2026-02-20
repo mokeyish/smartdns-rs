@@ -20,7 +20,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::Path,
     sync::Arc,
-    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -245,20 +244,17 @@ impl From<CancellationToken> for ServerHandle {
 
 #[derive(Debug, Clone)]
 pub struct DnsHandle {
-    sender: mpsc::Sender<IncomingDnsMessage>,
+    sender: mpsc::UnboundedSender<IncomingDnsMessage>,
     opts: ServerOpts,
 }
 
 pub type IncomingDnsMessage = (SerialMessage, ServerOpts, oneshot::Sender<SerialMessage>);
 
-pub type IncomingDnsRequest = mpsc::Receiver<IncomingDnsMessage>;
-
-const DNS_HANDLE_QUEUE_CAPACITY: usize = 8192;
-const DNS_HANDLE_ENQUEUE_TIMEOUT: Duration = Duration::from_millis(50);
+pub type IncomingDnsRequest = mpsc::UnboundedReceiver<IncomingDnsMessage>;
 
 impl DnsHandle {
     pub fn new() -> (IncomingDnsRequest, Self) {
-        let (tx, rx) = mpsc::channel(DNS_HANDLE_QUEUE_CAPACITY);
+        let (tx, rx) = mpsc::unbounded_channel();
         (
             rx,
             Self {
@@ -270,67 +266,17 @@ impl DnsHandle {
 
     pub async fn send<T: Into<SerialMessage>>(&self, message: T) -> SerialMessage {
         let message = message.into();
-        let fallback_addr = message.addr();
-        let fallback_protocol = message.protocol();
         let (tx, rx) = oneshot::channel();
 
-        fn refused_from_message(
-            message: Option<SerialMessage>,
-            fallback_addr: SocketAddr,
-            fallback_protocol: crate::libdns::Protocol,
-        ) -> SerialMessage {
-            let (mut response_message, addr, protocol) = match message {
-                Some(message) => {
-                    let addr = message.addr();
-                    let protocol = message.protocol();
-                    let response = DnsRequest::try_from(message)
-                        .map(|req| req.to_response())
-                        .unwrap_or_else(|_| Message::query().to_response());
-                    (response, addr, protocol)
-                }
-                None => (
-                    Message::query().to_response(),
-                    fallback_addr,
-                    fallback_protocol,
-                ),
-            };
+        if let Err(err) = self.sender.send((message, self.opts.clone(), tx)) {
+            let message = err.0.0;
+            let addr = message.addr();
+            let protocol = message.protocol();
+            let mut response_message = DnsRequest::try_from(message)
+                .map(|req| req.to_response())
+                .unwrap_or_else(|_| Message::query().to_response());
             response_message.set_response_code(ResponseCode::Refused);
-            SerialMessage::raw(response_message, addr, protocol)
-        }
-
-        let outgoing = (message, self.opts.clone(), tx);
-        match self.sender.try_send(outgoing) {
-            Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(outgoing)) => {
-                if self.opts.is_background {
-                    return refused_from_message(
-                        Some(outgoing.0),
-                        fallback_addr,
-                        fallback_protocol,
-                    );
-                }
-                match tokio::time::timeout(
-                    DNS_HANDLE_ENQUEUE_TIMEOUT,
-                    self.sender.send(outgoing),
-                )
-                .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(send_err)) => {
-                        return refused_from_message(
-                            Some(send_err.0.0),
-                            fallback_addr,
-                            fallback_protocol,
-                        );
-                    }
-                    Err(_) => {
-                        return refused_from_message(None, fallback_addr, fallback_protocol);
-                    }
-                }
-            }
-            Err(mpsc::error::TrySendError::Closed(outgoing)) => {
-                return refused_from_message(Some(outgoing.0), fallback_addr, fallback_protocol);
-            }
+            return SerialMessage::raw(response_message, addr, protocol);
         }
 
         match rx.await {
@@ -341,18 +287,6 @@ impl DnsHandle {
                 response_message.into()
             }
         }
-    }
-
-    /// Best-effort enqueue without waiting for a response.
-    ///
-    /// Intended for background refresh/prefetch jobs where dropping under pressure
-    /// is preferable to increasing front-path latency.
-    pub fn try_send_best_effort<T: Into<SerialMessage>>(&self, message: T) -> bool {
-        let (tx, rx) = oneshot::channel();
-        drop(rx);
-        self.sender
-            .try_send((message.into(), self.opts.clone(), tx))
-            .is_ok()
     }
 
     pub fn with_new_opt(&self, opts: ServerOpts) -> Self {

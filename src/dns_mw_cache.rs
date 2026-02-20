@@ -1,7 +1,6 @@
 use chrono::DateTime;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Read;
 use std::num::NonZeroUsize;
@@ -157,9 +156,16 @@ impl DnsCacheMiddleware {
                                 ..Default::default()
                             };
                             let client = client.with_new_opt(opts);
-                            if client.try_send_best_effort(query.clone()) {
-                                debug!("Prefetch domain {} {} queued", query.name(), query.query_type());
-                            }
+                            tokio::spawn(async move {
+                                let now = Instant::now();
+                                client.send(query.clone()).await;
+                                debug!(
+                                    "Prefetch domain {} {}, elapsed {:?}",
+                                    query.name(),
+                                    query.query_type(),
+                                    now.elapsed()
+                                );
+                            });
                         }
                     }
                 } else {
@@ -211,7 +217,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                                 opts.is_background = true;
                                 let client = self.client.with_new_opt(opts);
                                 let query = query.clone();
-                                client.try_send_best_effort(query);
+                                tokio::spawn(async move {
+                                    client.send(query).await;
+                                });
                             }
 
                             debug!(
@@ -230,7 +238,9 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                                 opts.is_background = true;
                                 let client = self.client.with_new_opt(opts);
                                 let query = query.clone();
-                                client.try_send_best_effort(query);
+                                tokio::spawn(async move {
+                                    client.send(query).await;
+                                });
                             }
 
                             debug!(
@@ -361,7 +371,6 @@ const MAX_TTL: u32 = 86400_u32;
 /// An LRU eviction cache specifically for storing DNS records
 pub struct DnsCache {
     cache: Arc<Mutex<LruCache<Query, DnsCacheEntry>>>,
-    prefetch_schedule: Arc<Mutex<PrefetchSchedule>>,
     serve_expired: bool,
     expired_ttl: u64,
     expired_reply_ttl: u64,
@@ -380,7 +389,6 @@ impl DnsCache {
 
         Self {
             cache,
-            prefetch_schedule: Arc::new(Mutex::new(PrefetchSchedule::default())),
             serve_expired,
             expired_ttl,
             expired_reply_ttl,
@@ -393,7 +401,6 @@ impl DnsCache {
 
     pub async fn clear(&self) {
         self.cache.lock().await.clear();
-        self.prefetch_schedule.lock().await.clear();
     }
 
     pub async fn cached_records(&self) -> Vec<CachedQueryRecord> {
@@ -437,20 +444,21 @@ impl DnsCache {
         let lookup = DnsResponse::new_with_deadline(query.clone(), records, valid_until)
             .with_name_server_group(name_server_group.to_string());
 
-        let mut cache = self.cache.lock().await;
-        if let Some(entry) = cache.get_mut(&query) {
-            entry.set_data(lookup.clone());
-            entry.set_valid_until(valid_until);
-            entry.stats.hit();
-        } else {
-            cache.put(query.clone(), DnsCacheEntry::new(lookup.clone(), valid_until));
-        }
-        drop(cache);
+        {
+            let cache = self.cache.clone();
+            let lookup = lookup.clone();
+            tokio::spawn(async move {
+                let mut cache = cache.lock().await;
 
-        self.prefetch_schedule
-            .lock()
-            .await
-            .schedule(query, valid_until);
+                if let Some(entry) = cache.get_mut(&query) {
+                    entry.data = lookup;
+                    entry.valid_until = valid_until;
+                    entry.stats.hit();
+                } else {
+                    cache.put(query, DnsCacheEntry::new(lookup, valid_until));
+                }
+            });
+        }
 
         lookup
     }
@@ -474,36 +482,38 @@ impl DnsCache {
         name_server_group: &str,
     ) -> Option<DnsResponse> {
         let mut is_cname_query = false;
-        // collect all records by name, preserving first-seen query ordering.
-        let mut grouped_records = Vec::<(Query, Vec<(Record, u32)>)>::new();
-        let mut grouped_indexes = HashMap::<Query, usize>::new();
-        for record in records {
-            let mut query = Query::query(record.name().clone(), record.record_type());
-            query.set_query_class(record.dns_class());
+        // collect all records by name
+        let records = records.fold(
+            Vec::<(Query, Vec<(Record, u32)>)>::new(),
+            |mut map, record| {
+                let mut query = Query::query(record.name().clone(), record.record_type());
+                query.set_query_class(record.dns_class());
 
-            let ttl = record.ttl();
+                let ttl = record.ttl();
 
-            if original_query != query {
-                is_cname_query = true;
-            }
+                if original_query != query {
+                    is_cname_query = true;
+                }
 
-            if let Some(index) = grouped_indexes.get(&query).copied() {
-                grouped_records[index].1.push((record, ttl));
-            } else {
-                let index = grouped_records.len();
-                grouped_indexes.insert(query.clone(), index);
-                grouped_records.push((query, vec![(record, ttl)]));
-            }
-        }
+                let val = (record, ttl);
+                match map.iter_mut().find(|e| e.0 == query) {
+                    Some(entry) => entry.1.push(val),
+                    None => map.push((query, vec![val])),
+                }
+
+                map
+            },
+        );
 
         // now insert by record type and name
         let mut lookup = None;
 
         if is_cname_query {
-            let mut records = Vec::new();
-            for (_, records_and_ttl) in &grouped_records {
-                records.extend(records_and_ttl.iter().cloned());
-            }
+            let records = records
+                .clone()
+                .into_iter()
+                .flat_map(|(_, r)| r)
+                .collect::<Vec<_>>();
 
             lookup = Some(
                 self.insert(original_query.clone(), records, now, name_server_group)
@@ -511,7 +521,7 @@ impl DnsCache {
             )
         }
 
-        for (query, records_and_ttl) in grouped_records {
+        for (query, records_and_ttl) in records {
             let is_query = original_query == query;
             let inserted = self
                 .insert(query, records_and_ttl, now, name_server_group)
@@ -588,159 +598,49 @@ impl DnsCache {
         now: Instant,
         seconds_ahead: Option<u64>,
     ) -> (Vec<(Query, Option<String>)>, Duration) {
-        let check_time = if self.expired_ttl > 0 {
-            now - Duration::from_secs(self.expired_ttl)
-        } else {
-            now
-        } + Duration::from_secs(seconds_ahead.unwrap_or(5)); // 5 seconds ahead
-
-        let mut most_recent = Duration::from_secs(MAX_TTL as u64);
         let mut cache = self.cache.lock().await;
-        if cache.is_empty() {
-            return (Vec::new(), most_recent);
-        }
+        let mut most_recent = Duration::from_secs(MAX_TTL as u64);
 
-        let due_queries = {
-            let mut schedule = self.prefetch_schedule.lock().await;
-            schedule.rebuild_from_cache(&cache);
-            let due_queries = schedule.drain_due(check_time);
-            if due_queries.is_empty()
-                && let Some(next_due) = schedule.time_until_next(check_time)
-            {
-                most_recent = most_recent.min(next_due);
-            }
-            due_queries
-        };
+        if !cache.is_empty() {
+            let mut expired = vec![];
+            let now = if self.expired_ttl > 0 {
+                now - Duration::from_secs(self.expired_ttl)
+            } else {
+                now
+            } + Duration::from_secs(seconds_ahead.unwrap_or(5)); // 5 seconds ahead
 
-        if due_queries.is_empty() {
-            return (Vec::new(), most_recent);
-        }
-
-        let mut expired = vec![];
-        let mut reschedule_queries = vec![];
-
-        for query in due_queries {
-            let Some(entry) = cache.get_mut(&query) else {
-                continue;
-            };
-
-            if entry.is_in_prefetching {
-                continue;
-            }
-
-            if entry.is_current(check_time) {
-                most_recent = most_recent.min(entry.ttl(check_time));
-                reschedule_queries.push((query, entry.valid_until));
-                continue;
-            }
-
-            entry.is_in_prefetching = true;
-            expired.push((
-                query,
-                entry.stats.hits,
-                entry.data.name_server_group().map(String::from),
-            ));
-        }
-        drop(cache);
-
-        if !reschedule_queries.is_empty() {
-            let mut schedule = self.prefetch_schedule.lock().await;
-            for (query, valid_until) in reschedule_queries {
-                schedule.schedule(query, valid_until);
-            }
-        }
-
-        expired.sort_by_key(|(_, hits, _)| std::cmp::Reverse(*hits));
-        (
-            expired.into_iter().map(|(q, _, g)| (q, g)).collect(),
-            most_recent,
-        )
-    }
-}
-
-#[derive(Default)]
-struct PrefetchSchedule {
-    by_query: HashMap<Query, Instant>,
-    by_deadline: BTreeMap<Instant, Vec<Query>>,
-}
-
-impl PrefetchSchedule {
-    fn clear(&mut self) {
-        self.by_query.clear();
-        self.by_deadline.clear();
-    }
-
-    fn is_empty(&self) -> bool {
-        self.by_query.is_empty()
-    }
-
-    fn schedule(&mut self, query: Query, deadline: Instant) {
-        if !query.query_type().is_ip_addr() {
-            return;
-        }
-
-        self.remove_query(&query);
-        self.by_query.insert(query.clone(), deadline);
-        self.by_deadline.entry(deadline).or_default().push(query);
-    }
-
-    fn time_until_next(&self, now: Instant) -> Option<Duration> {
-        self.by_deadline
-            .first_key_value()
-            .map(|(deadline, _)| deadline.saturating_duration_since(now))
-    }
-
-    fn drain_due(&mut self, now: Instant) -> Vec<Query> {
-        let mut due = Vec::new();
-
-        while let Some((deadline, _)) = self.by_deadline.first_key_value() {
-            if *deadline > now {
-                break;
-            }
-
-            let Some((deadline, queries)) = self.by_deadline.pop_first() else {
-                break;
-            };
-
-            for query in queries {
-                if self
-                    .by_query
-                    .get(&query)
-                    .is_some_and(|scheduled| *scheduled == deadline)
-                {
-                    self.by_query.remove(&query);
-                    due.push(query);
+            for (query, entry) in cache.iter_mut() {
+                if entry.is_in_prefetching {
+                    continue;
                 }
-            }
-        }
-
-        due
-    }
-
-    fn rebuild_from_cache(&mut self, cache: &LruCache<Query, DnsCacheEntry>) {
-        if !self.is_empty() {
-            return;
-        }
-
-        for (query, entry) in cache.iter() {
-            if query.query_type().is_ip_addr() && !entry.is_in_prefetching {
-                self.schedule(query.clone(), entry.valid_until);
-            }
-        }
-    }
-
-    fn remove_query(&mut self, query: &Query) {
-        if let Some(old_deadline) = self.by_query.remove(query) {
-            let mut remove_bucket = false;
-            if let Some(queries) = self.by_deadline.get_mut(&old_deadline) {
-                if let Some(index) = queries.iter().position(|q| q == query) {
-                    queries.swap_remove(index);
+                // only prefetch query type ip addr
+                if !query.query_type().is_ip_addr() {
+                    continue;
                 }
-                remove_bucket = queries.is_empty();
+
+                if entry.is_current(now) {
+                    most_recent = most_recent.min(entry.ttl(now));
+                    continue;
+                }
+
+                entry.is_in_prefetching = true;
+
+                expired.push((
+                    query.to_owned(),
+                    entry.stats.hits,
+                    entry.data.name_server_group().map(String::from),
+                ));
             }
-            if remove_bucket {
-                self.by_deadline.remove(&old_deadline);
-            }
+            drop(cache);
+
+            expired.sort_by_key(|(_, hits, _)| std::cmp::Reverse(*hits));
+
+            (
+                expired.into_iter().map(|(q, _, g)| (q, g)).collect(),
+                most_recent,
+            )
+        } else {
+            (Vec::with_capacity(0), most_recent)
         }
     }
 }
