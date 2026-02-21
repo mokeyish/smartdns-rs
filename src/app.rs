@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -198,9 +199,11 @@ impl App {
 
         loop {
             let cfg = self.cfg().await;
+            let cache_dir = cfg.domain_set_cache_dir().map(Path::to_path_buf);
             sync_remote_domain_set_states(
                 &cfg.domain_set_providers,
                 cfg.remote_domain_set_snapshots(),
+                cache_dir.as_deref(),
                 &mut states,
                 Instant::now(),
             );
@@ -255,12 +258,14 @@ struct RemoteDomainSetState {
     provider: DomainSetHttpProvider,
     interval: Duration,
     next_check_at: Instant,
+    cache_file: Option<PathBuf>,
     last_domain_set: Option<HashSet<WildcardName>>,
 }
 
 fn sync_remote_domain_set_states(
     providers: &HashMap<String, Vec<DomainSetProvider>>,
     snapshots: &HashMap<String, HashMap<String, HashSet<WildcardName>>>,
+    cache_dir: Option<&Path>,
     states: &mut HashMap<RemoteDomainSetKey, RemoteDomainSetState>,
     now: Instant,
 ) {
@@ -286,6 +291,7 @@ fn sync_remote_domain_set_states(
             };
             active_keys.insert(key.clone());
             let interval = Duration::from_secs(interval as u64);
+            let cache_file = cache_dir.map(|dir| http_provider.cache_file_path(set_name, dir));
 
             match states.entry(key.clone()) {
                 Entry::Occupied(mut entry) => {
@@ -293,10 +299,13 @@ fn sync_remote_domain_set_states(
                     if state.provider != *http_provider {
                         state.provider = http_provider.clone();
                         state.interval = interval;
+                        state.cache_file = cache_file.clone();
                         state.next_check_at = now + interval;
                     } else if state.interval != interval {
                         state.interval = interval;
                         state.next_check_at = now + interval;
+                    } else if state.cache_file != cache_file {
+                        state.cache_file = cache_file.clone();
                     }
                 }
                 Entry::Vacant(entry) => {
@@ -308,6 +317,7 @@ fn sync_remote_domain_set_states(
                         provider: http_provider.clone(),
                         interval,
                         next_check_at: now + interval,
+                        cache_file,
                         last_domain_set: snapshot,
                     });
                 }
@@ -327,19 +337,23 @@ async fn refresh_due_remote_domain_sets(
     for (key, state) in states.iter_mut() {
         if state.next_check_at <= now {
             state.next_check_at = now + state.interval;
-            due_states.push((key.clone(), state.provider.clone()));
+            due_states.push((
+                key.clone(),
+                state.provider.clone(),
+                state.cache_file.clone(),
+            ));
         }
     }
 
     let mut changed = Vec::new();
 
-    for (key, provider) in due_states {
+    for (key, provider, cache_file) in due_states {
         let set_name = key.set_name.clone();
         let url = key.url.clone();
 
         match tokio::time::timeout(
             REMOTE_DOMAIN_SET_FETCH_TIMEOUT,
-            fetch_remote_domain_set(provider),
+            fetch_remote_domain_set(set_name.as_str(), provider, cache_file),
         )
         .await
         {
@@ -370,11 +384,16 @@ async fn refresh_due_remote_domain_sets(
 }
 
 async fn fetch_remote_domain_set(
+    set_name: &str,
     provider: DomainSetHttpProvider,
+    cache_file: Option<PathBuf>,
 ) -> anyhow::Result<HashSet<WildcardName>> {
-    tokio::task::spawn_blocking(move || provider.get_domain_set())
-        .await
-        .map_err(|err| anyhow::anyhow!("join remote domain-set fetch task failed: {err}"))?
+    let set_name = set_name.to_string();
+    tokio::task::spawn_blocking(move || {
+        provider.refresh_and_persist(set_name.as_str(), cache_file.as_deref())
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("join remote domain-set fetch task failed: {err}"))?
 }
 
 fn next_remote_domain_set_sleep_duration(
@@ -794,6 +813,7 @@ mod tests {
             },
             interval: Duration::from_secs(interval as u64),
             next_check_at: now + Duration::from_secs(interval as u64),
+            cache_file: None,
             last_domain_set: None,
         }
     }
@@ -820,7 +840,7 @@ mod tests {
         let now = Instant::now();
         let mut states = HashMap::new();
 
-        sync_remote_domain_set_states(&providers, &snapshots, &mut states, now);
+        sync_remote_domain_set_states(&providers, &snapshots, None, &mut states, now);
 
         assert_eq!(states.len(), 1);
         let key = RemoteDomainSetKey {
@@ -863,7 +883,7 @@ mod tests {
             ),
         ]);
 
-        sync_remote_domain_set_states(&providers, &snapshots, &mut states, now);
+        sync_remote_domain_set_states(&providers, &snapshots, None, &mut states, now);
 
         assert_eq!(states.len(), 1);
         let key = RemoteDomainSetKey {
