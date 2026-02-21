@@ -44,6 +44,7 @@ pub struct RuntimeConfig {
     rule_groups: HashMap<String, RuleGroup>,
 
     domain_rule_group_map: HashMap<String, DomainRuleMap>,
+    remote_domain_set_snapshots: HashMap<String, HashMap<String, HashSet<WildcardName>>>,
 
     proxy_servers: Arc<HashMap<String, ProxyConfig>>,
 
@@ -640,6 +641,12 @@ impl RuntimeConfig {
         self.managed_dir.as_deref()
     }
 
+    pub(crate) fn remote_domain_set_snapshots(
+        &self,
+    ) -> &HashMap<String, HashMap<String, HashSet<WildcardName>>> {
+        &self.remote_domain_set_snapshots
+    }
+
     pub fn reload_new(&self) -> anyhow::Result<Arc<RuntimeConfig>> {
         let builder = RuntimeConfigBuilder {
             conf_dir: self.conf_dir.clone(),
@@ -730,6 +737,8 @@ impl RuntimeConfigBuilder {
         }
 
         let mut domain_sets: HashMap<String, HashSet<WildcardName>> = HashMap::new();
+        let mut remote_domain_set_snapshots: HashMap<String, HashMap<String, HashSet<WildcardName>>> =
+            HashMap::new();
 
         for (set_name, providers) in &cfg.domain_set_providers {
             let set = domain_sets.entry(set_name.to_string()).or_default();
@@ -737,6 +746,12 @@ impl RuntimeConfigBuilder {
                 match p.get_domain_set() {
                     Ok(s) => {
                         log::info!("DoaminSet load {} records into {}", s.len(), p.name());
+                        if let DomainSetProvider::Http(provider) = p {
+                            remote_domain_set_snapshots
+                                .entry(set_name.to_string())
+                                .or_default()
+                                .insert(provider.url.to_string(), s.clone());
+                        }
                         set.extend(s);
                     }
                     Err(err) => {
@@ -872,6 +887,7 @@ impl RuntimeConfigBuilder {
             inner: cfg,
             rule_groups: self.rule_groups,
             domain_rule_group_map,
+            remote_domain_set_snapshots,
             bogus_nxdomain,
             blacklist_ip,
             whitelist_ip,

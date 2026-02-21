@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
     sync::{
         Arc,
@@ -8,12 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{RwLock, Semaphore},
+    sync::{Mutex, RwLock, Semaphore},
     task::JoinSet,
 };
 
 use crate::{
-    config::ServerOpts,
+    config::{DomainSetHttpProvider, DomainSetProvider, IDomainSetProvider, ServerOpts, WildcardName},
     dns::{DnsRequest, DnsResponse, SerialMessage},
     dns_client::DnsClient,
     dns_conf::RuntimeConfig,
@@ -45,6 +45,7 @@ impl App {
                     uptime: Instant::now(),
                     loaded_at: RwLock::const_new(Instant::now()),
                     active_queries: Default::default(),
+                    reload_lock: Mutex::new(()),
                     guard: AppGuard,
                 }
                 .into(),
@@ -61,6 +62,7 @@ impl App {
     }
 
     pub async fn reload(&self) -> anyhow::Result<()> {
+        let _reload_guard = self.reload_lock.lock().await;
         log::info!("reloading configuration...");
         let cfg = self.cfg().await;
         let cfg = cfg.reload_new()?;
@@ -89,6 +91,7 @@ impl App {
     async fn init(&self) {
         self.update_middleware_handler().await;
         self.update_listeners().await;
+        self.start_remote_domain_set_updater();
         crate::banner();
         log::info!("awaiting connections...");
         log::info!("server starting up");
@@ -180,6 +183,204 @@ impl App {
 
         *self.mw_handler.write().await = middleware_handler;
     }
+
+    fn start_remote_domain_set_updater(&self) {
+        let app = self.clone();
+        tokio::spawn(async move {
+            app.remote_domain_set_updater_loop().await;
+        });
+    }
+
+    async fn remote_domain_set_updater_loop(self) {
+        let mut states = HashMap::new();
+
+        loop {
+            let cfg = self.cfg().await;
+            sync_remote_domain_set_states(
+                &cfg.domain_set_providers,
+                cfg.remote_domain_set_snapshots(),
+                &mut states,
+                Instant::now(),
+            );
+            drop(cfg);
+
+            let changed = refresh_due_remote_domain_sets(&mut states, Instant::now()).await;
+
+            if !changed.is_empty() {
+                let changed_names = changed
+                    .iter()
+                    .map(|(key, _)| format!("{}({})", key.set_name, key.url))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                log::info!("detected remote domain-set updates, reloading: {changed_names}");
+                match self.reload().await {
+                    Ok(()) => {
+                        for (key, set) in changed {
+                            if let Some(state) = states.get_mut(&key) {
+                                state.last_domain_set = Some(set);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "reload configuration failed after remote domain-set update: {}",
+                            err
+                        );
+                    }
+                }
+            }
+
+            tokio::time::sleep(next_remote_domain_set_sleep_duration(
+                &states,
+                Instant::now(),
+            ))
+            .await;
+        }
+    }
+}
+
+const REMOTE_DOMAIN_SET_IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+const REMOTE_DOMAIN_SET_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RemoteDomainSetKey {
+    set_name: String,
+    url: String,
+}
+
+#[derive(Debug, Clone)]
+struct RemoteDomainSetState {
+    provider: DomainSetHttpProvider,
+    interval: Duration,
+    next_check_at: Instant,
+    last_domain_set: Option<HashSet<WildcardName>>,
+}
+
+fn sync_remote_domain_set_states(
+    providers: &HashMap<String, Vec<DomainSetProvider>>,
+    snapshots: &HashMap<String, HashMap<String, HashSet<WildcardName>>>,
+    states: &mut HashMap<RemoteDomainSetKey, RemoteDomainSetState>,
+    now: Instant,
+) {
+    use std::collections::hash_map::Entry;
+
+    let mut active_keys = HashSet::new();
+
+    for (set_name, set_providers) in providers {
+        for provider in set_providers {
+            let DomainSetProvider::Http(http_provider) = provider else {
+                continue;
+            };
+            let Some(interval) = http_provider.interval else {
+                continue;
+            };
+            if interval == 0 {
+                continue;
+            }
+
+            let key = RemoteDomainSetKey {
+                set_name: set_name.clone(),
+                url: http_provider.url.to_string(),
+            };
+            active_keys.insert(key.clone());
+            let interval = Duration::from_secs(interval as u64);
+
+            match states.entry(key.clone()) {
+                Entry::Occupied(mut entry) => {
+                    let state = entry.get_mut();
+                    if state.provider != *http_provider {
+                        state.provider = http_provider.clone();
+                        state.interval = interval;
+                        state.next_check_at = now + interval;
+                    } else if state.interval != interval {
+                        state.interval = interval;
+                        state.next_check_at = now + interval;
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    let snapshot = snapshots
+                        .get(set_name)
+                        .and_then(|set| set.get(http_provider.url.as_str()))
+                        .cloned();
+                    entry.insert(RemoteDomainSetState {
+                        provider: http_provider.clone(),
+                        interval,
+                        next_check_at: now + interval,
+                        last_domain_set: snapshot,
+                    });
+                }
+            }
+        }
+    }
+
+    states.retain(|key, _| active_keys.contains(key));
+}
+
+async fn refresh_due_remote_domain_sets(
+    states: &mut HashMap<RemoteDomainSetKey, RemoteDomainSetState>,
+    now: Instant,
+) -> Vec<(RemoteDomainSetKey, HashSet<WildcardName>)> {
+    let mut due_states = Vec::new();
+
+    for (key, state) in states.iter_mut() {
+        if state.next_check_at <= now {
+            state.next_check_at = now + state.interval;
+            due_states.push((key.clone(), state.provider.clone()));
+        }
+    }
+
+    let mut changed = Vec::new();
+
+    for (key, provider) in due_states {
+        let set_name = key.set_name.clone();
+        let url = key.url.clone();
+
+        match tokio::time::timeout(REMOTE_DOMAIN_SET_FETCH_TIMEOUT, fetch_remote_domain_set(provider))
+            .await
+        {
+            Ok(Ok(next_set)) => {
+                if let Some(state) = states.get_mut(&key) {
+                    match state.last_domain_set.as_ref() {
+                        Some(last_set) if last_set != &next_set => changed.push((key, next_set)),
+                        Some(_) => (),
+                        None => changed.push((key, next_set)),
+                    }
+                }
+            }
+            Ok(Err(err)) => {
+                log::warn!(
+                    "refresh remote domain-set failed {}({}): {}",
+                    set_name,
+                    url,
+                    err
+                );
+            }
+            Err(_) => {
+                log::warn!("refresh remote domain-set timeout {}({})", set_name, url);
+            }
+        }
+    }
+
+    changed
+}
+
+async fn fetch_remote_domain_set(
+    provider: DomainSetHttpProvider,
+) -> anyhow::Result<HashSet<WildcardName>> {
+    tokio::task::spawn_blocking(move || provider.get_domain_set())
+        .await
+        .map_err(|err| anyhow::anyhow!("join remote domain-set fetch task failed: {err}"))?
+}
+
+fn next_remote_domain_set_sleep_duration(
+    states: &HashMap<RemoteDomainSetKey, RemoteDomainSetState>,
+    now: Instant,
+) -> Duration {
+    states
+        .values()
+        .map(|state| state.next_check_at.saturating_duration_since(now))
+        .min()
+        .unwrap_or(REMOTE_DOMAIN_SET_IDLE_CHECK_INTERVAL)
 }
 
 impl std::ops::Deref for App {
@@ -199,6 +400,7 @@ pub struct AppState {
     uptime: Instant,
     loaded_at: RwLock<Instant>,
     active_queries: AtomicUsize,
+    reload_lock: Mutex<()>,
     guard: AppGuard,
 }
 
@@ -552,4 +754,119 @@ fn build_middleware(
     };
 
     Arc::new(middleware_handler)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use url::Url;
+
+    use super::*;
+    use crate::config::DomainSetContentType;
+
+    fn make_http_provider(name: &str, url: &str, interval: Option<usize>) -> DomainSetProvider {
+        DomainSetProvider::Http(DomainSetHttpProvider {
+            name: name.to_string(),
+            url: Url::parse(url).unwrap(),
+            interval,
+            content_type: DomainSetContentType::List,
+        })
+    }
+
+    fn make_http_state(
+        name: &str,
+        url: &str,
+        interval: usize,
+        now: Instant,
+    ) -> RemoteDomainSetState {
+        RemoteDomainSetState {
+            provider: DomainSetHttpProvider {
+                name: name.to_string(),
+                url: Url::parse(url).unwrap(),
+                interval: Some(interval),
+                content_type: DomainSetContentType::List,
+            },
+            interval: Duration::from_secs(interval as u64),
+            next_check_at: now + Duration::from_secs(interval as u64),
+            last_domain_set: None,
+        }
+    }
+
+    #[test]
+    fn test_sync_remote_domain_set_states_seed_snapshot() {
+        let tracked_url = "https://example.com/ads.txt";
+        let ignored_url = "https://example.com/ignore.txt";
+
+        let providers = HashMap::from([(
+            "ads".to_string(),
+            vec![
+                make_http_provider("ads", tracked_url, Some(30)),
+                make_http_provider("ads", ignored_url, None),
+            ],
+        )]);
+
+        let snapshot_set = HashSet::from([WildcardName::from_str("ads.example.com").unwrap()]);
+        let snapshots = HashMap::from([(
+            "ads".to_string(),
+            HashMap::from([(tracked_url.to_string(), snapshot_set.clone())]),
+        )]);
+
+        let now = Instant::now();
+        let mut states = HashMap::new();
+
+        sync_remote_domain_set_states(&providers, &snapshots, &mut states, now);
+
+        assert_eq!(states.len(), 1);
+        let key = RemoteDomainSetKey {
+            set_name: "ads".to_string(),
+            url: tracked_url.to_string(),
+        };
+        let state = states.get(&key).unwrap();
+        assert_eq!(state.interval, Duration::from_secs(30));
+        assert_eq!(state.last_domain_set.as_ref(), Some(&snapshot_set));
+        assert!(state.next_check_at >= now + Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_sync_remote_domain_set_states_update_and_remove() {
+        let active_url = "https://example.com/active.txt";
+        let stale_url = "https://example.com/stale.txt";
+
+        let providers = HashMap::from([(
+            "block".to_string(),
+            vec![make_http_provider("block", active_url, Some(120))],
+        )]);
+
+        let snapshots = HashMap::<String, HashMap<String, HashSet<WildcardName>>>::new();
+        let now = Instant::now();
+
+        let mut states = HashMap::from([
+            (
+                RemoteDomainSetKey {
+                    set_name: "block".to_string(),
+                    url: active_url.to_string(),
+                },
+                make_http_state("block", active_url, 60, now),
+            ),
+            (
+                RemoteDomainSetKey {
+                    set_name: "block".to_string(),
+                    url: stale_url.to_string(),
+                },
+                make_http_state("block", stale_url, 60, now),
+            ),
+        ]);
+
+        sync_remote_domain_set_states(&providers, &snapshots, &mut states, now);
+
+        assert_eq!(states.len(), 1);
+        let key = RemoteDomainSetKey {
+            set_name: "block".to_string(),
+            url: active_url.to_string(),
+        };
+        let state = states.get(&key).unwrap();
+        assert_eq!(state.interval, Duration::from_secs(120));
+        assert!(state.next_check_at >= now + Duration::from_secs(120));
+    }
 }
