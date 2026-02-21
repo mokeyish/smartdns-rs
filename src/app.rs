@@ -15,7 +15,7 @@ use tokio::{
 
 use crate::{
     config::{
-        DomainSetHttpProvider, DomainSetProvider, IDomainSetProvider, ServerOpts, WildcardName,
+        DomainSetHttpProvider, DomainSetProvider, ServerOpts, WildcardName,
     },
     dns::{DnsRequest, DnsResponse, SerialMessage},
     dns_client::DnsClient,
