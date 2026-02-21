@@ -123,7 +123,7 @@ jobs:
           fallback_sha: ${{ github.sha }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: smartdns-${{ matrix.target }}-${{ steps.release_label.outputs.value }}
           retention-days: 30
