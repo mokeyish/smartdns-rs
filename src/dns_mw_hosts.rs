@@ -47,15 +47,7 @@ impl DnsHostsMiddleware {
             }
         }
 
-        {
-            let mut cache = self.0.write().await;
-            if let Some(cache) = cache.as_mut() {
-                if now.duration_since(cache.checked_at) < HOSTS_FILE_STAT_INTERVAL {
-                    return cache.hosts.clone();
-                }
-            }
-        }
-
+        // Collect file metadata outside the lock to avoid blocking readers/writers.
         let signature = collect_hosts_signature(hosts_file_pattern);
 
         {
