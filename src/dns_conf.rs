@@ -737,8 +737,10 @@ impl RuntimeConfigBuilder {
         }
 
         let mut domain_sets: HashMap<String, HashSet<WildcardName>> = HashMap::new();
-        let mut remote_domain_set_snapshots: HashMap<String, HashMap<String, HashSet<WildcardName>>> =
-            HashMap::new();
+        let mut remote_domain_set_snapshots: HashMap<
+            String,
+            HashMap<String, HashSet<WildcardName>>,
+        > = HashMap::new();
 
         for (set_name, providers) in &cfg.domain_set_providers {
             let set = domain_sets.entry(set_name.to_string()).or_default();

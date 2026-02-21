@@ -13,7 +13,9 @@ use tokio::{
 };
 
 use crate::{
-    config::{DomainSetHttpProvider, DomainSetProvider, IDomainSetProvider, ServerOpts, WildcardName},
+    config::{
+        DomainSetHttpProvider, DomainSetProvider, IDomainSetProvider, ServerOpts, WildcardName,
+    },
     dns::{DnsRequest, DnsResponse, SerialMessage},
     dns_client::DnsClient,
     dns_conf::RuntimeConfig,
@@ -335,8 +337,11 @@ async fn refresh_due_remote_domain_sets(
         let set_name = key.set_name.clone();
         let url = key.url.clone();
 
-        match tokio::time::timeout(REMOTE_DOMAIN_SET_FETCH_TIMEOUT, fetch_remote_domain_set(provider))
-            .await
+        match tokio::time::timeout(
+            REMOTE_DOMAIN_SET_FETCH_TIMEOUT,
+            fetch_remote_domain_set(provider),
+        )
+        .await
         {
             Ok(Ok(next_set)) => {
                 if let Some(state) = states.get_mut(&key) {
