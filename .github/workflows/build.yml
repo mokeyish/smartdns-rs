@@ -103,6 +103,8 @@ jobs:
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          rust_target: ${{ matrix.target }}
 
       - name: Build
         run: just build --release --no-default-features --features ${{ inputs.features }} --target=${{ matrix.target }}
@@ -113,10 +115,17 @@ jobs:
         run: just target=${{ matrix.target }} pack
         shell: bash
 
+      - name: Compute release label
+        id: release_label
+        uses: ./.github/actions/sanitize-label
+        with:
+          raw_label: ${{ inputs.version || github.ref_name }}
+          fallback_sha: ${{ github.sha }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: smartdns-${{ matrix.target }}-${{ inputs.version || github.ref_name }}
+          name: smartdns-${{ matrix.target }}-${{ steps.release_label.outputs.value }}
           retention-days: 30
           path: |
             dist/*.zip
@@ -168,6 +177,12 @@ jobs:
       -
         name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Compute release label
+        id: release_label
+        uses: ./.github/actions/sanitize-label
+        with:
+          raw_label: ${{ inputs.version || github.ref_name }}
+          fallback_sha: ${{ github.sha }}
       - name: Build and push Docker image
         run: |
-          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version }} -t ghcr.io/mokeyish/smartdns-rs:${{ inputs.version || github.ref_name }} --push -f ./docker/Dockerfile .
+          docker buildx build --platform linux/amd64 --platform linux/arm64 --platform linux/arm/v7 --build-arg VERSION=${{ inputs.version }} -t ghcr.io/mokeyish/smartdns-rs:${{ steps.release_label.outputs.value }} --push -f ./docker/Dockerfile .

@@ -1,0 +1,38 @@
+name: "Sanitize Label"
+description: "Sanitize branch/version label for artifact names and tags."
+
+inputs:
+  raw_label:
+    description: "Raw label input, e.g. version or branch name."
+    required: true
+  fallback_sha:
+    description: "Fallback commit SHA when sanitized label is empty."
+    required: false
+    default: ""
+
+outputs:
+  value:
+    description: "Sanitized label (A-Za-z0-9._- only)."
+    value: ${{ steps.sanitize.outputs.value }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Sanitize label
+      id: sanitize
+      shell: bash
+      env:
+        RAW_LABEL: ${{ inputs.raw_label }}
+        FALLBACK_SHA: ${{ inputs.fallback_sha }}
+      run: |
+        value="${RAW_LABEL}"
+        value="${value//[^A-Za-z0-9._-]/-}"
+        value="$(echo "$value" | sed -E 's/-+/-/g; s/^-+//; s/-+$//')"
+        if [ -z "$value" ]; then
+          if [ -n "$FALLBACK_SHA" ]; then
+            value="${FALLBACK_SHA:0:12}"
+          else
+            value="unknown"
+          fi
+        fi
+        echo "value=$value" >> "$GITHUB_OUTPUT"
