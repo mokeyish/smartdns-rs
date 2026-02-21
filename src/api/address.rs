@@ -87,6 +87,8 @@ async fn create(
         std::fs::write(&file, format!("{config}"))?;
     }
 
+    state.app.reload().await?;
+
     Ok(StatusCode::CREATED)
 }
 
@@ -137,6 +139,7 @@ async fn delete(
     }
 
     std::fs::write(&file, format!("{config}"))?;
+    state.app.reload().await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
