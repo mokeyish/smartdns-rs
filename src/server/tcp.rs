@@ -8,8 +8,8 @@ use crate::{
     dns::SerialMessage,
     libdns::{
         Protocol,
-        proto::runtime::iocompat::AsyncIoTokioAsStd,
-        proto::{tcp::TcpStream, xfer::DnsStreamHandle as _},
+        net::runtime::iocompat::AsyncIoTokioAsStd,
+        net::{tcp::TcpStream, xfer::DnsStreamHandle as _},
     },
     log,
     third_ext::FutureTimeoutExt,

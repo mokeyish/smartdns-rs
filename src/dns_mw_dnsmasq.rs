@@ -1,4 +1,5 @@
 use crate::dns::*;
+use crate::dns_error::LookupError;
 use crate::dnsmasq::LanClientStore;
 use crate::middleware::*;
 use std::borrow::Borrow;
@@ -18,13 +19,13 @@ impl DnsmasqMiddleware {
 }
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsmasqMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for DnsmasqMiddleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         if let Some(rdata) = self
             .client_store
             .lookup(req.query().name().borrow(), req.query().query_type())

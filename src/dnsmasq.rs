@@ -91,19 +91,16 @@ impl LanClientStore {
     pub fn lookup(&self, name: &Name, record_type: RecordType) -> Option<RData> {
         match record_type {
             RecordType::A | RecordType::AAAA => {
-                let store = match self.cached_clients() {
-                    Some(v) => v,
-                    None => return None,
-                };
+                let store = self.cached_clients()?;
 
                 let mut name = name.clone();
 
                 if !name.is_fqdn() {
                     // try add zone
-                    if let Some(zone) = self.zone.as_ref() {
-                        if let Ok(n) = name.clone().append_name(zone) {
-                            name = n;
-                        }
+                    if let Some(zone) = self.zone.as_ref()
+                        && let Ok(n) = name.clone().append_name(zone)
+                    {
+                        name = n;
                     }
                     name.set_fqdn(true);
                 }
@@ -227,10 +224,10 @@ fn read_lease_file<P: AsRef<Path>>(
         }
 
         if let Ok(mut client_info) = ClientInfo::from_str(line) {
-            if let Some(z) = zone {
-                if let Ok(host) = client_info.host.clone().append_name(z) {
-                    client_info.host = host;
-                }
+            if let Some(z) = zone
+                && let Ok(host) = client_info.host.clone().append_name(z)
+            {
+                client_info.host = host;
             }
             client_info.host.set_fqdn(true);
             map.insert(client_info.host.clone().into(), client_info);
@@ -243,7 +240,7 @@ fn read_lease_file<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
 
-    use crate::libdns::resolver::IntoName;
+    use crate::libdns::proto::rr::IntoName;
 
     use super::*;
 

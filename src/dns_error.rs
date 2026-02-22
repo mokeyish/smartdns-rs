@@ -1,9 +1,13 @@
 use crate::dns::{DefaultSOA as _, DnsResponse};
-use crate::libdns::proto::{
-    AuthorityData, NoRecords, ProtoError, ProtoErrorKind,
-    op::{Query, ResponseCode},
-    rr::{Record, rdata::SOA},
+use crate::libdns::{
+    net::{DnsError, NetError, NoRecords},
+    proto::{
+        ProtoError,
+        op::{Query, ResponseCode},
+        rr::{Record, rdata::SOA},
+    },
 };
+
 use std::{io, sync::Arc};
 use thiserror::Error;
 
@@ -21,6 +25,12 @@ pub enum LookupError {
     /// An error got returned by the hickory-proto crate
     #[error("proto error: {0}")]
     Proto(#[from] ProtoError),
+    /// An error got returned by the hickory-net crate
+    #[error("net error: {0}")]
+    Net(#[from] NetError),
+    /// Semantic DNS errors
+    #[error("DNS error: {0}")]
+    Dns(#[from] DnsError),
     /// An underlying IO error occurred
     #[error("io error: {0}")]
     Io(Arc<io::Error>),
@@ -44,24 +54,23 @@ impl LookupError {
 
     #[inline]
     pub fn is_soa(&self) -> bool {
-        if let Self::Proto(err) = self {
-            if let ProtoErrorKind::NoRecordsFound(NoRecords { soa: Some(_), .. }) = err.kind() {
-                return true;
-            }
+        if let Self::Dns(err) = self
+            && let DnsError::NoRecordsFound(NoRecords { soa: Some(_), .. }) = err
+        {
+            return true;
         }
         false
     }
 
     pub fn as_soa(&self, query: &Query) -> Option<DnsResponse> {
-        if let Self::Proto(err) = self {
-            if let ProtoErrorKind::NoRecordsFound(NoRecords {
+        if let Self::Dns(err) = self
+            && let DnsError::NoRecordsFound(NoRecords {
                 soa: Some(record), ..
-            }) = err.kind()
-            {
-                let mut dns_response = DnsResponse::new_with_max_ttl(query.to_owned(), Vec::new());
-                dns_response.add_authority(record.as_ref().to_owned().into_record_of_rdata());
-                return Some(dns_response);
-            }
+            }) = err
+        {
+            let mut dns_response = DnsResponse::new_with_max_ttl(query.to_owned(), Vec::new());
+            dns_response.add_authority(record.as_ref().to_owned().into_record_of_rdata());
+            return Some(dns_response);
         }
         None
     }
@@ -69,11 +78,10 @@ impl LookupError {
     pub fn no_records_found(query: Query, ttl: u32) -> LookupError {
         let soa = Record::from_rdata(query.name().to_owned(), ttl, SOA::default_soa());
 
-        let no_records = AuthorityData::new(query.into(), Some(Box::new(soa)), true, true, None);
-        let mut no_records: NoRecords = no_records.into();
-        no_records.response_code = ResponseCode::ServFail;
+        let mut no_records = NoRecords::new(query, ResponseCode::ServFail);
+        no_records.soa = Some(Box::new(soa));
 
-        ProtoErrorKind::NoRecordsFound(no_records).into()
+        DnsError::NoRecordsFound(no_records).into()
     }
 }
 
@@ -83,8 +91,8 @@ impl From<ResponseCode> for LookupError {
     }
 }
 
-impl From<ProtoErrorKind> for LookupError {
-    fn from(value: ProtoErrorKind) -> Self {
-        Self::Proto(value.into())
+impl From<io::Error> for LookupError {
+    fn from(value: io::Error) -> Self {
+        Self::Io(Arc::new(value))
     }
 }
