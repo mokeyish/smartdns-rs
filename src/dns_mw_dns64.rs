@@ -1,4 +1,5 @@
 use crate::dns::*;
+use crate::dns_error::LookupError;
 use crate::middleware::*;
 use ipnet::Ipv6Net;
 use std::net::IpAddr;
@@ -16,13 +17,13 @@ impl Dns64Middleware {
 }
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for Dns64Middleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for Dns64Middleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         let query = req.query().original();
         let query_type = query.query_type();
         match query_type {

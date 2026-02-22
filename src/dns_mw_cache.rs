@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use crate::config::ServerOpts;
 use crate::dns_conf::RuntimeConfig;
+use crate::dns_error::LookupError;
 use crate::libdns::proto::ProtoError;
 use crate::log;
 use crate::server::DnsHandle;
@@ -181,13 +182,13 @@ impl DnsCacheMiddleware {
 }
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for DnsCacheMiddleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         // skip cache
         if ctx.server_opts.no_cache() || ctx.no_cache || req.is_dnssec() {
             return next.run(ctx, req).await;
@@ -296,12 +297,12 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                         )
                         .await;
 
-                    if ctx.cfg().prefetch_domain() {
-                        if let Some(ttl) = lookup.min_ttl() {
-                            self.prefetch_notify
-                                .notify_after(Duration::from_secs(ttl as u64))
-                                .await;
-                        }
+                    if ctx.cfg().prefetch_domain()
+                        && let Some(ttl) = lookup.min_ttl()
+                    {
+                        self.prefetch_notify
+                            .notify_after(Duration::from_secs(ttl as u64))
+                            .await;
                     }
                 }
                 Ok(lookup)
@@ -537,7 +538,7 @@ impl DnsCache {
 
     /// This converts the ResolveError to set the inner negative_ttl value to be the
     ///  current expiration ttl.
-    fn nx_error_with_ttl(_error: &mut DnsError, _new_ttl: Duration) {
+    fn nx_error_with_ttl(_error: &mut LookupError, _new_ttl: Duration) {
         // if let ResolveError {
         //     kind:
         //         ResolveErrorKind::NoRecordsFound {
@@ -810,7 +811,7 @@ impl DnsCacheEntry {
     fn serialize_many<'a>(
         entries: impl Iterator<Item = &'a DnsCacheEntry>,
         writer: &mut impl std::io::Write,
-    ) -> Result<(), ProtoError> {
+    ) -> Result<(), LookupError> {
         let mut buf = vec![];
 
         for entry in entries {
@@ -823,7 +824,7 @@ impl DnsCacheEntry {
         Ok(())
     }
 
-    fn deserialize_many(data: &[u8]) -> Result<Vec<DnsCacheEntry>, ProtoError> {
+    fn deserialize_many(data: &[u8]) -> Result<Vec<DnsCacheEntry>, LookupError> {
         let mut entries = vec![];
         let mut offset = 0;
 

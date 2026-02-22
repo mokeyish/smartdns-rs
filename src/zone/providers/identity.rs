@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 
-use crate::dns::{DnsContext, DnsError, DnsRequest, DnsResponse, RData, Record};
+use crate::dns::{DnsContext, DnsRequest, DnsResponse, RData, Record};
+use crate::dns_error::LookupError;
 use crate::infra::arp::lookup_client_mac_from_arp;
 use crate::libdns::proto::op::Query;
 use crate::libdns::proto::rr::rdata::TXT;
@@ -24,7 +25,7 @@ impl ZoneProvider for IdentityZoneProvider {
         &self,
         ctx: &DnsContext,
         req: &DnsRequest,
-    ) -> Result<Option<DnsResponse>, DnsError> {
+    ) -> Result<Option<DnsResponse>, LookupError> {
         let query = req.query().original().to_owned();
 
         if query.query_type() != RecordType::TXT {

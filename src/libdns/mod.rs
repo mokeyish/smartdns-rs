@@ -2,6 +2,10 @@ pub mod proto {
     pub use hickory_proto::*;
 }
 
+pub mod net {
+    pub use hickory_net::*;
+}
+
 pub mod resolver {
     use super::proto::rr::Record;
     pub use hickory_resolver::*;
@@ -37,7 +41,7 @@ pub mod resolver {
 pub mod bridge;
 pub mod custom;
 
-pub use proto::xfer::Protocol;
+pub use net::xfer::Protocol;
 
 pub trait ProtocolDefaultPort {
     fn default_port(&self) -> u16;

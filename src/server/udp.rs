@@ -3,7 +3,8 @@ use crate::{
     dns::SerialMessage,
     libdns::{
         Protocol,
-        proto::{DnsStreamHandle, ProtoError, runtime::TokioRuntimeProvider, udp::UdpStream},
+        net::{DnsStreamHandle, runtime::TokioRuntimeProvider, udp::UdpStream},
+        proto::ProtoError,
     },
     log,
 };

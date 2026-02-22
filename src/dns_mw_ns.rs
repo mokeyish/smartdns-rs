@@ -17,8 +17,9 @@ use crate::{
     middleware::*,
 };
 
+use crate::libdns::net::NetError;
 use crate::libdns::proto::rr::domain::usage::LOCAL;
-use crate::libdns::proto::{AuthorityData, op::ResponseCode, rr::rdata::opt::EdnsCode};
+use crate::libdns::proto::{op::ResponseCode, rr::rdata::opt::EdnsCode};
 use futures::FutureExt;
 use rr::rdata::opt::EdnsOption;
 use tokio::time::sleep;
@@ -34,34 +35,34 @@ impl NameServerMiddleware {
 }
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for NameServerMiddleware {
     #[inline]
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        _next: crate::middleware::Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        _next: crate::middleware::Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         let name: &Name = req.query().name().borrow();
         let rtype = req.query().query_type();
 
         let client = &self.client;
 
-        if rtype.is_ip_addr() {
-            if let Some(lookup) = client.lookup_nameserver(name.clone(), rtype).await {
-                debug!(
-                    "lookup nameserver {} {} ip {:?}",
-                    name,
-                    rtype,
-                    lookup
-                        .answers()
-                        .iter()
-                        .filter_map(|record| record.data().ip_addr())
-                        .collect::<Vec<_>>()
-                );
-                ctx.no_cache = true;
-                return Ok(lookup);
-            }
+        if rtype.is_ip_addr()
+            && let Some(lookup) = client.lookup_nameserver(name.clone(), rtype).await
+        {
+            debug!(
+                "lookup nameserver {} {} ip {:?}",
+                name,
+                rtype,
+                lookup
+                    .answers()
+                    .iter()
+                    .filter_map(|record| record.data().ip_addr())
+                    .collect::<Vec<_>>()
+            );
+            ctx.no_cache = true;
+            return Ok(lookup);
         }
 
         let lookup_options = LookupOptions {
@@ -102,7 +103,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                 Some(ns) => ns,
                 None => {
                     error!("no available nameserver found for {}", name);
-                    return Err(ProtoErrorKind::NoConnections.into());
+                    return Err(NetError::NoConnections.into());
                 }
             }
         };
@@ -123,6 +124,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
         if rtype.is_ip_addr() {
             let cfg = ctx.cfg();
 
+            let ttl = ctx.cfg().rr_ttl().unwrap_or_default() as u32;
+
             let mut opts = match ctx.domain_rule.as_ref() {
                 Some(rule) => LookupIpOptions {
                     response_strategy: rule
@@ -138,6 +141,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     whitelist_ip: cfg.whitelist_ip().clone(),
                     ip_alias: cfg.ip_alias().clone(),
                     lookup_options,
+                    ttl,
                 },
                 None => LookupIpOptions {
                     response_strategy: cfg.response_mode(),
@@ -148,6 +152,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
                     whitelist_ip: cfg.whitelist_ip().clone(),
                     ip_alias: cfg.ip_alias().clone(),
                     lookup_options,
+                    ttl,
                 },
             };
 
@@ -172,6 +177,7 @@ struct LookupIpOptions {
     blacklist_ip: Arc<IpSet>,
     ip_alias: Arc<IpMap<Arc<[IpAddr]>>>,
     lookup_options: LookupOptions,
+    ttl: u32,
 }
 
 impl Deref for LookupIpOptions {
@@ -210,7 +216,7 @@ async fn lookup_ip(
         .collect::<Vec<_>>();
 
     if query_tasks.is_empty() {
-        return Err(ProtoErrorKind::NoConnections.into());
+        return Err(NetError::NoConnections.into());
     }
 
     // ignore speed check
@@ -328,7 +334,7 @@ async fn lookup_ip(
                 #[allow(clippy::type_complexity)]
                 let (ping_res, query_res): (
                     Option<Result<PingOutput, PingError>>,
-                    Option<Result<DnsResponse, DnsError>>,
+                    Option<Result<DnsResponse, LookupError>>,
                 ) = match (query_tasks.len(), ping_tasks.len()) {
                     (0, 0) => break,
                     (0, _) => {
@@ -360,8 +366,8 @@ async fn lookup_ip(
                     }
                 };
 
-                if let Some(Ok(out)) = ping_res {
-                    if match fastest_ip.as_ref() {
+                if let Some(Ok(out)) = ping_res
+                    && match fastest_ip.as_ref() {
                         Some(t) => out.elapsed() < t.elapsed(),
                         None => {
                             // first get speed, add timeout
@@ -371,7 +377,7 @@ async fn lookup_ip(
                                     async {
                                         match q.timeout(Duration::from_millis(200)).await {
                                             Ok(t) => t,
-                                            Err(_) => Err(ProtoErrorKind::Timeout.into()),
+                                            Err(_) => Err(NetError::Timeout.into()),
                                         }
                                     }
                                     .boxed()
@@ -380,9 +386,9 @@ async fn lookup_ip(
 
                             true
                         }
-                    } {
-                        fastest_ip = Some(out);
                     }
+                {
+                    fastest_ip = Some(out);
                 }
 
                 if let Some(res) = query_res {
@@ -424,10 +430,10 @@ async fn lookup_ip(
             let mut last_error = None;
             loop {
                 let (res, _idx, rest) = select_all(query_tasks).await;
-                if let Ok(response) = &res {
-                    if response.response_code() == ResponseCode::NoError {
-                        return res;
-                    }
+                if let Ok(response) = &res
+                    && response.response_code() == ResponseCode::NoError
+                {
+                    return res;
                 }
 
                 if rest.is_empty() {
@@ -573,6 +579,7 @@ async fn per_nameserver_lookup_ip(
         blacklist_ip,
         ip_alias,
         ignore_ip,
+        ttl,
         ..
     } = options;
 
@@ -629,8 +636,7 @@ async fn per_nameserver_lookup_ip(
             };
 
             if answers.is_empty() {
-                let no_records = AuthorityData::new(Box::new(query), None, true, true, None);
-                return Err(ProtoErrorKind::NoRecordsFound(no_records.into()).into());
+                return Err(LookupError::no_records_found(query, *ttl));
             }
 
             *lookup.answers_mut() = answers;

@@ -7,6 +7,7 @@ use tokio::time::sleep;
 
 use crate::config::SpeedCheckMode;
 use crate::dns::*;
+use crate::dns_error::LookupError;
 use crate::log::debug;
 use crate::middleware::*;
 use crate::third_ext::FutureTimeoutExt;
@@ -14,15 +15,15 @@ use crate::third_ext::FutureTimeoutExt;
 pub struct DnsDualStackIpSelectionMiddleware;
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError>
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError>
     for DnsDualStackIpSelectionMiddleware
 {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         use RecordType::{A, AAAA};
 
         // highest priority
@@ -94,7 +95,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError>
                 req.query().name(),
                 that_type
             );
-            Err(DnsError::no_records_found(
+            Err(LookupError::no_records_found(
                 req.query().original().to_owned(),
                 ttl,
             ))

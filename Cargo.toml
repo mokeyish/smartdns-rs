@@ -51,24 +51,21 @@ self-update = ["dep:self_update"]
 resolve-cli = ["dep:console"]
 
 dns-over-tls = [
-  "hickory-proto/tls-ring",
   "hickory-resolver/tls-ring",
 ]
 dns-over-https = [
-  "hickory-proto/https-ring",
   "hickory-resolver/https-ring"
 ]
 dns-over-quic = [
-  "hickory-proto/quic-ring",
   "hickory-resolver/quic-ring",
 ]
 dns-over-h3 = [
-  "hickory-proto/h3-ring",
   "hickory-resolver/h3-ring"
 ]
 
 mdns = [
   "hickory-proto/mdns",
+  "hickory-net/mdns",
   "hickory-resolver/mdns",
 ]
 
@@ -186,8 +183,9 @@ console-subscriber = { version = "0.4.1", optional = true }
 # tracing-appender = "0.2"
 
 # hickory dns
-hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.5", features = ["serde"]}
-hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.5", features = [
+hickory-proto = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.6", features = ["serde"]}
+hickory-net = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.6"}
+hickory-resolver = { git = "https://github.com/mokeyish/hickory-dns.git", rev = "0.26.0-smartdns.6", features = [
   "serde",
   "system-config",
 ] }

@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use crate::dns_error::LookupError;
 use crate::libdns::proto::op::Query;
 use tokio::sync::RwLock;
 
@@ -81,13 +82,13 @@ impl DnsHostsMiddleware {
 const HOSTS_FILE_STAT_INTERVAL: Duration = Duration::from_secs(2);
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for DnsHostsMiddleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         let query = req.query().original();
         let is_ptr = query.query_type() == RecordType::PTR && ctx.cfg().expand_ptr_from_address();
         if query.query_type().is_ip_addr() || is_ptr {
@@ -100,7 +101,7 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsHostsMiddl
             }) {
                 return Ok(DnsResponse::new_with_deadline(
                     query.clone(),
-                    lookup.records().to_vec(),
+                    lookup.answers().to_vec(),
                     lookup.valid_until(),
                 ));
             }
@@ -298,7 +299,10 @@ mod tests {
         let hostnames = lookup
             .records()
             .iter()
-            .flat_map(|r| r.data().as_ptr())
+            .flat_map(|r| match r.data() {
+                RData::PTR(v) => Some(v),
+                _ => None,
+            })
             .collect::<Vec<_>>();
         assert_eq!(hostnames, vec![&PTR("hi.a1.".parse().unwrap())]);
 
@@ -308,7 +312,10 @@ mod tests {
         let hostnames = lookup
             .records()
             .iter()
-            .flat_map(|r| r.data().as_ptr())
+            .flat_map(|r| match r.data() {
+                RData::PTR(v) => Some(v),
+                _ => None,
+            })
             .collect::<Vec<_>>();
         assert_eq!(hostnames, vec![&PTR("hi.a2.".parse().unwrap())]);
 

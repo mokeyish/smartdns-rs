@@ -126,7 +126,7 @@ where
     }
 }
 
-impl IntoResponse for crate::dns::DnsError {
+impl IntoResponse for crate::dns_error::LookupError {
     fn into_response(self) -> Response {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
