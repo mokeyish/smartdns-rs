@@ -39,11 +39,13 @@ pub struct RuntimeConfig {
     conf_dir: Option<PathBuf>,
     conf_file: Option<PathBuf>,
     managed_dir: Option<PathBuf>,
+    domain_set_cache_dir: Option<PathBuf>,
     inner: Config,
 
     rule_groups: HashMap<String, RuleGroup>,
 
     domain_rule_group_map: HashMap<String, DomainRuleMap>,
+    remote_domain_set_snapshots: HashMap<String, HashMap<String, HashSet<WildcardName>>>,
 
     proxy_servers: Arc<HashMap<String, ProxyConfig>>,
 
@@ -640,6 +642,16 @@ impl RuntimeConfig {
         self.managed_dir.as_deref()
     }
 
+    pub(crate) fn domain_set_cache_dir(&self) -> Option<&Path> {
+        self.domain_set_cache_dir.as_deref()
+    }
+
+    pub(crate) fn remote_domain_set_snapshots(
+        &self,
+    ) -> &HashMap<String, HashMap<String, HashSet<WildcardName>>> {
+        &self.remote_domain_set_snapshots
+    }
+
     pub fn reload_new(&self) -> anyhow::Result<Arc<RuntimeConfig>> {
         let builder = RuntimeConfigBuilder {
             conf_dir: self.conf_dir.clone(),
@@ -683,6 +695,8 @@ impl RuntimeConfigBuilder {
         let conf_file = self.conf_file;
         let conf_dir = self.conf_dir;
         let mut cfg = self.config;
+        let domain_set_cache_dir =
+            resolve_domain_set_cache_dir(conf_file.as_deref(), conf_dir.as_deref());
 
         if !self.rule_group_stack.is_empty() {
             while let Some((name, group)) = self.rule_group_stack.pop() {
@@ -730,18 +744,53 @@ impl RuntimeConfigBuilder {
         }
 
         let mut domain_sets: HashMap<String, HashSet<WildcardName>> = HashMap::new();
+        let mut remote_domain_set_snapshots: HashMap<
+            String,
+            HashMap<String, HashSet<WildcardName>>,
+        > = HashMap::new();
 
         for (set_name, providers) in &cfg.domain_set_providers {
             let set = domain_sets.entry(set_name.to_string()).or_default();
             for p in providers.iter() {
-                match p.get_domain_set() {
-                    Ok(s) => {
-                        log::info!("DoaminSet load {} records into {}", s.len(), p.name());
-                        set.extend(s);
+                let loaded = match p {
+                    DomainSetProvider::Http(provider) => {
+                        match provider.load_with_cache(set_name, domain_set_cache_dir.as_deref()) {
+                            Ok((s, source)) => {
+                                let source = match source {
+                                    DomainSetHttpLoadSource::Remote => "remote",
+                                    DomainSetHttpLoadSource::Cache => "cache",
+                                };
+                                log::info!(
+                                    "DoaminSet load {} records into {} ({})",
+                                    s.len(),
+                                    p.name(),
+                                    source
+                                );
+                                remote_domain_set_snapshots
+                                    .entry(set_name.to_string())
+                                    .or_default()
+                                    .insert(provider.url.to_string(), s.clone());
+                                Some(s)
+                            }
+                            Err(err) => {
+                                log::error!("DoaminSet load failed {} {}", p.name(), err);
+                                None
+                            }
+                        }
                     }
-                    Err(err) => {
-                        log::error!("DoaminSet load failed {} {}", p.name(), err);
-                    }
+                    _ => match p.get_domain_set() {
+                        Ok(s) => {
+                            log::info!("DoaminSet load {} records into {}", s.len(), p.name());
+                            Some(s)
+                        }
+                        Err(err) => {
+                            log::error!("DoaminSet load failed {} {}", p.name(), err);
+                            None
+                        }
+                    },
+                };
+                if let Some(s) = loaded {
+                    set.extend(s);
                 }
             }
         }
@@ -869,9 +918,11 @@ impl RuntimeConfigBuilder {
             conf_dir,
             conf_file,
             managed_dir,
+            domain_set_cache_dir,
             inner: cfg,
             rule_groups: self.rule_groups,
             domain_rule_group_map,
+            remote_domain_set_snapshots,
             bogus_nxdomain,
             blacklist_ip,
             whitelist_ip,
@@ -1163,6 +1214,16 @@ fn resolve_filepath<P: AsRef<Path>>(filepath: P, base_file: Option<&PathBuf>) ->
     }
 
     filepath.to_path_buf()
+}
+
+fn resolve_domain_set_cache_dir(
+    conf_file: Option<&Path>,
+    conf_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    conf_file
+        .and_then(Path::parent)
+        .map(|dir| dir.join("domain_sets"))
+        .or_else(|| conf_dir.map(|dir| dir.join("domain_sets")))
 }
 
 #[cfg(test)]
@@ -1873,6 +1934,68 @@ mod tests {
         assert!(!domain_set.contains(&"ads2c.cn".parse().unwrap()));
         // assert!(domain_set.is_match(&Name::from_str("ads3.net").unwrap().into()));
         // assert!(domain_set.is_match(&Name::from_str("q.ads3.net").unwrap().into()));
+    }
+
+    #[test]
+    fn test_domain_set_remote_fallback_to_cache_on_startup() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use url::Url;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "smartdns-domain-set-cache-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let conf_file = temp_dir.join("smartdns.conf");
+        let remote_url = "http://127.0.0.1:1/block-list.txt";
+        let provider = DomainSetHttpProvider {
+            name: "block".to_string(),
+            url: Url::parse(remote_url).unwrap(),
+            interval: Some(30),
+            content_type: Default::default(),
+        };
+        let cache_file = provider.cache_file_path("block", &temp_dir.join("domain_sets"));
+        std::fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+        std::fs::write(&cache_file, "cached.example.com\n").unwrap();
+
+        std::fs::write(
+            &conf_file,
+            format!(
+                "domain-set -name block -url {remote_url} -interval 30\n\
+                 domain-rules /domain-set:block/ --address #\n"
+            ),
+        )
+        .unwrap();
+
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file(&conf_file)
+            .build()
+            .unwrap();
+
+        let rule = cfg
+            .domain_rule_group("default")
+            .find(&"cached.example.com".parse().unwrap())
+            .cloned();
+        assert_eq!(rule.get(|n| n.address.clone()), Some(AddressRuleValue::SOA));
+
+        let snapshots = cfg
+            .remote_domain_set_snapshots()
+            .get("block")
+            .and_then(|v| v.get(remote_url));
+        assert_eq!(
+            snapshots,
+            Some(&HashSet::from(["cached.example.com"
+                .parse::<WildcardName>()
+                .unwrap()]))
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
