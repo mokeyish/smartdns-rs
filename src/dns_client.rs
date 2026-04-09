@@ -19,17 +19,20 @@ use crate::{
 };
 
 use crate::libdns::{
+    net::xfer::{DnsHandle, FirstAnswer},
     proto::{
-        DnsHandle, ProtoError,
-        op::{Edns, Message, Query},
+        ProtoError,
+        op::{DnsRequest, DnsRequestOptions, Edns, Message, Query},
         rr::{
             Record, RecordType,
             domain::{IntoName, Name},
             rdata::opt::{ClientSubnet, EdnsOption},
         },
-        xfer::{DnsRequest, DnsRequestOptions, FirstAnswer},
     },
-    resolver::config::{ResolverOpts, ServerOrderingStrategy},
+    resolver::{
+        PoolContext, TlsConfig,
+        config::{ResolverOpts, ServerOrderingStrategy},
+    },
 };
 pub use bootstrap::BootstrapResolver;
 pub use name_server::NameServer;
@@ -93,10 +96,10 @@ impl DnsClientBuilder {
         let mut server_instances = HashMap::<&NameServerInfo, _>::new();
         let mut make_server = |server_config, resolver, dedup| {
             let entry = server_instances.entry(server_config);
-            if let std::collections::hash_map::Entry::Occupied(_) = entry {
-                if dedup {
-                    return None;
-                }
+            if let std::collections::hash_map::Entry::Occupied(_) = entry
+                && dedup
+            {
+                return None;
             }
             let server = entry.or_insert_with(|| {
                 let proxy = server_config
@@ -459,34 +462,36 @@ mod name_server {
                     tls_client_config.normal
                 };
 
-                Some(config)
+                TlsConfig {
+                    config: config.deref().clone(),
+                }
             } else {
-                None
+                TlsConfig::new()?
             };
 
-            let mut options = NameServerOpts::new(
+            let mut resolver_opts = resolver
+                .as_ref()
+                .map(|r| r.options().clone())
+                .unwrap_or_default();
+
+            resolver_opts.server_ordering_strategy = ServerOrderingStrategy::QueryStatistics;
+
+            let cx = Arc::new(PoolContext::new(resolver_opts.clone(), tls_config));
+
+            let options = NameServerOpts::new(
                 config.blacklist_ip,
                 config.whitelist_ip,
                 config.check_edns,
                 config.subnet.map(|x| x.into()).or(default_client_subnet),
-                resolver
-                    .as_ref()
-                    .map(|r| r.options().clone())
-                    .unwrap_or_default(),
+                resolver_opts,
             );
-
-            if let Some(tls_config) = tls_config.as_deref() {
-                options.resolver_opts.tls_config = tls_config.clone();
-            }
-
-            options.resolver_opts.server_ordering_strategy =
-                ServerOrderingStrategy::QueryStatistics;
 
             let so_mark = config.so_mark;
             let device = config.interface;
 
             let connection = ConnectionProvider::new(
                 config.server,
+                cx,
                 Arc::new(options.deref().clone()),
                 resolver,
                 proxy,
@@ -500,7 +505,7 @@ mod name_server {
             })
         }
 
-        pub async fn warmup(&self) -> Result<(), ProtoError> {
+        pub async fn warmup(&self) -> Result<(), LookupError> {
             self.connection.warmup().await?;
             Ok(())
         }
@@ -529,16 +534,16 @@ mod name_server {
 
             let client_subnet = options.client_subnet.or(self.options().client_subnet);
 
-            if options.client_subnet.is_none() {
-                if let Some(subnet) = client_subnet.as_ref() {
-                    log::debug!(
-                        "query name: {} type: {} subnet: {}/{}",
-                        query.name(),
-                        query.query_type(),
-                        subnet.addr(),
-                        subnet.scope_prefix(),
-                    );
-                }
+            if options.client_subnet.is_none()
+                && let Some(subnet) = client_subnet.as_ref()
+            {
+                log::debug!(
+                    "query name: {} type: {} subnet: {}/{}",
+                    query.name(),
+                    query.query_type(),
+                    subnet.addr(),
+                    subnet.scope_prefix(),
+                );
             }
 
             let request_options = {
@@ -556,6 +561,7 @@ mod name_server {
 
             let res = {
                 let ns = &self.connection;
+
                 ns.send(req).first_answer().await?
             };
 
@@ -845,6 +851,18 @@ where
                     Either::Right((res, _)) => res,
                 }
             }
+            Ipv6AndIpv4 => {
+                use futures_util::future::{Either, select};
+                match select(
+                    self.lookup(name.clone(), RecordType::AAAA),
+                    self.lookup(name.clone(), RecordType::A),
+                )
+                .await
+                {
+                    Either::Left((res, _)) => res,
+                    Either::Right((res, _)) => res,
+                }
+            }
             Ipv6thenIpv4 => match self.lookup(name.clone(), RecordType::AAAA).await {
                 Ok(lookup) => Ok(lookup),
                 Err(_err) => self.lookup(name.clone(), RecordType::A).await,
@@ -902,7 +920,14 @@ mod tests {
             Err(e) => e.to_string(),
         };
         // println!("name: {} addrs => {}", name, addrs);
-        addrs.contains("8.8.8.8") || addrs.contains("8.8.4.4")
+        [
+            "8.8.8.8",
+            "8.8.4.4",
+            "2001:4860:4860::8888",
+            "2001:4860:4860::8844",
+        ]
+        .into_iter()
+        .any(|ip| addrs.contains(ip))
     }
 
     async fn query_alidns(client: &DnsClient) -> bool {
@@ -923,7 +948,14 @@ mod tests {
         };
 
         // println!("name: {} addrs => {}", name, addrs);
-        addrs.contains("223.5.5.5") || addrs.contains("223.6.6.6")
+        [
+            "223.5.5.5",
+            "223.6.6.6",
+            "2400:3200::1",
+            "2400:3200:baba::1",
+        ]
+        .into_iter()
+        .any(|ip| addrs.contains(ip))
     }
 
     #[tokio::test]

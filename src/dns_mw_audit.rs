@@ -9,6 +9,7 @@ use smallvec::SmallVec;
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::dns::*;
+use crate::dns_error::LookupError;
 use crate::infra::mapped_file::MappedFile;
 use crate::libdns::proto::op::Query;
 use crate::log::warn;
@@ -19,13 +20,13 @@ pub struct DnsAuditMiddleware {
 }
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsAuditMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for DnsAuditMiddleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         let now = Local::now();
 
         let start = Instant::now();
@@ -95,7 +96,7 @@ pub struct DnsAuditRecord {
     id: u16,
     client: String,
     query: Query,
-    result: Result<DnsResponse, DnsError>,
+    result: Result<DnsResponse, LookupError>,
     speed: Duration,
     elapsed: Duration,
     date: DateTime<Local>,

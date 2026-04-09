@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use crate::dns::{DnsContext, DnsError, DnsRequest, DnsResponse, Name, RData, RecordType};
+use crate::dns::{DnsContext, DnsRequest, DnsResponse, Name, RData, RecordType};
+use crate::dns_error::LookupError;
 use crate::infra::ipset::IpSet;
 use crate::libdns::proto::rr::rdata::PTR;
 use crate::zone::ZoneProvider;
@@ -41,7 +42,7 @@ impl ZoneProvider for LocalPtrZoneProvider {
         &self,
         ctx: &DnsContext,
         req: &DnsRequest,
-    ) -> Result<Option<DnsResponse>, DnsError> {
+    ) -> Result<Option<DnsResponse>, LookupError> {
         if req.query().query_type() != RecordType::PTR {
             return Ok(None);
         }

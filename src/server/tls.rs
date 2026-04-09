@@ -10,7 +10,7 @@ use crate::{
     dns::SerialMessage,
     libdns::{
         Protocol,
-        proto::{runtime::iocompat::AsyncIoTokioAsStd, xfer::DnsStreamHandle as _},
+        net::{runtime::iocompat::AsyncIoTokioAsStd, xfer::DnsStreamHandle as _},
     },
     log,
     rustls::ResolvesServerCert,
@@ -23,7 +23,7 @@ pub fn serve(
     timeout: Duration,
     server_cert_resolver: Arc<dyn ResolvesServerCert>,
 ) -> io::Result<CancellationToken> {
-    use crate::libdns::proto::rustls::tls_from_stream;
+    use crate::libdns::net::tls::tls_from_stream;
     use crate::rustls::tls_server_config;
     use tokio_rustls::TlsAcceptor;
 

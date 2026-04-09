@@ -1,21 +1,24 @@
 use std::{borrow::Borrow, net::IpAddr, sync::Arc};
 
-use crate::libdns::proto::{
-    op::Query,
-    rr::{
-        IntoName, RecordType,
-        rdata::opt::{EdnsCode, EdnsOption},
+use crate::{
+    dns_error::LookupError,
+    libdns::proto::{
+        op::Query,
+        rr::{
+            IntoName, RecordType,
+            rdata::opt::{EdnsCode, EdnsOption},
+        },
     },
 };
 
 use crate::{
     config::ServerOpts,
-    dns::{DnsContext, DnsError, DnsRequest, DnsResponse},
+    dns::{DnsContext, DnsRequest, DnsResponse},
     dns_conf::RuntimeConfig,
     middleware::{Middleware, MiddlewareBuilder, MiddlewareDefaultHandler, MiddlewareHost},
 };
 
-pub type DnsMiddlewareHost = MiddlewareHost<DnsContext, DnsRequest, DnsResponse, DnsError>;
+pub type DnsMiddlewareHost = MiddlewareHost<DnsContext, DnsRequest, DnsResponse, LookupError>;
 
 pub struct DnsMiddlewareHandler {
     cfg: Arc<RuntimeConfig>,
@@ -27,7 +30,7 @@ impl DnsMiddlewareHandler {
         &self,
         req: &DnsRequest,
         server_opts: &ServerOpts,
-    ) -> Result<DnsResponse, DnsError> {
+    ) -> Result<DnsResponse, LookupError> {
         let cfg = self.cfg.clone();
 
         let mut server_opts = server_opts.clone();
@@ -59,10 +62,10 @@ impl DnsMiddlewareHandler {
             None => {
                 let mut client_ip = req.src().ip();
 
-                if let IpAddr::V6(addr) = client_ip {
-                    if let Some(addr) = addr.to_ipv4_mapped() {
-                        client_ip = addr.into();
-                    }
+                if let IpAddr::V6(addr) = client_ip
+                    && let Some(addr) = addr.to_ipv4_mapped()
+                {
+                    client_ip = addr.into();
                 }
 
                 client_rules
@@ -82,14 +85,14 @@ impl DnsMiddlewareHandler {
         &self,
         name: N,
         query_type: RecordType,
-    ) -> Result<DnsResponse, DnsError> {
+    ) -> Result<DnsResponse, LookupError> {
         let query = Query::query(name.into_name()?, query_type);
         self.search(&query.into(), &Default::default()).await
     }
 }
 
 pub struct DnsMiddlewareBuilder {
-    builder: MiddlewareBuilder<DnsContext, DnsRequest, DnsResponse, DnsError>,
+    builder: MiddlewareBuilder<DnsContext, DnsRequest, DnsResponse, LookupError>,
 }
 
 impl DnsMiddlewareBuilder {
@@ -99,7 +102,7 @@ impl DnsMiddlewareBuilder {
         }
     }
 
-    pub fn with<M: Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> + 'static>(
+    pub fn with<M: Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> + 'static>(
         mut self,
         middleware: M,
     ) -> Self {
@@ -119,13 +122,15 @@ impl DnsMiddlewareBuilder {
 struct DnsDefaultHandler;
 
 #[async_trait::async_trait]
-impl MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsDefaultHandler {
+impl MiddlewareDefaultHandler<DnsContext, DnsRequest, DnsResponse, LookupError>
+    for DnsDefaultHandler
+{
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-    ) -> Result<DnsResponse, DnsError> {
-        Err(DnsError::no_records_found(
+    ) -> Result<DnsResponse, LookupError> {
+        Err(LookupError::no_records_found(
             req.query().original().to_owned(),
             ctx.cfg().rr_ttl().unwrap_or_default() as u32,
         ))
@@ -139,7 +144,10 @@ pub use tests::*;
 #[cfg(test)]
 mod tests {
 
-    use crate::libdns::proto::rr::{RData, Record};
+    use crate::{
+        dns_error::LookupError,
+        libdns::proto::rr::{RData, Record},
+    };
     use std::{
         collections::HashMap,
         fmt::Debug,
@@ -150,7 +158,7 @@ mod tests {
     use crate::infra::middleware::*;
 
     pub struct DnsMockMiddleware {
-        map: HashMap<Query, Result<DnsResponse, DnsError>>,
+        map: HashMap<Query, Result<DnsResponse, LookupError>>,
     }
 
     impl DnsMockMiddleware {
@@ -159,7 +167,7 @@ mod tests {
             DnsMockMiddlewareBuilder::new()
         }
 
-        pub fn mock<M: Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> + 'static>(
+        pub fn mock<M: Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> + 'static>(
             middleware: M,
         ) -> DnsMockMiddlewareBuilder {
             Self::builder().with_extra_middleware(middleware)
@@ -167,13 +175,13 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsMockMiddleware {
+    impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for DnsMockMiddleware {
         async fn handle(
             &self,
             ctx: &mut DnsContext,
             req: &DnsRequest,
-            next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-        ) -> Result<DnsResponse, DnsError> {
+            next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+        ) -> Result<DnsResponse, LookupError> {
             match self.map.get(req.query().original()) {
                 Some(res) => res.clone(),
                 None => next.run(ctx, req).await,
@@ -182,7 +190,7 @@ mod tests {
     }
 
     pub struct DnsMockMiddlewareBuilder {
-        map: HashMap<Query, Result<DnsResponse, DnsError>>,
+        map: HashMap<Query, Result<DnsResponse, LookupError>>,
         builder: DnsMiddlewareBuilder,
     }
 
@@ -195,7 +203,7 @@ mod tests {
         }
 
         pub fn with_extra_middleware<
-            M: Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> + 'static,
+            M: Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> + 'static,
         >(
             mut self,
             middleware: M,
@@ -271,7 +279,7 @@ mod tests {
             &self,
             name: N,
             query_type: RecordType,
-        ) -> Result<Vec<RData>, DnsError> {
+        ) -> Result<Vec<RData>, LookupError> {
             self.lookup(name, query_type)
                 .await
                 .map(|lookup| lookup.record_iter().map(|s| s.data()).cloned().collect())

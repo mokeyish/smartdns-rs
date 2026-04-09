@@ -7,10 +7,12 @@ use clap::Parser;
 use console::Style;
 use console::{StyledObject, style};
 
-use crate::libdns::proto::{
-    op::Message,
-    rr::{DNSClass, DNSClass as QueryClass, Name as Domain, Record, RecordData, RecordType},
-    xfer::Protocol as DnsOverProtocol,
+use crate::libdns::{
+    net::xfer::Protocol as DnsOverProtocol,
+    proto::{
+        op::Message,
+        rr::{DNSClass, DNSClass as QueryClass, Name as Domain, Record, RecordData, RecordType},
+    },
 };
 
 use crate::dns_client::{DnsClient, GenericResolver, LookupOptions};
@@ -23,10 +25,10 @@ impl ResolveCommand {
             Some(s) => DnsUrl::from_str(s).ok(),
             None => None,
         };
-        if let Some(proto) = proto {
-            if let Some(s) = server.as_mut() {
-                s.set_proto(proto)
-            }
+        if let Some(proto) = proto
+            && let Some(s) = server.as_mut()
+        {
+            s.set_proto(proto)
         }
         let domains = self.domains();
         let query_types = self.q_type();

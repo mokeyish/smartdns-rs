@@ -1,5 +1,6 @@
 use crate::config::HttpsRecordRule;
 use crate::dns::*;
+use crate::dns_error::LookupError;
 use crate::middleware::Next;
 
 pub struct RuleZoneProvider;
@@ -13,8 +14,8 @@ impl RuleZoneProvider {
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<Option<DnsResponse>, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<Option<DnsResponse>, LookupError> {
         match req.query().query_type() {
             RecordType::SRV => {
                 if let Some(srv) = ctx.domain_rule.get_ref(|r| r.srv.as_ref()) {
@@ -44,7 +45,7 @@ impl RuleZoneProvider {
 
                             let mut lookup = next.run(ctx, req).await?;
                             for record in lookup.answers_mut() {
-                                if let Some(https) = record.data_mut().as_https_mut() {
+                                if let RData::HTTPS(https) = record.data_mut() {
                                     let svc_params = https
                                         .svc_params()
                                         .iter()

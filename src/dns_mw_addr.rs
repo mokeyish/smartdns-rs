@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use crate::dns::*;
+use crate::dns_error::LookupError;
 use crate::libdns::proto::rr::{RData, RecordType};
 use crate::middleware::*;
 
@@ -11,13 +12,13 @@ use crate::libdns::resolver::TtlClip;
 pub struct AddressMiddleware;
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for AddressMiddleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         let query_type = req.query().query_type();
 
         if let Some(rdatas) = handle_rule_addr(query_type, ctx) {
@@ -45,27 +46,26 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
             Ok(lookup) => Ok({
                 let mut records = Cow::Borrowed(lookup.records());
 
-                if query_type.is_ip_addr() {
-                    if let Some(mut max_reply_ip_num) = ctx.cfg().max_reply_ip_num() {
-                        if max_reply_ip_num > 0 {
-                            let mut truncate = None;
-                            for (i, r) in records.iter().enumerate() {
-                                if matches!(r.data(), RData::A(_) | RData::AAAA(_)) {
-                                    max_reply_ip_num -= 1;
-                                    if max_reply_ip_num == 0 {
-                                        truncate = Some(i + 1);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            match truncate {
-                                Some(truncate) if records.len() > truncate => {
-                                    records.to_mut().truncate(truncate);
-                                }
-                                _ => (),
+                if query_type.is_ip_addr()
+                    && let Some(mut max_reply_ip_num) = ctx.cfg().max_reply_ip_num()
+                    && max_reply_ip_num > 0
+                {
+                    let mut truncate = None;
+                    for (i, r) in records.iter().enumerate() {
+                        if matches!(r.data(), RData::A(_) | RData::AAAA(_)) {
+                            max_reply_ip_num -= 1;
+                            if max_reply_ip_num == 0 {
+                                truncate = Some(i + 1);
+                                break;
                             }
                         }
+                    }
+
+                    match truncate {
+                        Some(truncate) if records.len() > truncate => {
+                            records.to_mut().truncate(truncate);
+                        }
+                        _ => (),
                     }
                 }
 
@@ -375,7 +375,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_min() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_min() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-min 50")
             .build()
@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_max() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_max() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 50")
             .build()
@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_min_max() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_min_max() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
@@ -478,7 +478,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_max_reply() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_max_reply() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
@@ -513,7 +513,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_max_reply_ip_num() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_max_reply_ip_num() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
@@ -554,7 +554,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_max_reply_ip_num_1() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_max_reply_ip_num_1() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
@@ -583,7 +583,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_max_reply_ip_num_2() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_max_reply_ip_num_2() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")
@@ -624,7 +624,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_clip_ttl_cname_max_reply_ip_num_2() -> Result<(), DnsError> {
+    async fn test_ttl_clip_ttl_cname_max_reply_ip_num_2() -> Result<(), LookupError> {
         let cfg = RuntimeConfig::builder()
             .with("rr-ttl-max 66")
             .with("rr-ttl-min 55")

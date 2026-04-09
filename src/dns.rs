@@ -15,12 +15,12 @@ use crate::dns_conf::RuntimeConfig;
 pub use crate::dns_rule::DomainRuleGetter;
 
 pub use crate::libdns::proto::{
-    ProtoErrorKind, op,
+    ProtoError, op,
     rr::{self, Name, RData, Record, RecordType, rdata::SOA},
 };
 
 pub use crate::libdns::{
-    proto::xfer::Protocol,
+    net::xfer::Protocol,
     resolver::{config::NameServerConfig, lookup::Lookup},
 };
 
@@ -170,7 +170,7 @@ mod serial_message {
         }
     }
 
-    impl TryFrom<SerialMessage> for crate::libdns::proto::xfer::SerialMessage {
+    impl TryFrom<SerialMessage> for crate::libdns::proto::op::SerialMessage {
         type Error = ProtoError;
         fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
             Ok(match value {
@@ -184,7 +184,7 @@ mod serial_message {
         type Error = ProtoError;
         #[inline]
         fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
-            Ok(crate::libdns::proto::xfer::SerialMessage::try_from(value)?
+            Ok(crate::libdns::proto::op::SerialMessage::try_from(value)?
                 .into_parts()
                 .0)
         }
@@ -194,7 +194,7 @@ mod serial_message {
         type Error = ProtoError;
         #[inline]
         fn try_from(value: SerialMessage) -> Result<Self, Self::Error> {
-            Ok(crate::libdns::proto::xfer::SerialMessage::try_from(value)?
+            Ok(crate::libdns::proto::op::SerialMessage::try_from(value)?
                 .into_parts()
                 .0
                 .into())
@@ -226,7 +226,7 @@ mod request {
         },
     };
 
-    use super::{DnsError, SerialMessage};
+    use super::SerialMessage;
 
     #[derive(Clone)]
     pub struct DnsRequest {
@@ -428,21 +428,24 @@ mod response {
             R: IntoIterator<Item = Record, IntoIter = I>,
             I: Iterator<Item = Record>,
         {
-            use op::message::{HeaderCounts, update_header_counts};
             let mut message = Message::query().to_response();
             message.add_query(query.clone());
             message.add_answers(records);
 
-            let header = update_header_counts(
-                message.header(),
-                message.truncated(),
-                HeaderCounts {
-                    query_count: message.queries().len(),
-                    answer_count: message.answers().len(),
-                    authority_count: message.authorities().len(),
-                    additional_count: message.additionals().len(),
-                },
-            );
+            let mut header = *message.header();
+
+            let query_count = message.queries().len() as u16;
+            let answer_count = message.answers().len() as u16;
+            let authority_count = message.authorities().len() as u16;
+            let additional_count = message.additionals().len() as u16;
+            let is_truncated = message.truncated();
+
+            header
+                .set_query_count(query_count)
+                .set_answer_count(answer_count)
+                .set_authority_count(authority_count)
+                .set_additional_count(additional_count)
+                .set_truncated(is_truncated);
 
             message.set_header(header);
 
@@ -594,7 +597,6 @@ mod response {
 
 pub type DnsRequest = request::DnsRequest;
 pub type DnsResponse = response::DnsResponse;
-pub type DnsError = LookupError;
 use ipnet::IpAdd;
 pub use serial_message::SerialMessage;
 

@@ -1,5 +1,7 @@
 use std::{io, net::SocketAddr, path::PathBuf};
 
+use hickory_net::NetError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("a certificate file must be specified for binding {0}")]
@@ -12,6 +14,9 @@ pub enum Error {
     LoadCertificateKeyFailed(PathBuf, String),
     #[error("could not register {0} listener on addresss {1}, due to {2}")]
     RegisterListenerFailed(&'static str, SocketAddr, String),
+    /// An error got returned by the hickory-net crate
+    #[error("net error: {0}")]
+    Net(#[from] NetError),
     /// An underlying IO error occurred
     #[error("io error: {0}")]
     Io(#[from] io::Error),
