@@ -604,7 +604,7 @@ impl DnsCache {
         if !cache.is_empty() {
             let mut expired = vec![];
             let now = if self.expired_ttl > 0 {
-                now - Duration::from_secs(self.expired_ttl)
+                now.checked_sub(Duration::from_secs(self.expired_ttl)).unwrap_or(now)
             } else {
                 now
             } + Duration::from_secs(seconds_ahead.unwrap_or(5)); // 5 seconds ahead
