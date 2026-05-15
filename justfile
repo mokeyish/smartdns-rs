@@ -81,7 +81,7 @@ wix: && wix-sha256sum
   # echo "TARGET=$TARGET"
   # echo "ARCH=$ARCH"
   # echo "VERSION=$VERSION"
-  VERSION="$VERSION" TARGET="$TARGET" SOURCE_DIR="$SOURCE_DIR" wix build -arch $ARCH ./wix.wxs -o $OUTPUT
+  VERSION="$VERSION" TARGET="$TARGET" SOURCE_DIR="$SOURCE_DIR" wix build -acceptEula wix7 -arch $ARCH ./wix.wxs -o $OUTPUT
   echo "Saved to: $OUTPUT"
 
 
