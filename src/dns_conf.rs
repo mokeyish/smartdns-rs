@@ -644,6 +644,7 @@ impl RuntimeConfig {
         let builder = RuntimeConfigBuilder {
             conf_dir: self.conf_dir.clone(),
             conf_file: self.conf_file.clone(),
+            managed_dir: self.managed_dir.clone(),
             ..Self::builder()
         };
 
@@ -678,6 +679,20 @@ impl RuntimeConfigBuilder {
             if !loaded {
                 self.load_file(&conf_file)?;
             }
+        }
+
+        if let Some(managed_dir) = self.managed_dir.clone() {
+            for entry in std::fs::read_dir(managed_dir)? {
+                debug!("managed dir entry {:?}", &entry);
+                let path = entry?.path();
+                //load all .conf? or specific files only
+                if path.extension().and_then(|e| e.to_str()) == Some("conf") {
+                    info!("managed dir - try to load {:?}", &path);
+                    self.load_file(&path)?;
+                }
+            }
+        } else {
+            debug!("no managed_dir");
         }
 
         let conf_file = self.conf_file;
