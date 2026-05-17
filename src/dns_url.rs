@@ -1,7 +1,7 @@
 use crate::libdns::{
     Protocol::{self, *},
     ProtocolDefaultPort,
-    proto::http::DEFAULT_DNS_QUERY_PATH,
+    net::http::DEFAULT_DNS_QUERY_PATH,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -159,13 +159,13 @@ impl FromStr for DnsUrl {
         let host = match host {
             Some(host) => {
                 let mut host = host.to_owned();
-                if let Host::Domain(ref domain) = host {
-                    if let Ok(ip) = IpAddr::from_str(domain) {
-                        host = match ip {
-                            IpAddr::V4(ip) => Host::Ipv4(ip),
-                            IpAddr::V6(ip) => Host::Ipv6(ip),
-                        };
-                    }
+                if let Host::Domain(ref domain) = host
+                    && let Ok(ip) = IpAddr::from_str(domain)
+                {
+                    host = match ip {
+                        IpAddr::V4(ip) => Host::Ipv4(ip),
+                        IpAddr::V6(ip) => Host::Ipv6(ip),
+                    };
                 }
                 Some(host)
             }

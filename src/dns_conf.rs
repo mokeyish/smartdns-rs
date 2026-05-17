@@ -1109,40 +1109,38 @@ fn resolve_filepath<P: AsRef<Path>>(filepath: P, base_file: Option<&PathBuf>) ->
         return filepath.to_path_buf();
     }
 
-    if !filepath.is_absolute() {
-        if let Some(base_conf_file) = base_file {
-            if let Some(dir) = base_conf_file.parent() {
-                let new_path = dir.join(filepath);
+    if !filepath.is_absolute()
+        && let Some(base_conf_file) = base_file
+        && let Some(dir) = base_conf_file.parent()
+    {
+        let new_path = dir.join(filepath);
 
-                if new_path.is_file() {
-                    return new_path;
-                }
+        if new_path.is_file() {
+            return new_path;
+        }
 
-                if matches!(base_conf_file.file_name(), Some(file_name) if file_name == OsStr::new("smartdns.conf"))
-                {
-                    // eg: /etc/smartdns.d/custom.conf
-                    let new_path = dir.join("smartdns.d").join(filepath);
+        if matches!(base_conf_file.file_name(), Some(file_name) if file_name == OsStr::new("smartdns.conf"))
+        {
+            // eg: /etc/smartdns.d/custom.conf
+            let new_path = dir.join("smartdns.d").join(filepath);
 
-                    if new_path.is_file() {
-                        return new_path;
-                    }
-                }
-
-                if let Ok(new_path) = std::env::current_dir().map(|dir| dir.join(filepath)) {
-                    if new_path.is_file() {
-                        return new_path;
-                    }
-                }
-
-                if let Some(new_path) = std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|dir| dir.join(filepath)))
-                {
-                    if new_path.is_file() {
-                        return new_path;
-                    }
-                }
+            if new_path.is_file() {
+                return new_path;
             }
+        }
+
+        if let Ok(new_path) = std::env::current_dir().map(|dir| dir.join(filepath))
+            && new_path.is_file()
+        {
+            return new_path;
+        }
+
+        if let Some(new_path) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join(filepath)))
+            && new_path.is_file()
+        {
+            return new_path;
         }
     }
 

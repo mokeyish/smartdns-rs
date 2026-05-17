@@ -1,4 +1,5 @@
 use crate::dns::*;
+use crate::dns_error::LookupError;
 use crate::middleware::*;
 use crate::zone::{IdentityZoneProvider, LocalPtrZoneProvider, RuleZoneProvider, ZoneManager};
 
@@ -19,13 +20,13 @@ impl DnsZoneMiddleware {
 }
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsZoneMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for DnsZoneMiddleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         if let Some(response) = self.manager.lookup(ctx, req).await? {
             return Ok(response);
         }
@@ -72,14 +73,14 @@ mod tests {
 
         let mock = DnsMockMiddleware::mock(DnsZoneMiddleware::new()).build(cfg);
 
-        let srv = mock
+        let Some(RData::SRV(srv)) = mock
             .lookup_rdata("_vlmcs._tcp", RecordType::SRV)
             .await
             .unwrap()
             .pop()
-            .unwrap()
-            .into_srv()
-            .unwrap();
+        else {
+            panic!("SRV record not found");
+        };
 
         assert_eq!(srv.target(), &"example.com".parse().unwrap());
         assert_eq!(srv.port(), 1688);

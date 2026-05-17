@@ -243,7 +243,7 @@ impl RuntimeConfig {
 
         #[cfg(feature = "mdns")]
         if self.mdns_lookup() {
-            use crate::libdns::proto::multicast::{MDNS_IPV4, MDNS_IPV6};
+            use crate::libdns::net::multicast::{MDNS_IPV4, MDNS_IPV6};
             let mdns_servers = [*MDNS_IPV4, *MDNS_IPV6]
                 .into_iter()
                 .map(|ip| format!("mdns://{ip}"))

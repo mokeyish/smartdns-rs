@@ -281,17 +281,17 @@ pub fn serve(cfg: Arc<RuntimeConfig>) {
                     }
                 }
 
-                if !bg_batch.is_empty() {
-                    if let Ok(permit) = background_concurrency.clone().try_acquire_owned() {
-                        let mut batch = FuturesUnordered::new();
-                        std::mem::swap(&mut batch, &mut bg_batch);
-                        inner_join_set.spawn(async move {
-                            let count = batch.len();
-                            while (batch.next().await).is_some() {}
-                            drop(permit);
-                            count
-                        });
-                    }
+                if !bg_batch.is_empty()
+                    && let Ok(permit) = background_concurrency.clone().try_acquire_owned()
+                {
+                    let mut batch = FuturesUnordered::new();
+                    std::mem::swap(&mut batch, &mut bg_batch);
+                    inner_join_set.spawn(async move {
+                        let count = batch.len();
+                        while (batch.next().await).is_some() {}
+                        drop(permit);
+                        count
+                    });
                 }
 
                 if !batch.is_empty() {
@@ -440,12 +440,10 @@ async fn process(
                 MessageType::Response => todo!(),
             }
         }
-        Err(ProtoError { kind, .. }) if kind.as_form_error().is_some() => {
-            // We failed to parse the request due to some issue in the message, but the header is available, so we can respond
-            let (request_header, error) = kind
-                .into_form_error()
-                .expect("as form_error already confirmed this is a FormError");
-
+        Err(ProtoError::FormError {
+            header: request_header,
+            error,
+        }) => {
             // debug for more info on why the message parsing failed
             log::debug!(
                 "request:{id} src:{proto}://{addr}#{port} type:{message_type} {op}:FormError:{error}",

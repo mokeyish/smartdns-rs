@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::dns_error::LookupError;
 use crate::libdns::proto::rr::rdata::CNAME;
 
 use crate::config::CNameRule;
@@ -9,13 +10,13 @@ use crate::middleware::*;
 pub struct DnsCNameMiddleware;
 
 #[async_trait::async_trait]
-impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCNameMiddleware {
+impl Middleware<DnsContext, DnsRequest, DnsResponse, LookupError> for DnsCNameMiddleware {
     async fn handle(
         &self,
         ctx: &mut DnsContext,
         req: &DnsRequest,
-        next: Next<'_, DnsContext, DnsRequest, DnsResponse, DnsError>,
-    ) -> Result<DnsResponse, DnsError> {
+        next: Next<'_, DnsContext, DnsRequest, DnsResponse, LookupError>,
+    ) -> Result<DnsResponse, LookupError> {
         let cname = match &ctx.domain_rule {
             Some(rule) => rule.get(|r| match &r.cname {
                 Some(cname) => match cname {

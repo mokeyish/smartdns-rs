@@ -1,5 +1,6 @@
-use std::{io, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
+use crate::libdns::net::NetError;
 use crate::rustls::ResolvesServerCert;
 use tokio::{net, task::JoinSet};
 use tokio_util::sync::CancellationToken;
@@ -14,8 +15,8 @@ pub fn serve(
     _timeout: Duration,
     server_cert_resolver: Arc<dyn ResolvesServerCert>,
     _dns_hostname: Option<String>,
-) -> io::Result<CancellationToken> {
-    use crate::libdns::proto::quic::{DoqErrorCode, QuicServer};
+) -> Result<CancellationToken, NetError> {
+    use crate::libdns::net::quic::{DoqErrorCode, QuicServer};
 
     log::debug!("registered quic: {:?}", socket);
 
@@ -95,7 +96,7 @@ pub fn serve(
 
                     if let Err(err) = match res_message.try_into() {
                         Ok(buffer) => request_stream.send_bytes(buffer).await,
-                        Err(err) => Err(err),
+                        Err(err) => Err(err.into()),
                     } {
                         log::warn!("quic stream processing failed from {src_addr}: {err}");
                     }

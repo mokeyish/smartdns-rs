@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use crate::dns_client::LookupOptions;
 use crate::dns_url::{DnsUrl, ProtocolConfig};
 use crate::libdns::{
@@ -7,6 +9,14 @@ use crate::libdns::{
         ProtocolConfig as LibdnsProtocolConfig,
     },
 };
+
+impl From<&DnsUrl> for LibdnsNameServerConfig {
+    fn from(url: &DnsUrl) -> Self {
+        let ip = url.ip().unwrap_or(Ipv4Addr::UNSPECIFIED.into());
+        let conn_config = LibdnsConnectionConfig::from(url);
+        Self::new(ip, false, vec![conn_config])
+    }
+}
 
 impl From<&DnsUrl> for LibdnsConnectionConfig {
     fn from(url: &DnsUrl) -> Self {

@@ -1,4 +1,7 @@
-use crate::dns::{DnsContext, DnsError, DnsRequest, DnsResponse};
+use crate::{
+    dns::{DnsContext, DnsRequest, DnsResponse},
+    dns_error::LookupError,
+};
 
 use super::ZoneProvider;
 
@@ -21,7 +24,7 @@ impl ZoneManager {
         &self,
         ctx: &DnsContext,
         req: &DnsRequest,
-    ) -> Result<Option<DnsResponse>, DnsError> {
+    ) -> Result<Option<DnsResponse>, LookupError> {
         for provider in &self.providers {
             if let Some(response) = provider.lookup(ctx, req).await? {
                 return Ok(Some(response));
