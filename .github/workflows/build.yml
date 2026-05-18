@@ -176,7 +176,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
       -
         name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Compute release label
         id: release_label
         uses: ./.github/actions/sanitize-label
