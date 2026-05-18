@@ -68,6 +68,9 @@ impl RuntimeConfig {
 
         if let Some(conf_dir) = conf_dir.as_deref() {
             builder = builder.with_conf_dir(conf_dir);
+
+            let managed = conf_dir.join("managed");
+            builder = builder.with_managed_dir(managed);
         }
 
         let path = if let Some(ref conf) = path {
@@ -926,6 +929,11 @@ impl RuntimeConfigBuilder {
 
     pub fn with_conf_dir<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.conf_dir = Some(path.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn with_managed_dir<P: AsRef<Path>>(mut self, path: P) -> Self {
+        self.managed_dir = Some(path.as_ref().to_path_buf());
         self
     }
 
