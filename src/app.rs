@@ -405,15 +405,28 @@ async fn process(
                                         match e.as_soa(original) {
                                             Some(soa) => soa,
                                             None => {
-                                                log::debug!(
-                                                    "{}Response: error resolving: {}, Duration: {:?}",
+                                                // GH #307: surface upstream
+                                                // resolution failures at WARN
+                                                // with the query that failed +
+                                                // the full debug error, so
+                                                // operators can diagnose DoH /
+                                                // upstream issues without
+                                                // turning on debug logging.
+                                                log::warn!(
+                                                    "{}Response: error resolving query={} type={}: {:#}, Duration: {:?}",
                                                     if server_opts.is_background {
                                                         "Background"
                                                     } else {
                                                         ""
                                                     },
+                                                    original.name(),
+                                                    original.query_type(),
                                                     e,
                                                     start.elapsed()
+                                                );
+                                                log::debug!(
+                                                    "error detail: {:?}",
+                                                    e
                                                 );
                                                 response_header
                                                     .set_response_code(ResponseCode::ServFail);
