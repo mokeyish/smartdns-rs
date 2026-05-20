@@ -31,3 +31,11 @@ dist
 
 # localhost.crt
 # localhost.key
+
+# MetaCubeX geo data files — large (8-20 MB), updated frequently. Tests
+# auto-skip when absent; run scripts/fetch-geo-testdata.sh to populate.
+/tests/test_data/geosite.dat
+/tests/test_data/geoip.dat
+/tests/test_data/country.mmdb
+/tests/test_data/country-lite.mmdb
+/tests/test_data/GeoLite2-ASN.mmdb
