@@ -52,11 +52,19 @@ pub fn parse_flag<
 }
 
 pub fn unkown_value(input: &str) -> IResult<&str, &str> {
+    use nom::combinator::{eof, peek};
     preceded(
         alt((tag("="), recognize(pair(opt(char(':')), space1)))),
-        recognize(pair(
-            is_not("-_ \t#"),
-            take_till(|c: char| c.is_whitespace()),
+        alt((
+            // GH #690: allow a bare `-` as a sentinel value, e.g.
+            // `-host-name -`. We accept it only when followed by whitespace
+            // or EOF, so a subsequent option like `-other` is still
+            // interpreted as a new option, not as the value of this one.
+            recognize(pair(char('-'), peek(alt((space1, eof))))),
+            recognize(pair(
+                is_not("-_ \t#"),
+                take_till(|c: char| c.is_whitespace()),
+            )),
         )),
     )
     .parse(input)
@@ -112,6 +120,26 @@ mod tests {
                 " # -exclude-default-group",
                 vec![("group", Some("bootstrap"))]
             )
+        );
+    }
+
+    /// GH #690: `-host-name -` must parse the bare `-` as the value, not as
+    /// the start of the next option.
+    #[test]
+    fn test_parse_options_dash_value() {
+        assert_eq!(
+            parse("-host-name -").unwrap(),
+            ("", vec![("host-name", Some("-"))])
+        );
+    }
+
+    /// And the dash-sentinel must not eat a subsequent option: `-a - -b`
+    /// parses as ("a", Some("-")), ("b", None).
+    #[test]
+    fn test_parse_options_dash_then_next_option() {
+        assert_eq!(
+            parse("-a - -b").unwrap(),
+            ("", vec![("a", Some("-")), ("b", None)])
         );
     }
 }

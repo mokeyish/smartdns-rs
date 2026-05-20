@@ -265,6 +265,39 @@ mod tests {
         );
     }
 
+    /// GH #690: `-host-name -` should disable SNI on the TLS handshake,
+    /// matching the original C smartdns semantics. Regression guard.
+    /// Matches the exact config syntax from the user's bug report:
+    /// `server-https 2400:3200::1 -tls-host-verify dns.alidns.com
+    ///  -http-host dns.alidns.com -host-name -`
+    #[test]
+    fn test_host_name_dash_disables_sni() {
+        let (rest, ns) = NameServerInfo::parse(
+            "server-https 2400:3200::1 -tls-host-verify dns.alidns.com -http-host dns.alidns.com -host-name -",
+        )
+        .expect("parse should succeed");
+        assert_eq!(rest, "");
+        assert!(
+            ns.server.sni_off(),
+            "expected sni_off()=true when -host-name - is given, got false. \
+             URL = {}",
+            ns.server
+        );
+    }
+
+    /// Without `-host-name -`, SNI should be on by default for an https
+    /// upstream with a domain host.
+    #[test]
+    fn test_host_name_unset_keeps_sni_on() {
+        let (_rest, ns) =
+            NameServerInfo::parse("server-https https://dns.alidns.com/dns-query")
+                .expect("parse should succeed");
+        assert!(
+            !ns.server.sni_off(),
+            "expected sni_off()=false without -host-name -, got true"
+        );
+    }
+
     #[test]
     fn test_server_dhcp() {
         assert_eq!(
