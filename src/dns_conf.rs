@@ -355,6 +355,13 @@ impl RuntimeConfig {
         self.cache.serve_expired_reply_ttl.unwrap_or(5)
     }
 
+    /// serve-expired-prefetch-time — refresh active records this many
+    /// seconds before TTL elapses. 0 disables. Matches C smartdns.
+    #[inline]
+    pub fn serve_expired_prefetch_time(&self) -> u64 {
+        self.cache.serve_expired_prefetch_time.unwrap_or(0)
+    }
+
     /// List of hosts that supply bogus NX domain results
     #[inline]
     pub fn bogus_nxdomain(&self) -> &Arc<IpSet> {
@@ -980,6 +987,7 @@ impl RuntimeConfigBuilder {
                 SpeedMode(v) => self.speed_check_mode = v,
                 ServeExpiredTtl(v) => self.cache.serve_expired_ttl = Some(v),
                 ServeExpiredReplyTtl(v) => self.cache.serve_expired_reply_ttl = Some(v),
+                ServeExpiredPrefetchTime(v) => self.cache.serve_expired_prefetch_time = Some(v),
                 CacheSize(v) => self.cache.size = Some(v),
                 ForceQtypeSoa(v) => {
                     self.force_qtype_soa.insert(v);
@@ -1746,6 +1754,25 @@ mod tests {
         assert_eq!(cfg.log.file_mode, Some(0o644u32.into()));
         cfg.config("log-file-mode 0o755");
         assert_eq!(cfg.log.file_mode, Some(0o755u32.into()));
+    }
+
+    /// GH #166: `serve-expired-prefetch-time` previously logged as
+    /// "unknown conf"; now a recognized directive.
+    #[test]
+    fn test_parse_serve_expired_prefetch_time() {
+        let cfg = RuntimeConfig::builder()
+            .with("serve-expired-prefetch-time 30")
+            .build()
+            .unwrap();
+        assert_eq!(cfg.serve_expired_prefetch_time(), 30);
+        assert_eq!(cfg.cache.serve_expired_prefetch_time, Some(30));
+    }
+
+    #[test]
+    fn test_serve_expired_prefetch_time_default() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        // Default is 0 (disabled).
+        assert_eq!(cfg.serve_expired_prefetch_time(), 0);
     }
 
     #[test]
