@@ -146,19 +146,20 @@ pub fn load_mmdb(path: &Path, tag: &str) -> Result<Vec<IpNet>> {
     let mut nets = Vec::new();
 
     let collect = |nets: &mut Vec<IpNet>, cidr: ipnetwork::IpNetwork| {
-        for result in reader.within::<maxminddb::geoip2::Country>(cidr).into_iter().flatten() {
-            if let Ok(item) = result {
-                let matches = item
-                    .info
-                    .country
-                    .as_ref()
-                    .and_then(|c| c.iso_code)
-                    .is_some_and(|code| code.eq_ignore_ascii_case(tag));
-                if matches {
-                    if let Ok(net) = IpNet::new(item.ip_net.ip(), item.ip_net.prefix()) {
-                        nets.push(net);
-                    }
-                }
+        let iter = reader
+            .within::<maxminddb::geoip2::Country>(cidr)
+            .into_iter()
+            .flatten()
+            .flatten();
+        for item in iter {
+            let matches = item
+                .info
+                .country
+                .as_ref()
+                .and_then(|c| c.iso_code)
+                .is_some_and(|code| code.eq_ignore_ascii_case(tag));
+            if matches && let Ok(net) = IpNet::new(item.ip_net.ip(), item.ip_net.prefix()) {
+                nets.push(net);
             }
         }
     };

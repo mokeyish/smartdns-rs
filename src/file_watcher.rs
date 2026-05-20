@@ -55,15 +55,15 @@ fn run_watcher_thread(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
 
     for path in &paths {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
-        if let Some(dir) = canonical.parent() {
-            if watched_dirs.insert(dir.to_path_buf()) {
-                match debouncer.watcher().watch(dir, RecursiveMode::NonRecursive) {
-                    Ok(()) => {
-                        log::info!("hot-reload: watching dir {}", dir.display());
-                    }
-                    Err(e) => {
-                        log::warn!("hot-reload: failed to watch {}: {}", dir.display(), e);
-                    }
+        if let Some(dir) = canonical.parent()
+            && watched_dirs.insert(dir.to_path_buf())
+        {
+            match debouncer.watcher().watch(dir, RecursiveMode::NonRecursive) {
+                Ok(()) => {
+                    log::info!("hot-reload: watching dir {}", dir.display());
+                }
+                Err(e) => {
+                    log::warn!("hot-reload: failed to watch {}: {}", dir.display(), e);
                 }
             }
         }
