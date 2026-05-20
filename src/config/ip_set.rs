@@ -6,6 +6,18 @@ use super::*;
 pub struct IpSetProvider {
     pub name: String,
     pub file: PathBuf,
+    pub content_type: IpSetContentType,
+    pub match_tag: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum IpSetContentType {
+    #[default]
+    List,
+    #[cfg(feature = "geodata")]
+    GeoIp,
+    #[cfg(feature = "geodata")]
+    Mmdb,
 }
 
 pub fn parse_ip_set_file(text: &str) -> impl Iterator<Item = IpNet> + '_ {

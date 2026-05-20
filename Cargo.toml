@@ -29,7 +29,11 @@ default = ["common", "self-update" ]
 
 homebrew = [ "common" ]
 
-common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "mdns", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client", "serde" ]
+common = ["resolve-cli", "dns-over-tls", "dns-over-https", "dns-over-quic", "dns-over-h3", "mdns", "dnssec", "service", "nft", "nom-recipes-all", "swagger-ui-cdn", "http_client", "serde", "geodata", "hot-reload" ]
+
+geodata = ["dep:prost", "dep:maxminddb", "dep:ipnetwork"]
+
+hot-reload = ["dep:notify-debouncer-mini"]
 
 future-diagnostic = [
   "dep:console-subscriber"
@@ -225,6 +229,10 @@ async-http-proxy = { version = "1.2.5", features = [
   "basic-auth",
 ] }
 
+prost = { version = "0.13", optional = true }
+maxminddb = { version = "0.24", optional = true }
+ipnetwork = { version = "0.20", optional = true }
+notify-debouncer-mini = { version = "0.4", optional = true, default-features = false }
 num-traits = "0.2.19"
 url = "2.5.4"
 # regex = "1"
@@ -277,6 +285,7 @@ bindgen = "0.72"
 # Dev-dependencies are not used when compiling a package for building, but are used for compiling tests, examples, and benchmarks.
 [dev-dependencies]
 indoc = "2"
+tempfile = "3"
 # reqwest = { version = "0.12", default-features = false, features = [
 #   "blocking",
 #   "rustls-tls",

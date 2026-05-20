@@ -11,6 +11,8 @@ use super::WildcardName;
 pub enum DomainSetProvider {
     File(DomainSetFileProvider),
     Http(DomainSetHttpProvider),
+    #[cfg(feature = "geodata")]
+    GeoSite(GeoSiteFileProvider),
 }
 
 #[enum_dispatch]
@@ -39,6 +41,16 @@ pub struct DomainSetHttpProvider {
 pub enum DomainSetContentType {
     #[default]
     List,
+    #[cfg(feature = "geodata")]
+    GeoSite,
+}
+
+#[cfg(feature = "geodata")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeoSiteFileProvider {
+    pub name: String,
+    pub file: PathBuf,
+    pub match_tag: String,
 }
 
 impl IDomainSetProvider for DomainSetFileProvider {
@@ -68,6 +80,17 @@ impl IDomainSetProvider for DomainSetHttpProvider {
         let text = res.text()?;
         read_to_domain_set(&text, &mut domain_set);
         Ok(domain_set)
+    }
+}
+
+#[cfg(feature = "geodata")]
+impl IDomainSetProvider for GeoSiteFileProvider {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    fn get_domain_set(&self) -> Result<HashSet<WildcardName>> {
+        super::geodata::load_geosite(&self.file, &self.match_tag)
     }
 }
 

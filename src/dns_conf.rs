@@ -60,6 +60,9 @@ pub struct RuntimeConfig {
     ignore_ip: Arc<IpSet>,
 
     ip_alias: Arc<IpMap<Arc<[IpAddr]>>>,
+
+    /// Files referenced by this config (conf files, geo data, list files). Used for hot-reload watching.
+    watched_files: Vec<PathBuf>,
 }
 
 impl RuntimeConfig {
@@ -141,6 +144,7 @@ impl RuntimeConfig {
             rule_groups: Default::default(),
             rule_group_stack: Default::default(),
             dirs: Default::default(),
+            watched_files: Default::default(),
         }
     }
 }
@@ -353,6 +357,13 @@ impl RuntimeConfig {
     #[inline]
     pub fn serve_expired_reply_ttl(&self) -> u64 {
         self.cache.serve_expired_reply_ttl.unwrap_or(5)
+    }
+
+    /// serve-expired-prefetch-time — refresh active records this many
+    /// seconds before TTL elapses. 0 disables. Matches C smartdns.
+    #[inline]
+    pub fn serve_expired_prefetch_time(&self) -> u64 {
+        self.cache.serve_expired_prefetch_time.unwrap_or(0)
     }
 
     /// List of hosts that supply bogus NX domain results
@@ -640,6 +651,12 @@ impl RuntimeConfig {
         self.managed_dir.as_deref()
     }
 
+    /// All files referenced by this config that should be watched for hot-reload
+    /// (conf files, included conf files, geo data files, list files).
+    pub fn watched_files(&self) -> &[PathBuf] {
+        &self.watched_files
+    }
+
     pub fn reload_new(&self) -> anyhow::Result<Arc<RuntimeConfig>> {
         let builder = RuntimeConfigBuilder {
             conf_dir: self.conf_dir.clone(),
@@ -669,11 +686,13 @@ pub struct RuntimeConfigBuilder {
     rule_group_stack: Vec<(String, RuleGroup)>,
     loaded_files: HashSet<PathBuf>,
     dirs: HashSet<PathBuf>,
+    watched_files: HashSet<PathBuf>,
 }
 
 impl RuntimeConfigBuilder {
     pub fn build(mut self) -> anyhow::Result<RuntimeConfig> {
         if let Some(conf_file) = self.conf_file.clone() {
+            self.watched_files.insert(conf_file.clone());
             let loaded = self.loaded_files.contains(&conf_file);
             if !loaded {
                 self.load_file(&conf_file)?;
@@ -865,6 +884,9 @@ impl RuntimeConfigBuilder {
             dir
         });
 
+        let mut watched_files: Vec<PathBuf> = self.watched_files.into_iter().collect();
+        watched_files.sort();
+
         Ok(RuntimeConfig {
             conf_dir,
             conf_file,
@@ -878,6 +900,7 @@ impl RuntimeConfigBuilder {
             ignore_ip,
             ip_alias,
             proxy_servers: Arc::new(proxy_servers),
+            watched_files,
         })
     }
 }
@@ -980,6 +1003,7 @@ impl RuntimeConfigBuilder {
                 SpeedMode(v) => self.speed_check_mode = v,
                 ServeExpiredTtl(v) => self.cache.serve_expired_ttl = Some(v),
                 ServeExpiredReplyTtl(v) => self.cache.serve_expired_reply_ttl = Some(v),
+                ServeExpiredPrefetchTime(v) => self.cache.serve_expired_prefetch_time = Some(v),
                 CacheSize(v) => self.cache.size = Some(v),
                 ForceQtypeSoa(v) => {
                     self.force_qtype_soa.insert(v);
@@ -1007,6 +1031,7 @@ impl RuntimeConfigBuilder {
                 CaPath(v) => self.ca_path = Some(v),
                 ConfFile(v) => {
                     if !self.loaded_files.contains(&v) {
+                        self.watched_files.insert(v.clone());
                         self.load_file(v.clone()).expect("load_file failed");
                         if let Some(dir) = v.parent() {
                             self.dirs.insert(dir.to_path_buf());
@@ -1028,6 +1053,12 @@ impl RuntimeConfigBuilder {
                     use crate::config::DomainSetProvider;
                     if let DomainSetProvider::File(provider) = &mut v {
                         provider.file = self.resolve_filepath(&provider.file);
+                        self.watched_files.insert(provider.file.clone());
+                    }
+                    #[cfg(feature = "geodata")]
+                    if let DomainSetProvider::GeoSite(provider) = &mut v {
+                        provider.file = self.resolve_filepath(&provider.file);
+                        self.watched_files.insert(provider.file.clone());
                     }
                     self.domain_set_providers
                         .entry(v.name().to_string())
@@ -1038,17 +1069,66 @@ impl RuntimeConfigBuilder {
                     self.proxy_servers.insert(v.name.clone(), v.config);
                 }
                 HostsFile(file) => self.hosts_file = Some(file),
-                IpSetProvider(p) => {
-                    let path = resolve_filepath(&p.file, self.conf_file.as_ref());
-                    match std::fs::read_to_string(path) {
-                        Ok(text) => {
-                            let net = self.ip_sets.entry(p.name.clone()).or_default();
-                            let len = net.len();
-                            net.extend(parse_ip_set_file(&text));
-                            log::info!("IpSet load {} records into {}", net.len() - len, p.name);
+                IpSetProvider(mut p) => {
+                    p.file = resolve_filepath(&p.file, self.conf_file.as_ref());
+                    self.watched_files.insert(p.file.clone());
+                    match p.content_type {
+                        #[cfg(feature = "geodata")]
+                        IpSetContentType::GeoIp => {
+                            let tag = p.match_tag.as_deref().unwrap_or("cn");
+                            match crate::config::geodata::load_geoip(&p.file, tag) {
+                                Ok(nets) => {
+                                    let set = self.ip_sets.entry(p.name.clone()).or_default();
+                                    let len = set.len();
+                                    set.extend(nets);
+                                    log::info!(
+                                        "IpSet(geoip:{}) load {} records into {}",
+                                        tag,
+                                        set.len() - len,
+                                        p.name
+                                    );
+                                }
+                                Err(err) => {
+                                    log::error!("IpSet(geoip) load failed {} {}", p.name, err);
+                                }
+                            }
                         }
-                        Err(err) => {
-                            log::error!("IpSet load failed {} {}", p.name, err);
+                        #[cfg(feature = "geodata")]
+                        IpSetContentType::Mmdb => {
+                            let tag = p.match_tag.as_deref().unwrap_or("CN");
+                            match crate::config::geodata::load_mmdb(&p.file, tag) {
+                                Ok(nets) => {
+                                    let set = self.ip_sets.entry(p.name.clone()).or_default();
+                                    let len = set.len();
+                                    set.extend(nets);
+                                    log::info!(
+                                        "IpSet(mmdb:{}) load {} records into {}",
+                                        tag,
+                                        set.len() - len,
+                                        p.name
+                                    );
+                                }
+                                Err(err) => {
+                                    log::error!("IpSet(mmdb) load failed {} {}", p.name, err);
+                                }
+                            }
+                        }
+                        IpSetContentType::List => {
+                            match std::fs::read_to_string(&p.file) {
+                                Ok(text) => {
+                                    let net = self.ip_sets.entry(p.name.clone()).or_default();
+                                    let len = net.len();
+                                    net.extend(parse_ip_set_file(&text));
+                                    log::info!(
+                                        "IpSet load {} records into {}",
+                                        net.len() - len,
+                                        p.name
+                                    );
+                                }
+                                Err(err) => {
+                                    log::error!("IpSet load failed {} {}", p.name, err);
+                                }
+                            }
                         }
                     }
                 }
@@ -1909,6 +1989,69 @@ mod tests {
         assert_eq!(cfg.ip_sets["cf-ipv4"], v4);
         assert_eq!(cfg.ip_sets["cf-ipv6"], v6);
         assert_eq!(*cfg.whitelist_ip, all);
+    }
+
+    #[test]
+    fn test_parse_serve_expired_prefetch_time() {
+        // GH #166: `serve-expired-prefetch-time` previously parsed as "unknown conf".
+        let cfg = RuntimeConfig::builder()
+            .with("serve-expired-prefetch-time 30")
+            .build()
+            .unwrap();
+        assert_eq!(cfg.serve_expired_prefetch_time(), 30);
+        assert_eq!(cfg.cache.serve_expired_prefetch_time, Some(30));
+    }
+
+    #[test]
+    fn test_serve_expired_prefetch_time_default() {
+        let cfg = RuntimeConfig::builder().build().unwrap();
+        // Default is 0 (disabled).
+        assert_eq!(cfg.serve_expired_prefetch_time(), 0);
+    }
+
+    #[test]
+    fn test_watched_files_tracking() {
+        let cfg = RuntimeConfig::builder()
+            .with_conf_file("tests/test_data/b_main.conf")
+            .build()
+            .unwrap();
+
+        let watched = cfg.watched_files();
+        let file_names: std::collections::HashSet<String> = watched
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+            .collect();
+
+        assert!(
+            file_names.contains("b_main.conf"),
+            "expected b_main.conf in watched files, got {:?}",
+            file_names
+        );
+        assert!(
+            file_names.contains("b_server.conf"),
+            "expected b_server.conf (included via conf-file) in watched files, got {:?}",
+            file_names
+        );
+        assert!(
+            file_names.contains("b_addr.conf"),
+            "expected b_addr.conf (included via conf-file) in watched files, got {:?}",
+            file_names
+        );
+        assert!(
+            file_names.contains("block-list.txt"),
+            "expected block-list.txt (domain-set file) in watched files, got {:?}",
+            file_names
+        );
+        assert!(
+            file_names.contains("cf-ipv4.txt"),
+            "expected cf-ipv4.txt (ip-set file) in watched files, got {:?}",
+            file_names
+        );
+        assert!(
+            file_names.contains("cf-ipv6.txt"),
+            "expected cf-ipv6.txt (ip-set file) in watched files, got {:?}",
+            file_names
+        );
     }
 
     #[test]

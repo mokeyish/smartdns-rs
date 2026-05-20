@@ -33,6 +33,8 @@ mod dns_rule;
 mod dns_url;
 mod dnsmasq;
 mod error;
+#[cfg(feature = "hot-reload")]
+mod file_watcher;
 mod ffi;
 mod infra;
 mod libdns;
@@ -306,6 +308,21 @@ mod signal {
         }
 
         Ok(())
+    }
+
+    #[cfg(unix)]
+    pub async fn reload() {
+        use tokio::signal::unix::{SignalKind, signal};
+        if let Ok(mut sighup) = signal(SignalKind::hangup()) {
+            sighup.recv().await;
+        } else {
+            std::future::pending::<()>().await;
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub async fn reload() {
+        std::future::pending::<()>().await;
     }
 }
 

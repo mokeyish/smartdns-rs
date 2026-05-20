@@ -28,6 +28,8 @@ mod client_rule;
 mod domain;
 mod domain_rule;
 mod domain_set;
+#[cfg(feature = "geodata")]
+pub mod geodata;
 mod ip_set;
 mod log;
 mod nameserver;

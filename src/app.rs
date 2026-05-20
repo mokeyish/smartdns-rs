@@ -322,7 +322,70 @@ pub fn serve(cfg: Arc<RuntimeConfig>) {
 
     runtime.block_on(async move {
         use crate::signal;
-        let _ = signal::terminate().await;
+
+        #[cfg(feature = "hot-reload")]
+        let mut file_change_rx: Option<tokio::sync::mpsc::Receiver<()>> = {
+            let paths = app.cfg().await.watched_files().to_vec();
+            if paths.is_empty() {
+                None
+            } else {
+                Some(crate::file_watcher::spawn_watcher(paths))
+            }
+        };
+
+        loop {
+            #[cfg(feature = "hot-reload")]
+            let do_reload = tokio::select! {
+                _ = signal::terminate() => break,
+                _ = signal::reload() => {
+                    log::info!("SIGHUP received, reloading configuration");
+                    true
+                }
+                recv = async {
+                    match file_change_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if recv.is_some() {
+                        true
+                    } else {
+                        // Watcher channel closed unexpectedly. Drop the
+                        // receiver so the next iteration uses pending() and
+                        // we don't tight-loop on the closed channel.
+                        log::warn!("hot-reload: watcher channel closed, disabling file watching");
+                        file_change_rx = None;
+                        false
+                    }
+                }
+            };
+            #[cfg(not(feature = "hot-reload"))]
+            let do_reload = tokio::select! {
+                _ = signal::terminate() => break,
+                _ = signal::reload() => {
+                    log::info!("SIGHUP received, reloading configuration");
+                    true
+                }
+            };
+
+            if do_reload {
+                match app.reload().await {
+                    Ok(()) => {
+                        #[cfg(feature = "hot-reload")]
+                        {
+                            let new_paths = app.cfg().await.watched_files().to_vec();
+                            file_change_rx = if new_paths.is_empty() {
+                                None
+                            } else {
+                                Some(crate::file_watcher::spawn_watcher(new_paths))
+                            };
+                        }
+                    }
+                    Err(e) => log::error!("reload failed: {}", e),
+                }
+            }
+        }
+
         // close all servers.
         let mut shutdown_listeners = Default::default();
         std::mem::swap(
@@ -405,15 +468,28 @@ async fn process(
                                         match e.as_soa(original) {
                                             Some(soa) => soa,
                                             None => {
-                                                log::debug!(
-                                                    "{}Response: error resolving: {}, Duration: {:?}",
+                                                // GH #307: surface upstream
+                                                // resolution failures at WARN
+                                                // with the query that failed +
+                                                // the full debug error, so
+                                                // operators can diagnose DoH /
+                                                // upstream issues without
+                                                // turning on debug logging.
+                                                log::warn!(
+                                                    "{}Response: error resolving query={} type={}: {:#}, Duration: {:?}",
                                                     if server_opts.is_background {
                                                         "Background"
                                                     } else {
                                                         ""
                                                     },
+                                                    original.name(),
+                                                    original.query_type(),
                                                     e,
                                                     start.elapsed()
+                                                );
+                                                log::debug!(
+                                                    "error detail: {:?}",
+                                                    e
                                                 );
                                                 response_header
                                                     .set_response_code(ResponseCode::ServFail);

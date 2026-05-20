@@ -5,10 +5,17 @@ use super::*;
 ///
 /// domain-set -type list -file /path/to/list
 /// domain-set -type list -url https://example.com/list
+/// domain-set -type geosite -file /path/to/geosite.dat -match cn
 impl NomParser for DomainSetProvider {
     fn parse(input: &str) -> IResult<&str, Self> {
         use DomainSetProvider::*;
-        alt((map(NomParser::parse, File), map(NomParser::parse, Http))).parse(input)
+        alt((
+            #[cfg(feature = "geodata")]
+            map(NomParser::parse, GeoSite),
+            map(NomParser::parse, File),
+            map(NomParser::parse, Http),
+        ))
+        .parse(input)
     }
 }
 
@@ -139,7 +146,81 @@ impl NomParser for DomainSetHttpProvider {
 impl NomParser for DomainSetContentType {
     fn parse(input: &str) -> IResult<&str, Self> {
         use DomainSetContentType::*;
-        alt((value(List, tag_no_case("list")),)).parse(input)
+        alt((
+            value(List, tag_no_case("list")),
+            #[cfg(feature = "geodata")]
+            value(GeoSite, tag_no_case("geosite")),
+        ))
+        .parse(input)
+    }
+}
+
+#[cfg(feature = "geodata")]
+impl NomParser for GeoSiteFileProvider {
+    fn parse(input: &str) -> IResult<&str, Self> {
+        let mut name = None;
+        let mut file = None;
+        let mut match_tag = None;
+        let mut is_geosite = false;
+
+        let one = alt((
+            map(
+                options::parse_value(
+                    alt((tag_no_case("name"), tag_no_case("n"))),
+                    NomParser::parse,
+                ),
+                |v| {
+                    name = Some(v);
+                },
+            ),
+            map(
+                options::parse_value(
+                    alt((tag_no_case("file"), tag_no_case("f"))),
+                    NomParser::parse,
+                ),
+                |v| {
+                    file = Some(v);
+                },
+            ),
+            map(
+                options::parse_value(
+                    alt((tag_no_case("type"), tag_no_case("t"))),
+                    DomainSetContentType::parse,
+                ),
+                |t| {
+                    is_geosite = matches!(t, DomainSetContentType::GeoSite);
+                },
+            ),
+            map(
+                options::parse_value(
+                    alt((tag_no_case("match"), tag_no_case("m"))),
+                    NomParser::parse,
+                ),
+                |v: String| {
+                    match_tag = Some(v);
+                },
+            ),
+        ));
+
+        let (rest_input, _) = separated_list1(space1, one).parse(input)?;
+
+        if let (true, Some(name), Some(file), Some(match_tag)) =
+            (is_geosite, name, file, match_tag)
+        {
+            return Ok((
+                rest_input,
+                GeoSiteFileProvider {
+                    name,
+                    file,
+                    match_tag,
+                },
+            ));
+        }
+
+        Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Verify,
+        )))
     }
 }
 
@@ -205,6 +286,38 @@ mod tests {
                     name: "set".to_string(),
                     file: PathBuf::from("/path/to/list"),
                     content_type: Default::default(),
+                })
+            ))
+        );
+    }
+
+    #[cfg(feature = "geodata")]
+    #[test]
+    fn test_parse_geosite_provider() {
+        assert_eq!(
+            DomainSetProvider::parse(
+                "-type geosite -name cn -file /etc/smartdns/geosite.dat -match cn"
+            ),
+            Ok((
+                "",
+                DomainSetProvider::GeoSite(GeoSiteFileProvider {
+                    name: "cn".to_string(),
+                    file: PathBuf::from("/etc/smartdns/geosite.dat"),
+                    match_tag: "cn".to_string(),
+                })
+            ))
+        );
+
+        assert_eq!(
+            DomainSetProvider::parse(
+                "-t geosite -n google -f geosite.dat -m google"
+            ),
+            Ok((
+                "",
+                DomainSetProvider::GeoSite(GeoSiteFileProvider {
+                    name: "google".to_string(),
+                    file: PathBuf::from("geosite.dat"),
+                    match_tag: "google".to_string(),
                 })
             ))
         );

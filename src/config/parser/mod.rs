@@ -142,6 +142,7 @@ pub enum ConfigItem {
     ServeExpired(bool),
     ServeExpiredTtl(u64),
     ServeExpiredReplyTtl(u64),
+    ServeExpiredPrefetchTime(u64),
     Server(NameServerInfo),
     ServerName(Name),
     ResolvFile(PathBuf),
@@ -223,6 +224,7 @@ impl std::fmt::Display for ConfigItem {
             ConfigItem::ServeExpired(_) => todo!(),
             ConfigItem::ServeExpiredTtl(_) => todo!(),
             ConfigItem::ServeExpiredReplyTtl(_) => todo!(),
+            ConfigItem::ServeExpiredPrefetchTime(_) => todo!(),
             ConfigItem::Server(c) => {
                 write!(f, "server {c}")?;
             }
@@ -405,6 +407,10 @@ fn parse_line<'a>(input: &'a str) -> IResult<&'a str, ConfigLine<'a>> {
         map(
             config("serve-expired-reply-ttl"),
             ConfigItem::ServeExpiredReplyTtl,
+        ),
+        map(
+            config("serve-expired-prefetch-time"),
+            ConfigItem::ServeExpiredPrefetchTime,
         ),
         map(config("serve-expired-ttl"), ConfigItem::ServeExpiredTtl),
         map(config("serve-expired"), ConfigItem::ServeExpired),
@@ -625,6 +631,8 @@ mod tests {
                 ConfigItem::IpSetProvider(IpSetProvider {
                     name: "name".to_string(),
                     file: Path::new("/path/to/file.txt").to_path_buf(),
+                    content_type: Default::default(),
+                    match_tag: None,
                 })
                 .into()
             )
