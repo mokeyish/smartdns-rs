@@ -183,14 +183,12 @@ async fn delete(
 
         // 1. Delete ALL managed entries (including negation)
         let before = config.len();
-        config.retain(|line| {
-            match line {
-                ConfigLine::Config {
-                    config: ConfigItem::Address(rule),
-                    ..
-                } => rule.domain != domain,
-                _ => true,
-            }
+        config.retain(|line| match line {
+            ConfigLine::Config {
+                config: ConfigItem::Address(rule),
+                ..
+            } => rule.domain != domain,
+            _ => true,
         });
         let managed_deleted = config.len() != before;
 
@@ -202,14 +200,12 @@ async fn delete(
 
         // 3. If nothing was deleted, but static exists, create negation
         if static_exists {
-            let neg_exists = config.iter().any(|line| {
-                match line {
-                    ConfigLine::Config {
-                        config: ConfigItem::Address(rule),
-                        ..
-                    } => rule.domain == domain && rule.address == zero,
-                    _ => false,
-                }
+            let neg_exists = config.iter().any(|line| match line {
+                ConfigLine::Config {
+                    config: ConfigItem::Address(rule),
+                    ..
+                } => rule.domain == domain && rule.address == zero,
+                _ => false,
             });
 
             if !neg_exists {

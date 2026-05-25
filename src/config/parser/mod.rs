@@ -278,9 +278,7 @@ impl<'a> std::fmt::Display for ConfigFile<'a> {
                 ConfigLine::Config { config, comment } => {
                     match comment {
                         // Only write comments that are NOT empty
-                        Some(c) if !c.trim().is_empty() => {
-                            writeln!(f, "{} # {}", config, c)?
-                        }
+                        Some(c) if !c.trim().is_empty() => writeln!(f, "{} # {}", config, c)?,
                         // Completely remove empty comments
                         _ => writeln!(f, "{}", config)?,
                     }
@@ -438,26 +436,22 @@ fn parse_line<'a>(input: &'a str) -> IResult<&'a str, ConfigLine<'a>> {
                 preceded(space0, group),
                 alt((
                     //map(recognize((space1, comment)), Some),
+                    map(recognize((space1, comment)), |raw: &str| {
+                        // raw contains e.g. " # foo" or " # "
+                        // extract the part after '#'
+                        let trimmed = raw
+                            .trim_start() // remove leading spaces
+                            .trim_start_matches('#')
+                            .trim(); // actual comment content
 
-                    map(
-                        recognize((space1, comment)),
-                        |raw: &str| {
-                            // raw contains e.g. " # foo" or " # "
-                            // extract the part after '#'
-                            let trimmed = raw
-                                .trim_start()        // remove leading spaces
-                                .trim_start_matches('#')
-                                .trim();             // actual comment content
-
-                            if trimmed.is_empty() {
-                                None                // empty comment, discard
-                            } else {
-                                // must return an &str, not a String
-                                // trimmed is already an &str
-                                Some(trimmed)
-                            }
-                        },
-                    ),
+                        if trimmed.is_empty() {
+                            None // empty comment, discard
+                        } else {
+                            // must return an &str, not a String
+                            // trimmed is already an &str
+                            Some(trimmed)
+                        }
+                    }),
                     map(space0, |_| None),
                 )),
             ),

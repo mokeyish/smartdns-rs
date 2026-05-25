@@ -127,29 +127,25 @@ impl Cli {
                 // get directory from conf if empty
                 let (conf, directory) = match (conf, directory) {
                     // conf = Some, directory = None, build diretroy from conf
-                    (Some(conf_path), None) => {
-                        match conf_path.canonicalize() {
-                            Ok(conf_abs) => {
-                                let dir = conf_abs.parent().map(|p| p.to_path_buf());
-                                (Some(conf_abs), dir)
-                            }
-                            Err(e) => {
-                                warn!("failed to canonicalize config path: {}", e);
-                                (Some(conf_path), None)
-                            }
+                    (Some(conf_path), None) => match conf_path.canonicalize() {
+                        Ok(conf_abs) => {
+                            let dir = conf_abs.parent().map(|p| p.to_path_buf());
+                            (Some(conf_abs), dir)
                         }
-                    }
+                        Err(e) => {
+                            warn!("failed to canonicalize config path: {}", e);
+                            (Some(conf_path), None)
+                        }
+                    },
 
                     // conf = Some, directory = Some
-                    (Some(conf_path), Some(dir)) => {
-                        match conf_path.canonicalize() {
-                            Ok(conf_abs) => (Some(conf_abs), Some(dir)),
-                            Err(e) => {
-                                warn!("failed to canonicalize config path: {}", e);
-                                (Some(conf_path), Some(dir))
-                            }
+                    (Some(conf_path), Some(dir)) => match conf_path.canonicalize() {
+                        Ok(conf_abs) => (Some(conf_abs), Some(dir)),
+                        Err(e) => {
+                            warn!("failed to canonicalize config path: {}", e);
+                            (Some(conf_path), Some(dir))
                         }
-                    }
+                    },
 
                     // conf = None
                     (None, dir) => {
@@ -157,7 +153,7 @@ impl Cli {
                         (None, dir) //change nothing, use as is
                     }
                 };
-                
+
                 let cfg = RuntimeConfig::load(directory, conf);
 
                 cfg.summary();
