@@ -131,6 +131,9 @@ jobs:
           - target: arm-unknown-linux-musleabihf
             os: ubuntu-latest
             archive: tar.gz tar.xz tar.zst
+          - target: powerpc-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz tar.xz tar.zst
           # - target: mips-unknown-linux-musl
           #   archive: tar.gz tar.xz tar.zst
           # - target: mips-unknown-linux-musl

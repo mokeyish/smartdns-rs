@@ -13,3 +13,5 @@ image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main"
 [target.aarch64-unknown-linux-gnu]
 image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
 
+[target.powerpc-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
