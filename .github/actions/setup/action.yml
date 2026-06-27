@@ -34,10 +34,6 @@ inputs:
     description: "Install cargo-edit."
     required: false
     default: "true"
-  install_patch_crate:
-    description: "Install patch-crate."
-    required: false
-    default: "true"
 
 runs:
   using: "composite"
@@ -90,10 +86,4 @@ runs:
       uses: baptiste0928/cargo-install@v3
       with:
         crate: cargo-edit
-
-    - name: Install patch-crate
-      if: ${{ inputs.install_patch_crate == 'true' }}
-      uses: baptiste0928/cargo-install@v3
-      with:
-        crate: patch-crate
 

@@ -296,12 +296,12 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsCacheMiddl
                         )
                         .await;
 
-                    if ctx.cfg().prefetch_domain() {
-                        if let Some(ttl) = lookup.min_ttl() {
-                            self.prefetch_notify
-                                .notify_after(Duration::from_secs(ttl as u64))
-                                .await;
-                        }
+                    if ctx.cfg().prefetch_domain()
+                        && let Some(ttl) = lookup.min_ttl()
+                    {
+                        self.prefetch_notify
+                            .notify_after(Duration::from_secs(ttl as u64))
+                            .await;
                     }
                 }
                 Ok(lookup)

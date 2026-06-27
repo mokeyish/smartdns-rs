@@ -14,10 +14,7 @@ fn build_nftset() -> anyhow::Result<()> {
     }
 
     let mut build = cc::Build::new();
-    build
-        .file("include/nftset.c")
-        .static_flag(true)
-        .warnings(false);
+    build.file("include/nftset.c").warnings(false);
 
     if target.ends_with("-musl") {
         let target_dir = env::var_os("OUT_DIR").unwrap();

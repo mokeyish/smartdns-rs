@@ -39,10 +39,10 @@ impl<T> DomainMap<T> {
                     let w = name.hash_code();
                     if let Some(wildcards) = self.wildcards.get(&w) {
                         for w in wildcards.iter() {
-                            if w.is_match(&last) {
-                                if let Some(v) = self.map.get(&w.hash_code()) {
-                                    return Some(v);
-                                }
+                            if w.is_match(&last)
+                                && let Some(v) = self.map.get(&w.hash_code())
+                            {
+                                return Some(v);
                             }
                         }
                     }

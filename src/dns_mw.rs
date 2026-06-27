@@ -59,10 +59,10 @@ impl DnsMiddlewareHandler {
             None => {
                 let mut client_ip = req.src().ip();
 
-                if let IpAddr::V6(addr) = client_ip {
-                    if let Some(addr) = addr.to_ipv4_mapped() {
-                        client_ip = addr.into();
-                    }
+                if let IpAddr::V6(addr) = client_ip
+                    && let Some(addr) = addr.to_ipv4_mapped()
+                {
+                    client_ip = addr.into();
                 }
 
                 client_rules

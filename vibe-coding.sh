@@ -16,6 +16,7 @@ declare -a MOUNTS=(
     "$AGENT_HOME/.local:/home/openhands/.local"
     "$AGENT_HOME/.cache:/home/openhands/.cache"
     "$AGENT_HOME/.cargo:/home/openhands/.cargo"
+    "$AGENT_HOME/.rustup:/home/openhands/.rustup"
     "$AGENT_HOME/.nvm:/home/openhands/.nvm"
     "$OPENHANDS_HOME:/home/openhands/.openhands"
     "$PROJECTS_PATH:/projects"
