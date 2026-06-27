@@ -20,8 +20,6 @@ readme = "README.md"
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nightly)'] }
 
-[package.metadata.patch]
-# crates = ["hickory-server", "hickory-proto"]
 
 [features]
 

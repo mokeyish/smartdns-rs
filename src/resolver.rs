@@ -23,10 +23,10 @@ impl ResolveCommand {
             Some(s) => DnsUrl::from_str(s).ok(),
             None => None,
         };
-        if let Some(proto) = proto {
-            if let Some(s) = server.as_mut() {
-                s.set_proto(proto)
-            }
+        if let Some(proto) = proto
+            && let Some(s) = server.as_mut()
+        {
+            s.set_proto(proto)
         }
         let domains = self.domains();
         let query_types = self.q_type();

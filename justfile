@@ -189,17 +189,11 @@ setcap:
 
 
 # Apply patch
-[private]
-patch: # require_patch-crate
-  @#cargo patch-crate -f
+patch:
 
 #------------#
 # dependency #
 #------------#
-
-[private]
-@require_patch-crate:
-  cargo patch-crate --version >/dev/null 2>&1 || cargo install patch-crate
 
 [private]
 @require_set-version:

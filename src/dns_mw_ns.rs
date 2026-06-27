@@ -47,21 +47,21 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for NameServerMid
 
         let client = &self.client;
 
-        if rtype.is_ip_addr() {
-            if let Some(lookup) = client.lookup_nameserver(name.clone(), rtype).await {
-                debug!(
-                    "lookup nameserver {} {} ip {:?}",
-                    name,
-                    rtype,
-                    lookup
-                        .answers()
-                        .iter()
-                        .filter_map(|record| record.data().ip_addr())
-                        .collect::<Vec<_>>()
-                );
-                ctx.no_cache = true;
-                return Ok(lookup);
-            }
+        if rtype.is_ip_addr()
+            && let Some(lookup) = client.lookup_nameserver(name.clone(), rtype).await
+        {
+            debug!(
+                "lookup nameserver {} {} ip {:?}",
+                name,
+                rtype,
+                lookup
+                    .answers()
+                    .iter()
+                    .filter_map(|record| record.data().ip_addr())
+                    .collect::<Vec<_>>()
+            );
+            ctx.no_cache = true;
+            return Ok(lookup);
         }
 
         let lookup_options = LookupOptions {
@@ -360,8 +360,8 @@ async fn lookup_ip(
                     }
                 };
 
-                if let Some(Ok(out)) = ping_res {
-                    if match fastest_ip.as_ref() {
+                if let Some(Ok(out)) = ping_res
+                    && match fastest_ip.as_ref() {
                         Some(t) => out.elapsed() < t.elapsed(),
                         None => {
                             // first get speed, add timeout
@@ -380,9 +380,9 @@ async fn lookup_ip(
 
                             true
                         }
-                    } {
-                        fastest_ip = Some(out);
                     }
+                {
+                    fastest_ip = Some(out);
                 }
 
                 if let Some(res) = query_res {
@@ -424,10 +424,10 @@ async fn lookup_ip(
             let mut last_error = None;
             loop {
                 let (res, _idx, rest) = select_all(query_tasks).await;
-                if let Ok(response) = &res {
-                    if response.response_code() == ResponseCode::NoError {
-                        return res;
-                    }
+                if let Ok(response) = &res
+                    && response.response_code() == ResponseCode::NoError
+                {
+                    return res;
                 }
 
                 if rest.is_empty() {

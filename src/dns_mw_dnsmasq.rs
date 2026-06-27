@@ -31,21 +31,21 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsmasqMiddle
             // Extract the IP address from the PTR query name.
             // PTR queries are in the format: x.x.x.x.in-addr.arpa. for IPv4
             // or x.x.x.x...ip6.arpa. for IPv6.
-            if let Ok(ip_addr) = crate::dnsmasq::ptr_to_ip(req.query().name()) {
-                if let Some(rdata) = self.client_store.reverse_lookup(&ip_addr) {
-                    let local_ttl = ctx.cfg().local_ttl();
-                    let query = req.query().original().clone();
-                    let name = query.name().to_owned();
-                    let valid_until = Instant::now() + Duration::from_secs(local_ttl);
+            if let Ok(ip_addr) = crate::dnsmasq::ptr_to_ip(req.query().name())
+                && let Some(rdata) = self.client_store.reverse_lookup(&ip_addr)
+            {
+                let local_ttl = ctx.cfg().local_ttl();
+                let query = req.query().original().clone();
+                let name = query.name().to_owned();
+                let valid_until = Instant::now() + Duration::from_secs(local_ttl);
 
-                    let lookup = DnsResponse::new_with_deadline(
-                        query,
-                        vec![Record::from_rdata(name, local_ttl as u32, rdata)],
-                        valid_until,
-                    );
-                    ctx.source = LookupFrom::Static;
-                    return Ok(lookup);
-                }
+                let lookup = DnsResponse::new_with_deadline(
+                    query,
+                    vec![Record::from_rdata(name, local_ttl as u32, rdata)],
+                    valid_until,
+                );
+                ctx.source = LookupFrom::Static;
+                return Ok(lookup);
             }
             // If it's a PTR query but we couldn't resolve it from lease file, fall through.
         }

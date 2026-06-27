@@ -45,27 +45,26 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for AddressMiddle
             Ok(lookup) => Ok({
                 let mut records = Cow::Borrowed(lookup.records());
 
-                if query_type.is_ip_addr() {
-                    if let Some(mut max_reply_ip_num) = ctx.cfg().max_reply_ip_num() {
-                        if max_reply_ip_num > 0 {
-                            let mut truncate = None;
-                            for (i, r) in records.iter().enumerate() {
-                                if matches!(r.data(), RData::A(_) | RData::AAAA(_)) {
-                                    max_reply_ip_num -= 1;
-                                    if max_reply_ip_num == 0 {
-                                        truncate = Some(i + 1);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            match truncate {
-                                Some(truncate) if records.len() > truncate => {
-                                    records.to_mut().truncate(truncate);
-                                }
-                                _ => (),
+                if query_type.is_ip_addr()
+                    && let Some(mut max_reply_ip_num) = ctx.cfg().max_reply_ip_num()
+                    && max_reply_ip_num > 0
+                {
+                    let mut truncate = None;
+                    for (i, r) in records.iter().enumerate() {
+                        if matches!(r.data(), RData::A(_) | RData::AAAA(_)) {
+                            max_reply_ip_num -= 1;
+                            if max_reply_ip_num == 0 {
+                                truncate = Some(i + 1);
+                                break;
                             }
                         }
+                    }
+
+                    match truncate {
+                        Some(truncate) if records.len() > truncate => {
+                            records.to_mut().truncate(truncate);
+                        }
+                        _ => (),
                     }
                 }
 

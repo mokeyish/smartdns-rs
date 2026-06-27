@@ -20,16 +20,16 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsBogusMiddl
 
         let bogus_nxdomain = ctx.cfg().bogus_nxdomain();
 
-        if req.query().query_type().is_ip_addr() {
-            if let Ok(lookup) = res.as_ref() {
-                for record in lookup.records() {
-                    if match record.data() {
-                        RData::A(ip) if bogus_nxdomain.contains(ip.deref()) => true,
-                        RData::AAAA(ip) if bogus_nxdomain.contains(ip.deref()) => true,
-                        _ => false,
-                    } {
-                        return Err(ResponseCode::NXDomain.into());
-                    }
+        if req.query().query_type().is_ip_addr()
+            && let Ok(lookup) = res.as_ref()
+        {
+            for record in lookup.records() {
+                if match record.data() {
+                    RData::A(ip) if bogus_nxdomain.contains(ip.deref()) => true,
+                    RData::AAAA(ip) if bogus_nxdomain.contains(ip.deref()) => true,
+                    _ => false,
+                } {
+                    return Err(ResponseCode::NXDomain.into());
                 }
             }
         }

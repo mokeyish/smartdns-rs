@@ -93,10 +93,10 @@ impl DnsClientBuilder {
         let mut server_instances = HashMap::<&NameServerInfo, _>::new();
         let mut make_server = |server_config, resolver, dedup| {
             let entry = server_instances.entry(server_config);
-            if let std::collections::hash_map::Entry::Occupied(_) = entry {
-                if dedup {
-                    return None;
-                }
+            if let std::collections::hash_map::Entry::Occupied(_) = entry
+                && dedup
+            {
+                return None;
             }
             let server = entry.or_insert_with(|| {
                 let proxy = server_config
@@ -529,16 +529,16 @@ mod name_server {
 
             let client_subnet = options.client_subnet.or(self.options().client_subnet);
 
-            if options.client_subnet.is_none() {
-                if let Some(subnet) = client_subnet.as_ref() {
-                    log::debug!(
-                        "query name: {} type: {} subnet: {}/{}",
-                        query.name(),
-                        query.query_type(),
-                        subnet.addr(),
-                        subnet.scope_prefix(),
-                    );
-                }
+            if options.client_subnet.is_none()
+                && let Some(subnet) = client_subnet.as_ref()
+            {
+                log::debug!(
+                    "query name: {} type: {} subnet: {}/{}",
+                    query.name(),
+                    query.query_type(),
+                    subnet.addr(),
+                    subnet.scope_prefix(),
+                );
             }
 
             let request_options = {
