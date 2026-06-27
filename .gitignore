@@ -33,3 +33,5 @@ dist
 # localhost.key
 
 *.local.*
+
+.agent
