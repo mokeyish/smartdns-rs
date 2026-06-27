@@ -734,3 +734,89 @@ pub fn reverse_lookup(&self, ip: &IpAddr) -> Option<RData> {
 - When refactoring to use built-in APIs (e.g., `Name::parse_arpa_name()`), always verify the local implementation first
 - Library versions are pinned in `Cargo.toml` - check exact commit/rev for accurate reference
 
+---
+
+## Git & Contribution Guidelines
+
+### Commit Message Format
+
+We follow the **Conventional Commits** specification. Commit messages should follow this format:
+
+```text
+<type>(<scope>): <subject>
+
+<body>
+```
+
+#### Commit Type Categories
+
+| Type | Meaning | When to Use |
+| :--- | :--- | :--- |
+| **feat** | New Feature | Introduces a new feature or functionality |
+| **fix** | Bug Fix | Fixes a bug or vulnerability in the code |
+| **docs** | Documentation | Only modifies documentation, README, or comments |
+| **style** | Code Style | Changes that don't affect code meaning (formatting, whitespace, missing semicolons) |
+| **refactor** | Refactoring | Large or medium refactoring of logic structure or core modules |
+| **tweak** | Tweaks | Local code adjustments, minor optimizations, or renaming |
+| **perf** | Performance | Improves performance, load speed, or reduces memory usage |
+| **test** | Tests | Adds, modifies, or removes test code |
+| **chore** | Build/Tools | Modifies build tools, dependencies, or utility tools |
+| **ci** | CI Configuration | Modifies CI scripts or config files |
+| **revert** | Revert | Reverts a previous commit |
+
+**Examples:**
+- `refactor(auth): rewrite the token validation module`
+- `tweak(auth): optimize variable naming in login component`
+- `feat(dns): add IPv6 PTR lookup support`
+- `fix(cache): resolve cache invalidation issue`
+
+⚠️ **Breaking Changes**: Add `!` after the type (e.g., `feat!: remove deprecated API`) or note in the footer.
+
+### Branch Management
+
+* Main branch: `main` (stable releases only)
+* **Never commit directly to `main`**
+* Create feature branches from `main`:
+  * Features: `feat/your-feature-name`
+  * Bug fixes: `fix/your-bug-name`
+  * Documentation: `docs/your-docs-name`
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feat/my-new-feature
+```
+
+### PR/MR Workflow
+
+1. **Squash intermediate commits** before submitting:
+   ```bash
+   git rebase -i HEAD~3  # Change 'pick' to 'squash' for older commits
+   ```
+
+2. **Rebase on latest main** to avoid merge commits:
+   ```bash
+   git checkout main
+   git pull origin main
+   git checkout your-branch
+   git rebase main
+   ```
+
+3. **Force push** after rebasing:
+   ```bash
+   git push origin your-branch --force
+   ```
+
+4. **Create PR/MR** with clear description, referencing related issues with `Closes #123`
+
+### Pre-Submission Checklist
+
+Before submitting a PR/MR:
+* [ ] All tests pass: `just test`
+* [ ] Code is formatted: `just fmt`
+* [ ] No clippy warnings: `just clippy`
+* [ ] Commit messages follow Conventional Commits
+* [ ] Unit tests added for new features
+* [ ] Unit tests placed at end of file (after all public code)
+* [ ] Tests verify actual content, not just `Some`/`None`
+
