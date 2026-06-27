@@ -3,7 +3,6 @@ use crate::dnsmasq::LanClientStore;
 use crate::libdns::proto::rr::RecordType;
 use crate::middleware::*;
 use std::borrow::Borrow;
-use std::net::IpAddr;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -79,6 +78,8 @@ impl Middleware<DnsContext, DnsRequest, DnsResponse, DnsError> for DnsmasqMiddle
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::net::IpAddr;
     use std::str::FromStr;
 
     #[test]

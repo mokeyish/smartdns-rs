@@ -507,13 +507,7 @@ fn build_middleware(
             builder = builder.with(Dns64Middleware::new(dns64_prefix));
         }
 
-        builder = builder.with(DnsZoneMiddleware::new());
-
         builder = builder.with(AddressMiddleware);
-
-        if cfg.resolv_hostanme() {
-            builder = builder.with(DnsHostsMiddleware::new());
-        }
 
         if cfg
             .dnsmasq_lease_file()
@@ -524,6 +518,12 @@ fn build_middleware(
                 cfg.dnsmasq_lease_file().unwrap(),
                 cfg.domain().cloned(),
             ));
+        }
+
+        builder = builder.with(DnsZoneMiddleware::new());
+
+        if cfg.resolv_hostanme() {
+            builder = builder.with(DnsHostsMiddleware::new());
         }
 
         // nftset
