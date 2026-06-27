@@ -634,6 +634,25 @@ pub fn query_dns(client: &Client, query: &Query) -> Result<Response, Error>;
 - After all public code (structs, impls)
 - Documented in AGENTS.md
 
+**Test Distribution:**
+- `src/dnsmasq.rs` - Low-level tests (ClientInfo, LanClientStore, ptr_to_ip, reverse_lookup)
+- `src/dns_mw_dnsmasq.rs` - Integration tests (middleware chain)
+
+**Test Quality:**
+- Verify `Option` contains correct values, not just `Some`
+- Check actual content matches expected data
+- Test both success and error paths
+
+```rust
+// ✅ Good test - verifies content
+if let Some(RData::PTR(ptr)) = rdata {
+    assert_eq!(ptr.0.to_string(), "andy-pc.", "Hostname should match");
+}
+
+// ❌ Bad test - only checks Some/None
+assert!(rdata.is_some());
+```
+
 ```rust
 // Correct order:
 // 1. Imports
@@ -695,4 +714,23 @@ pub fn reverse_lookup(&self, ip: &IpAddr) -> Option<RData> {
 - Don't optimize prematurely
 - Profile before optimizing
 - Critical paths can be optimized later
+
+### 13. **Third-Party Library Guidelines**
+- **Always check local source code first** before searching online
+- Search path: `$HOME/.cargo/git/checkouts/<crate>/<rev>/` or `$HOME/.cargo/registry/src/`
+- GitHub links may become outdated or 404
+- Example search commands:
+  ```bash
+  # Find local source
+  find $HOME/.cargo -name "*.rs" | grep -E "(name\.rs|arpa\.rs)" | head -5
+  
+  # View specific file
+  cat $HOME/.cargo/git/checkouts/hickory-dns-*/crates/proto/src/rr/domain/name.rs | grep -A10 "parse_arpa_name"
+  
+  # Search for function
+  grep -r "parse_arpa_name" $HOME/.cargo/git/checkouts/hickory-dns*/ 2>/dev/null | head -3
+  ```
+
+- When refactoring to use built-in APIs (e.g., `Name::parse_arpa_name()`), always verify the local implementation first
+- Library versions are pinned in `Cargo.toml` - check exact commit/rev for accurate reference
 
