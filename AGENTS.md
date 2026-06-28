@@ -820,3 +820,29 @@ Before submitting a PR/MR:
 * [ ] Unit tests placed at end of file (after all public code)
 * [ ] Tests verify actual content, not just `Some`/`None`
 
+---
+
+## Agent Guidelines
+
+### ⚠️ IMPORTANT: Git Commit Policy
+
+**Do NOT submit commits to the repository without explicit user review and approval.**
+
+When making changes:
+1. Always **stage changes first** using `git add <files>`
+2. **DO NOT** run `git commit` without explicit user instruction
+3. Show the user what you've staged with `git diff --staged`
+4. Wait for user confirmation before committing
+5. Let the user review:
+   - Which files are modified
+   - What changes were made
+   - Whether the commit message is appropriate
+
+This policy ensures:
+- User maintains control over what gets committed
+- No unintended files or changes are committed
+- User can review commit messages and descriptions
+- Avoids accidental commits to wrong branches
+
+**Exception**: You may commit changes if explicitly instructed by the user after they've reviewed the staged changes.
+
