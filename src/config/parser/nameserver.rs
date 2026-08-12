@@ -289,9 +289,8 @@ mod tests {
     /// upstream with a domain host.
     #[test]
     fn test_host_name_unset_keeps_sni_on() {
-        let (_rest, ns) =
-            NameServerInfo::parse("server-https https://dns.alidns.com/dns-query")
-                .expect("parse should succeed");
+        let (_rest, ns) = NameServerInfo::parse("server-https https://dns.alidns.com/dns-query")
+            .expect("parse should succeed");
         assert!(
             !ns.server.sni_off(),
             "expected sni_off()=false without -host-name -, got true"
