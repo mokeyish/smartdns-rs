@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// remote udp dns server list
 ///
-/// server [IP]:[PORT] [-blacklist-ip] [-whitelist-ip] [-check-edns] [-group [group] ...] [-exclude-default-group]
+/// server [IP]:[PORT] [-blacklist-ip] [-whitelist-ip] [-check-edns] [-group [group] ...] [-exclude-default-group] [-fallback]
 ///
 /// default port is 53
 ///   - -blacklist-ip: filter result with blacklist ip
@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 ///   - -check-edns: result must exist edns RR, or discard result.
 ///   - -group [group]: set server to group, use with nameserver /domain/group.
 ///   - -exclude-default-group: exclude this server from default group.
+///   - -fallback: mark this server as a fallback DNS, it is only queried after
+///     the primary servers of the group have failed (see [NameServerInfo::fallback]).
 /// ```ini, no-run
 /// server 8.8.8.8 -blacklist-ip -check-edns -group g1 -group g2
 ///
@@ -56,6 +58,12 @@ pub struct NameServerInfo {
     ///   -g name
     ///   -group name
     /// ```
+    ///
+    /// A group literally named `fallback` (e.g. `server 223.5.5.5 -e
+    /// -group fallback`) is the well-known backup group: every other group's query
+    /// is retried against it once when the primary group's answer fails (a
+    /// transport error or a `ServFail` reply from a rate-limited public DNS).
+    /// See `dns_client::FALLBACK_GROUP`.
     #[serde(default = "Default::default")]
     pub group: Vec<String>,
 
@@ -79,6 +87,25 @@ pub struct NameServerInfo {
     /// ```
     #[serde(default = "Default::default")]
     pub exclude_default_group: bool,
+
+    /// mark the server as a fallback DNS.
+    ///
+    /// Fallback servers are skipped on the first query and are only queried
+    /// after the primary (non-fallback) servers of the *same group* have failed.
+    /// This is useful for rate-limited public DNS servers, which should only be
+    /// used as a backup to keep their traffic low. Matches the C version's
+    /// `-fallback` server option.
+    ///
+    /// This is distinct from the group-level backup: a server in a group named
+    /// `fallback` (`-group fallback`, see [`NameServerInfo::group`]) backs up
+    /// *every other group* and is queried after the primary group fails.
+    ///
+    /// ```
+    /// example:
+    ///   -fallback
+    /// ```
+    #[serde(default = "Default::default")]
+    pub fallback: bool,
 
     /// use proxy to connect to server.
     /// ```
@@ -147,6 +174,10 @@ impl std::fmt::Display for NameServerInfo {
             write!(f, " -e")?;
         }
 
+        if self.fallback {
+            write!(f, " -fallback")?;
+        }
+
         if let Some(proxy) = &self.proxy {
             write!(f, " -p {proxy}")?;
         }
@@ -162,6 +193,7 @@ impl From<DnsUrl> for NameServerInfo {
             name: Default::default(),
             group: Default::default(),
             exclude_default_group: Default::default(),
+            fallback: Default::default(),
             blacklist_ip: Default::default(),
             whitelist_ip: Default::default(),
             bootstrap_dns: Default::default(),
@@ -180,6 +212,7 @@ impl From<DnsUrl> for NameServerInfo {
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
+    use std::str::FromStr;
 
     #[test]
     fn test_ipnet_json_serde() {
@@ -231,5 +264,28 @@ mod tests {
         );
         assert_eq!(name_server.group, vec!["china".to_string()]);
         assert_eq!(name_server.enabled, Some(true));
+    }
+
+    #[test]
+    fn test_json_deserialize_fallback_default() {
+        // Without the `fallback` key it defaults to `false`.
+        let json_str = r#"{ "server": "223.5.5.5" }"#;
+        let name_server: NameServerInfo = serde_json::from_str(json_str).unwrap();
+        assert!(!name_server.fallback);
+
+        // With `fallback: true` it is honored.
+        let json_str = r#"{ "server": "223.5.5.5", "fallback": true }"#;
+        let name_server: NameServerInfo = serde_json::from_str(json_str).unwrap();
+        assert!(name_server.fallback);
+    }
+
+    #[test]
+    fn test_display_fallback() {
+        let mut info: NameServerInfo = DnsUrl::from_str("223.5.5.5").unwrap().into();
+        // Without `-fallback` nothing extra is rendered.
+        assert_eq!(info.to_string(), "udp://223.5.5.5");
+
+        info.fallback = true;
+        assert_eq!(info.to_string(), "udp://223.5.5.5 -fallback");
     }
 }

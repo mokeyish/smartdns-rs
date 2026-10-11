@@ -386,7 +386,7 @@ mod response {
 
     use crate::dns_client::MAX_TTL;
     use crate::libdns::proto::{
-        op::{self, Header, Message, MessageType, Query},
+        op::{self, Header, Message, MessageType, Query, ResponseCode},
         rr::{RData, Record},
     };
     use crate::libdns::resolver::TtlClip as _;
@@ -564,6 +564,20 @@ mod response {
     }
 
     impl DnsResponse {
+        /// Whether the upstream **server** failed, i.e. the round produced no
+        /// authoritative answer.
+        ///
+        /// A transport failure surfaces as `Err(LookupError)` at the call site;
+        /// this covers the case the caller can't see itself: an upstream that
+        /// replies with a `ServFail` response code. That is what a rate-limited
+        /// public DNS provider sends, and it is the main reason to use a
+        /// `fallback` server. Authoritative answers such as `NoError` and
+        /// `NXDomain` are **not** failures — re-asking another server would
+        /// only add traffic (and hit the same rate limit) for the same result.
+        pub fn is_failed(&self) -> bool {
+            self.response_code() == ResponseCode::ServFail
+        }
+
         pub fn max_ttl(&self) -> Option<u32> {
             self.answers().iter().map(|record| record.ttl()).max()
         }
@@ -628,5 +642,27 @@ impl DefaultSOA for SOA {
 impl DefaultSOA for RData {
     fn default_soa() -> Self {
         Self::SOA(SOA::default_soa())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::libdns::proto::op::ResponseCode;
+
+    #[test]
+    fn test_response_is_failed() {
+        // A fresh response is `NoError`: not a server failure.
+        let mut ok = DnsResponse::empty();
+        assert!(!ok.is_failed());
+
+        // A rate-limited upstream answers `ServFail`: a server failure that
+        // should trigger the `fallback` server.
+        ok.set_response_code(ResponseCode::ServFail);
+        assert!(ok.is_failed());
+
+        // Authoritative `NXDomain` is a valid answer, not a failure.
+        ok.set_response_code(ResponseCode::NXDomain);
+        assert!(!ok.is_failed());
     }
 }
