@@ -13,7 +13,7 @@ use crate::libdns::proto::{
     xfer::Protocol as DnsOverProtocol,
 };
 
-use crate::dns_client::{DnsClient, GenericResolver, LookupOptions};
+use crate::dns_client::{DnsClient, DnsResolver, LookupOptions};
 use crate::dns_url::DnsUrl;
 
 impl ResolveCommand {

@@ -8,7 +8,6 @@ use std::{
 
 use tokio::sync::RwLock;
 
-use crate::third_ext::FutureJoinAllExt;
 use crate::{
     dns::DnsResponse,
     dns_conf::NameServerInfo,
@@ -16,11 +15,12 @@ use crate::{
     log::{self, debug, info, warn},
     proxy::ProxyConfig,
     rustls::TlsClientConfigBundle,
+    third_ext::FutureJoinAllExt,
 };
 
 use crate::libdns::{
     proto::{
-        DnsHandle, ProtoError,
+        DnsHandle, ProtoError, ProtoErrorKind,
         op::{Edns, Message, Query},
         rr::{
             Record, RecordType,
@@ -33,11 +33,20 @@ use crate::libdns::{
 };
 pub use bootstrap::BootstrapResolver;
 pub use name_server::NameServer;
-pub use name_server_group::NameServerGroup;
+pub use name_server_group::{NameServerGroup, Splits};
 
 /// Maximum TTL as defined in https://tools.ietf.org/html/rfc2181, 2147483647
 ///   Setting this to a value of 1 day, in seconds
 pub const MAX_TTL: u32 = 86400_u32;
+
+/// The well-known nameserver group that backs up every other group.
+///
+/// A server added to a group literally named `fallback` (typically together
+/// with `-exclude-default-group`, e.g. `server ... -e -group fallback`) is
+/// only queried after the primary group's answer has failed, mirroring the C
+/// implementation where a failed query is retried against the `fallback` group
+/// (`_dns_client_get_group("fallback")`).
+pub const FALLBACK_GROUP: &str = "fallback";
 
 #[derive(Default)]
 pub struct DnsClientBuilder {
@@ -252,6 +261,15 @@ impl DnsClient {
         self.servers.get(name).cloned()
     }
 
+    /// The well-known group that backs up every other group, derived from the
+    /// configured groups; see [`FALLBACK_GROUP`].
+    pub fn fallback_group(&self) -> Option<Arc<NameServerGroup>> {
+        self.servers
+            .get(FALLBACK_GROUP)
+            .cloned()
+            .filter(|group| !group.is_empty())
+    }
+
     pub async fn lookup_nameserver(
         &self,
         name: Name,
@@ -358,6 +376,12 @@ mod name_server_group {
         pub servers: Vec<Arc<NameServer>>,
     }
 
+    /// Primary (non-fallback) and fallback servers of a group.
+    pub struct Splits {
+        pub primary: Vec<Arc<NameServer>>,
+        pub fallback: Vec<Arc<NameServer>>,
+    }
+
     impl NameServerGroup {
         pub async fn warmup(&self) {
             let futures = self.servers.iter().map(|server| {
@@ -380,29 +404,37 @@ mod name_server_group {
             self.servers.is_empty()
         }
 
-        fn options(&self) -> &Arc<ResolverOpts> {
-            &self.resolver_opts
+        /// Splits the group's servers into primary and fallback ones.
+        pub fn split(&self) -> Splits {
+            let mut primary = Vec::new();
+            let mut fallback = Vec::new();
+            for server in &self.servers {
+                if server.is_fallback() {
+                    fallback.push(server.clone());
+                } else {
+                    primary.push(server.clone());
+                }
+            }
+            Splits { primary, fallback }
         }
-    }
 
-    #[async_trait::async_trait]
-    impl GenericResolver for NameServerGroup {
-        fn options(&self) -> &ResolverOpts {
-            &self.resolver_opts
-        }
-
-        async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
-            &self,
-            name: N,
-            options: O,
+        /// Fans out `name` to `servers` in parallel and returns the first
+        /// response that carries records, or the last result once all servers
+        /// have been tried.
+        pub async fn query_servers(
+            servers: Vec<Arc<NameServer>>,
+            name: Name,
+            options: LookupOptions,
         ) -> Result<DnsResponse, LookupError> {
             use futures_util::future::select_all;
-            let name = name.into_name()?;
-            let mut tasks = self
-                .servers
+            let mut tasks = servers
                 .iter()
-                .map(|ns| GenericResolver::lookup(ns.as_ref(), name.clone(), options.clone()))
+                .map(|ns| DnsResolver::lookup(ns.as_ref(), name.clone(), options.clone()))
                 .collect::<Vec<_>>();
+
+            if tasks.is_empty() {
+                return Err(ProtoErrorKind::NoConnections.into());
+            }
 
             loop {
                 let (res, _idx, rest) = select_all(tasks).await;
@@ -418,6 +450,39 @@ mod name_server_group {
             }
         }
     }
+
+    #[async_trait::async_trait]
+    impl DnsResolver for NameServerGroup {
+        fn options(&self) -> &ResolverOpts {
+            &self.resolver_opts
+        }
+
+        /// Parallel fan-out over all servers in the group.
+        async fn lookup<N: IntoName + Send, O: Into<LookupOptions> + Send + Clone>(
+            &self,
+            name: N,
+            options: O,
+        ) -> Result<DnsResponse, LookupError> {
+            let name = name.into_name()?;
+            let options: LookupOptions = options.into();
+
+            let Splits { primary, fallback } = self.split();
+
+            if primary.is_empty() {
+                return Self::query_servers(fallback, name, options).await;
+            }
+
+            if fallback.is_empty() {
+                return Self::query_servers(primary, name, options).await;
+            }
+
+            let res = Self::query_servers(primary, name.clone(), options.clone()).await;
+            if matches!(res.as_ref(), Ok(lookup) if !lookup.records().is_empty()) {
+                return res;
+            }
+            Self::query_servers(fallback, name, options).await
+        }
+    }
 }
 
 mod name_server {
@@ -430,6 +495,7 @@ mod name_server {
     pub struct NameServer {
         options: Arc<NameServerOpts>,
         connection: Connection,
+        fallback: bool,
     }
 
     impl NameServer {
@@ -497,6 +563,7 @@ mod name_server {
             Ok(Self {
                 options: options.into(),
                 connection,
+                fallback: config.fallback,
             })
         }
 
@@ -509,10 +576,16 @@ mod name_server {
         pub fn options(&self) -> &NameServerOpts {
             &self.options
         }
+
+        /// Returns `true` if this server is marked as a fallback DNS.
+        #[inline]
+        pub fn is_fallback(&self) -> bool {
+            self.fallback
+        }
     }
 
     #[async_trait::async_trait]
-    impl GenericResolver for NameServer {
+    impl DnsResolver for NameServer {
         fn options(&self) -> &ResolverOpts {
             &self.options().resolver_opts
         }
@@ -609,7 +682,7 @@ mod bootstrap {
     use super::*;
     use crate::{dns_url::DnsUrl, libdns::resolver::config::ResolverConfig};
 
-    pub struct BootstrapResolver<T: GenericResolver = NameServerGroup>
+    pub struct BootstrapResolver<T: DnsResolver = NameServerGroup>
     where
         T: Send + Sync,
     {
@@ -617,7 +690,7 @@ mod bootstrap {
         ip_store: RwLock<HashMap<Query, Arc<[Record]>>>,
     }
 
-    impl<T: GenericResolver + Sync + Send> BootstrapResolver<T> {
+    impl<T: DnsResolver + Sync + Send> BootstrapResolver<T> {
         pub fn new(resolver: Arc<T>) -> Self {
             Self {
                 resolver,
@@ -679,7 +752,7 @@ mod bootstrap {
         }
     }
 
-    impl<T: GenericResolver + Sync + Send> std::ops::Deref for BootstrapResolver<T> {
+    impl<T: DnsResolver + Sync + Send> std::ops::Deref for BootstrapResolver<T> {
         type Target = Arc<T>;
 
         fn deref(&self) -> &Self::Target {
@@ -688,7 +761,7 @@ mod bootstrap {
     }
 
     #[async_trait::async_trait]
-    impl<T: GenericResolver + Sync + Send> GenericResolver for BootstrapResolver<T> {
+    impl<T: DnsResolver + Sync + Send> DnsResolver for BootstrapResolver<T> {
         fn options(&self) -> &ResolverOpts {
             self.resolver.options()
         }
@@ -706,7 +779,7 @@ mod bootstrap {
                 return Ok(lookup);
             }
 
-            match GenericResolver::lookup(self.resolver.as_ref(), name.clone(), options).await {
+            match DnsResolver::lookup(self.resolver.as_ref(), name.clone(), options).await {
                 Ok(lookup) => {
                     let records = lookup.records().to_vec();
 
@@ -739,13 +812,13 @@ mod bootstrap {
         }
     }
 
-    impl<T: GenericResolver + Sync + Send> From<Arc<T>> for BootstrapResolver<T> {
+    impl<T: DnsResolver + Sync + Send> From<Arc<T>> for BootstrapResolver<T> {
         fn from(resolver: Arc<T>) -> Self {
             Self::new(resolver)
         }
     }
 
-    impl<T: GenericResolver + Sync + Send> From<&BootstrapResolver<T>> for Arc<T> {
+    impl<T: DnsResolver + Sync + Send> From<&BootstrapResolver<T>> for Arc<T> {
         fn from(value: &BootstrapResolver<T>) -> Self {
             value.resolver.clone()
         }
@@ -753,7 +826,7 @@ mod bootstrap {
 }
 
 #[async_trait::async_trait]
-pub trait GenericResolver {
+pub trait DnsResolver {
     fn options(&self) -> &ResolverOpts;
 
     /// Lookup any RecordType
@@ -787,7 +860,7 @@ pub trait GenericResolverExt {
 #[async_trait::async_trait]
 impl<T> GenericResolverExt for T
 where
-    T: GenericResolver + Sync,
+    T: DnsResolver + Sync,
 {
     /// * `host` - string hostname, if this is an invalid hostname, an error will be returned.
     async fn lookup_ip<N: IntoName + Send>(&self, host: N) -> Result<DnsResponse, LookupError> {
@@ -1094,4 +1167,49 @@ mod tests {
     //     *once_cell::sync::Lazy::force_mut(&mut lazy) = 88;
     //     assert_eq!(bootstrap::RESOLVER.deref(), &88);
     // }
+
+    // --- Fallback flag test --------------------------------------------------
+    //
+    // The `-fallback` flag is carried from config onto the NameServer. The
+    // fallback orchestration logic lives in `dns_lookup::LookupStrategy` and
+    // is tested there.
+
+    /// Builds a `NameServer` from a plain IP URL, tagged as a fallback or not.
+    fn make_server(url: &str, fallback: bool) -> Arc<NameServer> {
+        let mut info: NameServerInfo = DnsUrl::from_str(url).unwrap().into();
+        info.fallback = fallback;
+        Arc::new(NameServer::new(info, None, None, None, None).unwrap())
+    }
+
+    #[test]
+    fn test_name_server_is_fallback_flag() {
+        assert!(!make_server("223.5.5.5", false).is_fallback());
+        assert!(make_server("223.5.5.5", true).is_fallback());
+    }
+
+    #[tokio::test]
+    async fn test_build_extracts_fallback_group() {
+        // End-to-end extraction: a server configured with `-e -group fallback`
+        // (the #743 config) is recognised as the group-level backup, while a
+        // default-group server is not.
+        let mut fb = NameServerInfo::from(DnsUrl::from_str("223.5.5.5").unwrap());
+        fb.exclude_default_group = true;
+        fb.group = vec!["fallback".to_string()];
+        let primary = NameServerInfo::from(DnsUrl::from_str("223.6.6.6").unwrap());
+
+        let client = DnsClient::builder()
+            .add_server(primary)
+            .add_server(fb)
+            .build()
+            .await;
+
+        // The `fallback` group is extracted and is non-empty.
+        let fb_group = client.fallback_group();
+        assert!(fb_group.is_some(), "the `fallback` group must be extracted");
+        assert_eq!(fb_group.as_ref().unwrap().len(), 1);
+
+        // …and it is also still directly resolvable as a named group, matching
+        // the C behaviour of an explicit `nameserver /domain/fallback` rule.
+        assert!(client.get_server_group("fallback").await.is_some());
+    }
 }

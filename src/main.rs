@@ -15,6 +15,7 @@ mod dns;
 mod dns_client;
 mod dns_conf;
 mod dns_error;
+mod dns_lookup;
 mod dns_mw;
 mod dns_mw_addr;
 mod dns_mw_audit;
