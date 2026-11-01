@@ -42,8 +42,8 @@ impl InstallerBuilder {
 
         let same_executable = current_exe == cmd_path;
         #[cfg(windows)]
-        let same_executable = same_executable
-            || same_file::is_same_file(&current_exe, cmd_path).unwrap_or(false);
+        let same_executable =
+            same_executable || same_file::is_same_file(&current_exe, cmd_path).unwrap_or(false);
 
         if same_executable {
             self
