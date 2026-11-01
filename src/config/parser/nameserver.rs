@@ -52,6 +52,7 @@ impl NomParser for NameServerInfo {
             for (k, v) in options {
                 match k.to_lowercase().as_str() {
                     "e" | "exclude-default-group" => nameserver.exclude_default_group = true,
+                    "fallback" => nameserver.fallback = true,
                     "blacklist-ip" => nameserver.blacklist_ip = true,
                     "whitelist-ip" => nameserver.whitelist_ip = true,
                     "check-edns" => nameserver.check_edns = true,
@@ -288,5 +289,53 @@ mod tests {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn test_server_fallback() {
+        // `-fallback` marks the server as a fallback DNS.
+        assert_eq!(
+            NameServerInfo::parse("server 223.5.5.5 -fallback"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("udp://223.5.5.5").unwrap(),
+                    fallback: true,
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        // `-fallback` combines with other options.
+        assert_eq!(
+            NameServerInfo::parse("server https://223.5.5.5/dns-query -fallback -check-edns -e"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("https://223.5.5.5/dns-query").unwrap(),
+                    fallback: true,
+                    check_edns: true,
+                    exclude_default_group: true,
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        // The option is case-insensitive.
+        assert_eq!(
+            NameServerInfo::parse("server 223.5.5.5 -Fallback"),
+            Ok((
+                "",
+                NameServerInfo {
+                    server: DnsUrl::from_str("udp://223.5.5.5").unwrap(),
+                    fallback: true,
+                    ..name_server_default()
+                }
+            ))
+        );
+
+        // Without `-fallback` the flag stays false.
+        let parsed = NameServerInfo::parse("server 223.5.5.5").unwrap().1;
+        assert!(!parsed.fallback);
     }
 }
