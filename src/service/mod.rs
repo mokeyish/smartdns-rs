@@ -13,7 +13,6 @@ mod installer;
 mod service_manager;
 
 pub use service_manager::ServiceStatus;
-
 cfg_if! {
     if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod linux;
@@ -31,7 +30,6 @@ cfg_if! {
         unimplemented!();
     }
 }
-
 pub fn service_manager() -> ServiceManager {
     create_service_definition().into()
 }
@@ -42,10 +40,15 @@ impl InstallerBuilder {
         let current_exe =
             env::current_exe().unwrap_or_else(|e| panic!("failed to get current exe path: {e}"));
 
-        if current_exe != cmd_path {
-            self.add_item((current_exe, cmd_path))
-        } else {
+        let same_executable = current_exe == cmd_path;
+        #[cfg(windows)]
+        let same_executable =
+            same_executable || same_file::is_same_file(&current_exe, cmd_path).unwrap_or(false);
+
+        if same_executable {
             self
+        } else {
+            self.add_item((current_exe, cmd_path))
         }
     }
 }

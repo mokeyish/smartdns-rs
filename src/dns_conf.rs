@@ -119,6 +119,17 @@ impl RuntimeConfig {
             Cow::Owned(path.to_path_buf())
         };
 
+        if !path.is_file() {
+            warn!(
+                "Configuration file '{}' not found. \
+                 Starting with built-in default settings. \
+                 Place your smartdns.conf at '{}' \
+                 or specify a custom configuration path using '-c <path>'.",
+                path.display(),
+                path.display()
+            );
+        }
+
         match builder.with_conf_file(&path).build() {
             Ok(cfg) => cfg.into(),
             Err(err) => {
