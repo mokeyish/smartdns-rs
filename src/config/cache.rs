@@ -57,4 +57,10 @@ pub struct CacheConfig {
 
     /// cache save interval
     pub checkpoint_time: Option<u64>,
+
+    /// Background prefetch refresh time before expiration (seconds).
+    /// When prefetch-domain is enabled, refresh active records this many
+    /// seconds before their TTL elapses. Matches the C `serve-expired-prefetch-time`
+    /// directive for config compatibility (see GH #166).
+    pub serve_expired_prefetch_time: Option<u64>,
 }
