@@ -165,7 +165,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
       - name: Rename artifacts
         run: |
           mv smartdns-x86_64-unknown-linux-musl-*/smartdns-x86_64-unknown-linux-musl-*.tar.gz smartdns-x86_64-unknown-linux-musl.tar.gz
